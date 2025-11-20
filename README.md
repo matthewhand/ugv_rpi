@@ -5,7 +5,7 @@
 # Waveshare UGV Robots
 This is a Raspberry Pi example for the [Waveshare](https://www.waveshare.com/) UGV robots: **WAVE ROVER**, **UGV Rover**, **UGV Beast**, **RaspRover**, **UGV01**, **UGV02**.  
 
-![](./media/UGV-Rover-details-23.jpg)
+![](./images/UGV-Rover-details-23.jpg)
 
 ## Basic Description
 The Waveshare UGV robots utilize both an upper computer and a lower computer. This repository contains the program running on the upper computer, which is typically a Raspberry Pi in this setup.  
@@ -48,9 +48,12 @@ You can use this tutorial to install this program on a pure Raspberry Pi OS.
 You can clone this repository from Waveshare's GitHub to your local machine.
 
     git clone https://github.com/waveshareteam/ugv_rpi.git
-    
-### Grant execution permission to the installation script
+
+### Grant execution permission to the mediamtx 
     cd ugv_rpi/
+    sudo chmod +x /home/ws/ugv_rpi/controllers/Mediamtx/mediamtx
+### Grant execution permission to the installation script
+    cd scripts/
     sudo chmod +x setup.sh
     sudo chmod +x autorun.sh
 ### Install app (it'll take a while before finish)
@@ -69,7 +72,7 @@ You can clone this repository from Waveshare's GitHub to your local machine.
 
 After powering on the robot, the Raspberry Pi will automatically establish a hotspot, and the LED screen will display a series of system initialization messages:  
 
-![](./media/RaspRover-LED-screen.png)
+![](./images/RaspRover-LED-screen.png)
 - The first line `E` displays the IP address of the Ethernet port, which allows remote access to the Raspberry Pi. If it shows No Ethernet, it indicates that the Raspberry Pi is not connected to an Ethernet cable.
 - The second line `W` indicates the robot's wireless mode. In Access Point (AP) mode, the robot automatically sets up a hotspot with the default IP address `192.168.50.5`. In Station (STA) mode, the Raspberry Pi connects to a known WiFi network and displays the IP address for remote access.
 - The third line `F/J` specifies the Ethernet port numbers. Port `5000` provides access to the robot control Web UI, while port `8888` grants access to the JupyterLab interface.
@@ -86,7 +89,7 @@ To ensure compatibility with various types of robots running on Raspberry Pi, we
 
     s 22
 
-In this command, the s directive denotes a robot-type setting. The first digit, `2`, signifies that the robot is a `UGV Rover`, with `1` representing `RaspRover` and `3` indicating `UGV Beast`. The second digit, also `2`, specifies the module as `Camera PT`, where `0` denotes `Nothing` and `1` signifies `RoArm-M2`.  
+In this command, the s directive denotes a robot-type setting. The first digit, `2`, signifies that the robot is a `UGV Rover`, with `1` representing `RaspRover` and `3` indicating `UGV Beast`. The second digit, also `2`, specifies the module as `Camera PT`, where `0` denotes `Nothing` , `1` signifies `RoArm-M2`，`3` signifies `RoArm-M3`.  
 
 ### Reboot Device
 If the program fails to run and encounters errors related to v4l2.py during runtime, you need to delete v4l2.py from both the Python virtual environment and the user environment. This will allow the program to automatically use the system-wide v4l2.py.  

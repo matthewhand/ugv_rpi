@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <!-- Required meta tags -->
+    <meta charset="utf-8">
+    <title>Live Video Based on Flask</title>
+</head>
+<body>
+    <div class="video">
+        <video id="video" autoplay muted playsinline></video>
+    </div>
+    <div id="message"></div>
+    <script type="module" src="./webrtc_reader.js"></script>
+    <script>
+    const videoElement = document.getElementById('video');
+    const message = document.getElementById('message');
+    const setMessage = (str) => {
+    if (str !== '') {
+        videoElement.controls = false;
+    } else {
+        videoElement.controls = defaultControls;
+    }
+    message.innerText = str;
+    };
+
+    const parseBoolString = (str, defaultVal) => {
+    str = (str || '');
+
+    if (['1', 'yes', 'true'].includes(str.toLowerCase())) {
+        return true;
+    }
+    if (['0', 'no', 'false'].includes(str.toLowerCase())) {
+        return false;
+    }
+    return defaultVal;
+    };
+
+    const loadAttributesFromQuery = () => {
+    const params = new URLSearchParams(window.location.search);
+    videoElement.controls = parseBoolString(params.get('controls'), false);
+    videoElement.muted = parseBoolString(params.get('muted'), true);
+    videoElement.autoplay = parseBoolString(params.get('autoplay'), true);
+    videoElement.playsInline = parseBoolString(params.get('playsinline'), false);
+    defaultControls = videoElement.controls;
+    };
+
+    let stream_url = `http://${window.location.hostname}:8889/cam/`;
+    window.addEventListener('load', () => {
+    loadAttributesFromQuery();
+    new MediaMTXWebRTCReader({
+        url: new URL('whep', stream_url) + window.location.search,
+        onError: (err) => {
+        setMessage(err);
+        },
+        onTrack: (evt) => {
+        setMessage('');
+        videoElement.srcObject = evt.streams[0];
+        },
+    });
+    });  
+
+    </script>
+</body>
+</html>

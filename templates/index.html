@@ -3,10 +3,12 @@
     <title>WAVESHARE ROBOT</title>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width,initial-scale=1.0">
-    <script src="./jquery-3.7.1.min.js"></script>
-    <script src="./js-yaml.min.js"></script>
-    <script src="./socket.io.js"></script>
-    <link rel="stylesheet" type="text/css" href="./style.css">
+    <script src="./libs/jquery-3.7.1.min.js"></script>
+    <script src="./libs/js-yaml.min.js"></script>
+    <script src="./libs/socket.io.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/nipplejs@0.9.0/dist/nipplejs.min.js"></script>
+    <link rel="stylesheet" type="text/css" href="./css/style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
     <style type="text/css">
     </style>
   </head>
@@ -33,15 +35,18 @@
                                     <div class="feed feed_r_t">
                                         <div>
                                             <div class="feed_ico_baterry"><span id="b_state" class="baterry_state baterry_state1"></span><span id="v_in">12</span><span> V</span></div>
-                                            <div class="feed_ico_light"><span class="light_state"></span><span id="MODE">AUTO</span></div>
-                                            <p><span>RSSI: </span><span id="rssi">0</span></p>
-                                            <p><span>FPS: </span><span id="fps">0</span></p>
-                                            <p><span>TEMP: </span><span id="tem">0</span></p>
+                                            <div class="feed_ico_light"><span class="light_state"></span><span id="MODE">OFF</span></div>
+                                            <p class="feed_r_t_pan"><span>RSSI: </span><span id="rssi">0</span></p>
+                                            <p class="feed_r_t_pan"><span>FPS: </span><span id="fps">0</span></p>
+                                            <p class="feed_r_t_pan"><span>TEMP: </span><span id="tem">0</span></p>
+                                            <p class="feed_r_t_pan"><span>Zoom: </span><span id="zoom-num">1x</span></p>
+                                            <p class="feed_r_t_pan"><span>Photos: </span><span id="photos-size">0</span></p>
+                                            <p class="feed_r_t_pan"><span>Videos: </span><span id="videos-size">0</span></p>                                            
                                         </div>
                                     </div>
                                 </div>
                             </div>
-                            <div class="feed_section feed_middle">
+                            <div class="feed_section feed_middle"> 
                                 <div>
                                     <div class="feed feed_l">
                                         <div class="tilt">
@@ -49,7 +54,12 @@
                                                 <div class="tilt_pointer"></div>
                                                 <p id="Tilt">0</p>
                                             </div>
-                                            <div id="tilt_scale" class="tilt_scale"><div id="tilt_scalediv"></div></div>
+                                            <div id="tilt_scale" class="tilt_scale">
+                                                <div id="tilt_scalediv"></div>
+                                                <p><span id="slider_text"></span>
+                                                <input id="slider" class="vertical-slider" type="range" min="0" max="1.5708" step="0.01" value="0">
+                                                </p>
+                                            </div>
                                         </div>
                                     </div>
                                     <div class="feed feed_m"><div class="feed_img_focus"></div></div>
@@ -59,11 +69,13 @@
                             <div class="feed_section feed_bottom">
                                 <div>
                                     <div class="feed feed_l_b">
-                                        <p><span>Zoom: </span><span id="zoom-num">1x</span></p>
-                                        <p><span>Photos: </span><span id="photos-size">0</span></p>
-                                        <p><span>Videos: </span><span id="videos-size">0</span></p>
-                                    </div>
-                                    <div class="feed feed_b">
+                                        <div class="ctrl_base_box">
+                                            <div class="ctrl_base ctrl_base_s" id="ctrl_base_left"> 
+                                                 <div id="joystick_left" class="ctrl_stick ctrl_stick_s"></div>
+                                            </div>
+                                        </div>  
+                                    </div>                                    
+                                    <div class="feed feed_b">                                     
                                         <div class="pan">
                                             <div><p id="Pan">0</p></div>
                                             <div class="pan_scale_box">
@@ -73,21 +85,41 @@
                                         </div>
                                     </div>
                                     <div class="feed feed_r_b">
-                                        <div class="ctrl_base_box">
-                                            <div class="ctrl_base ctrl_base_s" id="ctrl_base">
-                                                <div class="ctrl_stick ctrl_stick_s" id="ctrl_stick"></div>
-                                            </div>
+                                        <div class="video_btn_container ">
+                                            <button id="arm_mode_toggle" class="video_ctl_btn ctl_btn_active" onclick="toggleArmMode()">Joint</button>
+                                            <button id="press_mode_toggle" class="video_ctl_btn ctl_btn_active" onclick="togglePressMode()">Increase</button>
                                         </div>
-                                    </div>
+                                        <div class="ctrl_base_box">
+                                            <div class="ctrl_base ctrl_base_s" id="ctrl_base_right"> 
+                                                <div id="joystick_right" class="ctrl_stick ctrl_stick_s"></div>
+                                            </div>
+                                        </div>  
+                                    </div>                                   
                                 </div>
                             </div>
                         </div>
                     </div>
-                    <div class="video"><img src="{{ url_for('video_feed') }}" /></div>
-                    <!-- <div class="video"><video id="remoteVideo" autoplay></video></div> -->
+                    <div class="video">
+                        <video id="video" autoplay muted playsinline></video>
+                    </div>
+                    <div id="message"></div>
                 </div>
                 <div class="video_ctrl">
-                    <div>
+                    <div class="controls_1">
+                        <button id="playPause-btn" class="video_ctl_btn ctl_btn_active">
+                            <img id="playPause-icon" src="../assets/img/white/pause_1.svg" alt="Pause" width="20" height="20">
+                        </button>
+                        <button id="audio-btn" class="video_ctl_btn ctl_btn_active">
+                            <img id="audio-icon" src="../assets/img/white/volume-up.svg" alt="volume-up" width="20" height="20">
+                        </button>
+                        <button id="fullscreen-btn" class="video_ctl_btn ctl_btn_active">
+                            <img id="fullscreen-icon" src="../assets/img/white/fullscreen.svg" alt="fullscreen" width="20" height="20">
+                        </button>
+                        <button id="pip-btn" class="video_ctl_btn ctl_btn_active">
+                            <img id="pip-icon" src="../assets/img/white/pip.svg" alt="pip" width="20" height="20">
+                        </button>
+                    </div>
+                    <div class="controls_2">
                         <div class="record"><div><button id="record-btn" class="normal_btn video_btn_record btn_ico">Record</button></div></div>
                         <div class="capture"><div><button class="normal_btn video_btn_capture" onclick="captureAndUpdate()"></button></div></div>
                         <div class="views">
@@ -95,9 +127,9 @@
                             <div class="video_btn_px_select">
                                 <button id="video_pixel_btn" class="normal_btn normal_btn_size video_btn_px">WebRTC</button>
                                 <ul id="video_pixel_btn_list">
-                                    <!-- <li class="normal_btn" onclick="cmdSend(max_res,2,0);">960P</li>
-                                    <li class="normal_btn" onclick="cmdSend(mid_res,1,0);">480P</li>
-                                    <li class="normal_btn" onclick="cmdSend(min_res,0,0);">240P</li> -->
+                                    <!-- <li class="normal_btn" onclick="cmdSend(max_res,2);">960P</li>
+                                    <li class="normal_btn" onclick="cmdSend(mid_res,1);">480P</li>
+                                    <li class="normal_btn" onclick="cmdSend(min_res,0);">240P</li> -->
                                 </ul>
                             </div>
                         </div>
@@ -110,9 +142,9 @@
                                 <div class="ctl9_middle_pos ctl9_middle_light">
                                     <div class="ctl9_middle_pos">
                                         <div 
-                                            onmousedown="cmdSend(head_ct,0,0);" 
-                                            ontouchstart="cmdSend(head_ct,0,0);" 
-                                            onmouseup="cmdSend(head_ct,0,0);" ontouchend="cmdSend(head_ct,0,0);">
+                                            onmousedown="cmdSend(led_mode,head_ct);" 
+                                            ontouchstart="cmdSend(led_mode,head_ct);" 
+                                            onmouseup="cmdSend(led_mode,head_ct);" ontouchend="cmdSend(led_mode,head_ct);">
                                         FUNC</div>
                                     </div>
                                 </div>
@@ -120,55 +152,17 @@
                         </div>
                         <div class="ctl9 ctl9_base">
                             <ul>
-                                <li class="ctl9_base_btn" 
-                                onmousedown="cmdJsonCmd({'T':cmd_movition_ctrl,'L':slow_speed,'R':max_speed});" 
-                                ontouchstart="cmdJsonCmd({'T':cmd_movition_ctrl,'L':slow_speed,'R':max_speed});" 
-                                onmouseup="cmdJsonCmd({'T':cmd_movition_ctrl,'L':0,'R':0});" 
-                                ontouchend="cmdJsonCmd({'T':cmd_movition_ctrl,'L':0,'R':0});"></li>
+                                <li class="ctl9_base_btn" data-x="1" data-z="1"></li>
+                                <li class="ctl9_base_btn2" data-x="1" data-z="0"></li>
+                                <li class="ctl9_base_btn" data-x="1" data-z="-1"></li>
+                                <li class="ctl9_base_btn4" data-x="0" data-z="1"></li>
 
-                                <li class="ctl9_base_btn2" 
-                                onmousedown="cmdJsonCmd({'T':cmd_movition_ctrl,'L':max_speed,'R':max_speed});" 
-                                ontouchstart="cmdJsonCmd({'T':cmd_movition_ctrl,'L':max_speed,'R':max_speed});" 
-                                onmouseup="cmdJsonCmd({'T':cmd_movition_ctrl,'L':0,'R':0});" 
-                                ontouchend="cmdJsonCmd({'T':cmd_movition_ctrl,'L':0,'R':0});"></li>
-
-                                <li class="ctl9_base_btn" 
-                                onmousedown="cmdJsonCmd({'T':cmd_movition_ctrl,'L':max_speed,'R':slow_speed});" 
-                                ontouchstart="cmdJsonCmd({'T':cmd_movition_ctrl,'L':max_speed,'R':slow_speed});" 
-                                onmouseup="cmdJsonCmd({'T':cmd_movition_ctrl,'L':0,'R':0});" 
-                                ontouchend="cmdJsonCmd({'T':cmd_movition_ctrl,'L':0,'R':0});"></li>
-                                
-                                <li class="ctl9_base_btn4" 
-                                onmousedown="cmdJsonCmd({'T':cmd_movition_ctrl,'L':-max_speed,'R':max_speed});" 
-                                ontouchstart="cmdJsonCmd({'T':cmd_movition_ctrl,'L':-max_speed,'R':max_speed});" 
-                                onmouseup="cmdJsonCmd({'T':cmd_movition_ctrl,'L':0,'R':0});" 
-                                ontouchend="cmdJsonCmd({'T':cmd_movition_ctrl,'L':0,'R':0});"></li>
-                                
                                 <li class="ctl9_base_btn"></li>
-                                
-                                <li class="ctl9_base_btn6" 
-                                onmousedown="cmdJsonCmd({'T':cmd_movition_ctrl,'L':max_speed,'R':-max_speed});" 
-                                ontouchstart="cmdJsonCmd({'T':cmd_movition_ctrl,'L':max_speed,'R':-max_speed});" 
-                                onmouseup="cmdJsonCmd({'T':cmd_movition_ctrl,'L':0,'R':0});" 
-                                ontouchend="cmdJsonCmd({'T':cmd_movition_ctrl,'L':0,'R':0});"></li>
-                                
-                                <li class="ctl9_base_btn" 
-                                onmousedown="cmdJsonCmd({'T':cmd_movition_ctrl,'L':-slow_speed,'R':-max_speed});" 
-                                ontouchstart="cmdJsonCmd({'T':cmd_movition_ctrl,'L':-slow_speed,'R':-max_speed});" 
-                                onmouseup="cmdJsonCmd({'T':cmd_movition_ctrl,'L':0,'R':0});" 
-                                ontouchend="cmdJsonCmd({'T':cmd_movition_ctrl,'L':0,'R':0});"></li>
-                                
-                                <li class="ctl9_base_btn8" 
-                                onmousedown="cmdJsonCmd({'T':cmd_movition_ctrl,'L':-max_speed,'R':-max_speed});" 
-                                ontouchstart="cmdJsonCmd({'T':cmd_movition_ctrl,'L':-max_speed,'R':-max_speed});" 
-                                onmouseup="cmdJsonCmd({'T':cmd_movition_ctrl,'L':0,'R':0});" 
-                                ontouchend="cmdJsonCmd({'T':cmd_movition_ctrl,'L':0,'R':0});"></li>
-                                
-                                <li class="ctl9_base_btn" 
-                                onmousedown="cmdJsonCmd({'T':cmd_movition_ctrl,'L':-max_speed,'R':-slow_speed});" 
-                                ontouchstart="cmdJsonCmd({'T':cmd_movition_ctrl,'L':-max_speed,'R':-slow_speed});" 
-                                onmouseup="cmdJsonCmd({'T':cmd_movition_ctrl,'L':0,'R':0});" 
-                                ontouchend="cmdJsonCmd({'T':cmd_movition_ctrl,'L':0,'R':0});"></li>
+
+                                <li class="ctl9_base_btn6" data-x="0" data-z="-1"></li>
+                                <li class="ctl9_base_btn" data-x="-1" data-z="1"></li>
+                                <li class="ctl9_base_btn8" data-x="-1" data-z="0"></li>
+                                <li class="ctl9_base_btn" data-x="-1" data-z="-1"></li>
                             </ul>
                         </div>
                     </div>
@@ -180,9 +174,9 @@
                                 <div id="audioFilesDrag" class="audio-drop">Drop audio files here!</div>
                                 <!-- <ol>
                                     <li>1<span class="audioplay"></span><span>Drop audio files here.mp3</span></li>
-                                </ol>-->
+                                </ol> -->
                             </div>
-                            <div style="visibility: hidden;" id="stopButton" class="pause"><div></div></div>
+                            <div style="visibility: visible;" id="stopButton" class="pause"><div></div></div>
                         </div>
                     </div>
                 </div>
@@ -201,75 +195,75 @@
                         <div>  
                             <h2 class="sc_title feed_ct_tt">Speed Ctrl</h2>
                             <div id="speed_ctrl_btn">
-                                <div><button onclick="speedCtrl(min_rate);" class="ctl_btn ctl_btn_active">Slow</button></div>
-                                <div><button onclick="speedCtrl(mid_rate);" class="ctl_btn">Middle</button></div>
-                                <div><button onclick="speedCtrl(max_rate);" class="ctl_btn">Fast</button></div>
+                                <div><button onclick="speedRateCtrl(min_rate);" class="ctl_btn ctl_btn_active">Slow</button></div>
+                                <div><button onclick="speedRateCtrl(mid_rate);" class="ctl_btn">Middle</button></div>
+                                <div><button onclick="speedRateCtrl(max_rate);" class="ctl_btn">Fast</button></div>
                             </div>
                         </div>
                         <div>  
                             <h2 class="sc_title feed_ct_tt">PT Steady/Ahead</h2>
                             <div id="steady_ctrl_btn">
-                                <div><button onclick="steadyCtrl(0, stickSendY);" class="ctl_btn ctl_btn_active">OFF</button></div>
-                                <div><button onclick="steadyCtrl(1, stickSendY);" class="ctl_btn">ON</button></div>
+                                <div><button onclick="steadyCtrl(0);" class="ctl_btn ctl_btn_active">OFF</button></div>
+                                <div><button onclick="steadyCtrl(1);" class="ctl_btn">ON</button></div>
                                 <div><button onclick="lookAhead();" class="ctl_btn">Ahead</button></div>
-                            </div>
-                        </div>
-                        <div>  
-                            <h2 class="sc_title feed_ct_tt">Simple Detection Type</h2>
-                            <div id="d_type_btn">
-                                <div><button onclick="cmdSend(cv_none,0,0);" class="ctl_btn ctl_btn_active">None</button></div>
-                                <div><button onclick="cmdSend(cv_moti,1,0);" class="ctl_btn ctl_btn_mov btn_ico">Movtion</button></div>
-                                <div><button onclick="cmdSend(cv_face,2,0);" class="ctl_btn ctl_btn_faces btn_ico">Faces</button></div>
                             </div>
                         </div>
                         <div>  
                             <h2 class="sc_title feed_ct_tt">Simple Detection Reaction</h2>
                             <div id="d_reaction_btn">
-                                <div><button onclick="cmdSend(re_none,0,0);" class="ctl_btn ctl_btn_active">None</button></div>
-                                <div><button onclick="cmdSend(re_capt,0,0);" class="ctl_btn ctl_btn_caputure btn_ico">Capture</button></div>
-                                <div><button onclick="cmdSend(re_reco,0,0);" class="ctl_btn ctl_btn_record btn_ico">Record</button></div>
+                                <div><button onclick="cmdSend(detect_react,re_none);" class="ctl_btn ctl_btn_active">None</button></div>
+                                <div><button onclick="cmdSend(detect_react,re_capt);" class="ctl_btn ctl_btn_caputure btn_ico">Capture</button></div>
+                                <div><button onclick="cmdSend(detect_react,re_reco);" class="ctl_btn ctl_btn_record btn_ico">Record</button></div>
+                            </div>
+                        </div>                        
+                        <div>  
+                            <h2 class="sc_title feed_ct_tt">Simple Detection Type</h2>
+                            <div id="d_type_btn">
+                                <div><button onclick="cmdSend(detect_type,cv_none);" class="ctl_btn ctl_btn_active">None</button></div>
+                                <div><button onclick="cmdSend(detect_type,cv_moti);" class="ctl_btn ctl_btn_mov btn_ico">Movtion</button></div>
+                                <div><button onclick="cmdSend(detect_type,cv_face);" class="ctl_btn ctl_btn_faces btn_ico">Faces</button></div>
                             </div>
                         </div>
                         <div>  
                             <h2 class="sc_title feed_ct_tt">Advance CV Ctrl</h2>
                             <div id="adv_cv_ctrl_btn">
-                                <div><button onclick="cmdSend(mc_lock,0,0);" class="ctl_btn">LOCK</button></div>
-                                <div><button onclick="cmdSend(mc_unlo,0,0);" class="ctl_btn">UNLOCK</button></div>
-                                <div><button onclick="cmdSend(cv_auto,0,0);" class="ctl_btn">AUTODRIVE</button></div>
+                                <div><button onclick="cmdSend(cv_movtion_mode,mc_lock);" class="ctl_btn">LOCK</button></div>
+                                <div><button onclick="cmdSend(cv_movtion_mode,mc_unlo);" class="ctl_btn">UNLOCK</button></div>
+                                <div><button onclick="cmdSend(detect_type,cv_auto);" class="ctl_btn">AUTODRIVE</button></div>
                             </div>
                         </div>
                         <div>  
                             <h2 class="sc_title feed_ct_tt">Advance CV Funcs</h2>
                             <div id="adv_cv_funcs_btn">
-                                <div><button onclick="cmdSend(cv_objs,0,0);" class="ctl_btn">OBJECTS</button></div>
-                                <div><button onclick="cmdSend(cv_clor,0,0);" class="ctl_btn">COLOR</button></div>
-                                <div><button onclick="cmdSend(mp_hand,0,0);" class="ctl_btn">HAND GS</button></div>
+                                <div><button onclick="cmdSend(detect_type,cv_objs);" class="ctl_btn">OBJECTS</button></div>
+                                <div><button onclick="cmdSend(detect_type,cv_clor);" class="ctl_btn">COLOR</button></div>
+                                <div><button onclick="cmdSend(detect_type,mp_hand);" class="ctl_btn">HAND GS</button></div>
                             </div>
                         </div>
                         <div>  
                             <h2 class="sc_title feed_ct_tt">MediaPipe Funcs</h2>
                             <div id="mp_funcs_btn">
-                                <div><button onclick="cmdSend(mp_face,0,0);" class="ctl_btn">MP FACE</button></div>
-                                <div><button onclick="cmdSend(mp_pose,0,0);" class="ctl_btn">MP POSE</button></div>
+                                <div><button onclick="cmdSend(detect_type,mp_face);" class="ctl_btn">MP FACE</button></div>
+                                <div><button onclick="cmdSend(detect_type,mp_pose);" class="ctl_btn">MP POSE</button></div>
                             </div>
                         </div>
                         <div>  
                             <h2 class="sc_title feed_ct_tt">Head Light Ctrl</h2>
                             <div id="light_ctrl_btn">
-                                <div><button onclick="cmdSend(led_off,0,0);" class="ctl_btn ctl_btn_active">OFF</button></div>
-                                <div><button onclick="cmdSend(led_aut,0,0);" class="ctl_btn">AUTO</button></div>
-                                <div><button onclick="cmdSend(led_ton,0,0);" class="ctl_btn">ON</button></div>
+                                <div><button onclick="cmdSend(led_mode,led_off);" class="ctl_btn ctl_btn_active">OFF</button></div>
+                                <div><button onclick="cmdSend(led_mode,led_aut);" class="ctl_btn">AUTO</button></div>
+                                <div><button onclick="cmdSend(led_mode,led_ton);" class="ctl_btn">ON</button></div>
                             </div>
                         </div>
                         <div>  
                             <h2 class="sc_title feed_ct_tt">Base Light Ctrl</h2>
                             <div id="base_led_ctrl_btn">
-                                <div><button onclick="cmdSend(base_of,0,0);" class="ctl_btn">BASE OFF</button></div>
-                                <div><button onclick="cmdSend(base_on,0,0);" class="ctl_btn">BASE ON</button></div>
+                                <div><button onclick="cmdSend(base_light,0);" class="ctl_btn">BASE OFF</button></div>
+                                <div><button onclick="cmdSend(base_light,255);" class="ctl_btn">BASE ON</button></div>
                             </div>
                         </div>
                         <div class="long_btn new_page" id="open_jupyter">
-                            <a target="_blank" style="color: #f5bd5f;" href="/"><span>JupyterLab</span>&nbsp;<span>&gt;</span></a>
+                            <a target="_blank" style="color: #f5bd5f;"><span>JupyterLab</span>&nbsp;<span>&gt;</span></a>
                         </div>
                     </div>
                 </div>
@@ -282,7 +276,7 @@
                     <ul id="photo-list">
                     </ul>
                     <div class="long_btn new_page">
-                        <a href="./photo.html"><span>View Photo Gallery Page</span>&nbsp;(<span id="number-photos">0</span>)&nbsp;<span>&gt;</span></a>
+                        <a href="./html/photo.html"><span>View Photo Gallery Page</span>&nbsp;(<span id="number-photos">0</span>)&nbsp;<span>&gt;</span></a>
                     </div>
                 </div>
             </section>
@@ -292,7 +286,7 @@
                     <ul class="video-list" id="video-list">
                     </ul>
                     <div class="long_btn new_page">
-                        <a href="./video.html"><span>View Video Files Page</span>&nbsp;(<span id="number-videos">0</span>)&nbsp;<span>&gt;</span></a>
+                        <a href="./html/video.html"><span>View Video Files Page</span>&nbsp;(<span id="number-videos">0</span>)&nbsp;<span>&gt;</span></a>
                     </div>
                 </div>
             </section>
@@ -300,7 +294,7 @@
                 <div>
                     <h2 id="test" class="sc_title normal_sc_title">Bus Servos Initialization Setup</h2>
                     <div class="long_btn new_page ">
-                        <a class="btn_ico ico_setting" href="./settings.html"><span>Setting Page</span>&nbsp;<span>&gt;</span></a>
+                        <a class="btn_ico ico_setting" href="./html/settings.html"><span>Setting Page</span>&nbsp;<span>&gt;</span></a>
                     </div>
                 </div>
             </section>
@@ -308,24 +302,22 @@
     </main>
     <div id="video-del-tips" class="video-del-tips"><p>Successfully deleted video</p></div>
     <footer style="visibility: hidden;">
-        <div style="background-image: url('./img/white/record.svg');"></div>
-        <div style="background-image: url('./img/white/capture.svg');"></div>
-        <div style="background-image: url('./img/white/zoom.svg');"></div>
-        <div style="background-image: url('./img/white/ctrl_arrow.svg');"></div>
-        <div style="background-image: url('./img/white/faces.svg');"></div>
-        <div style="background-image: url('./img/white/movtion.svg');"></div>
-        <div style="background-image: url('./img/white/none.svg');"></div>
-        <div style="background-image: url('./img/white/delete.svg');"></div>
-        <div style="background-image: url('./img/grey/record.svg');"></div>
-        <div style="background-image: url('./img/grey/capture.svg');"></div>
-        <div style="background-image: url('./img/grey/zoom.svg');"></div>
-        <div style="background-image: url('./img/grey/ctrl_arrow.svg');"></div>
-        <div style="background-image: url('./img/grey/faces.svg');"></div>
-        <div style="background-image: url('./img/grey/movtion.svg');"></div>
-        <div style="background-image: url('./img/grey/delete.svg');"></div>
+        <div style="background-image: url('../assets/img/white/record.svg');"></div>
+        <div style="background-image: url('../assets/img/white/capture.svg');"></div>
+        <div style="background-image: url('../assets/img/white/zoom.svg');"></div>
+        <div style="background-image: url('../assets/img/white/ctrl_arrow.svg');"></div>
+        <div style="background-image: url('../assets/img/white/faces.svg');"></div>
+        <div style="background-image: url('../assets/img/white/movtion.svg');"></div>
+        <div style="background-image: url('../assets/img/white/none.svg');"></div>
+        <div style="background-image: url('../assets/img/white/delete.svg');"></div>
+        <div style="background-image: url('../assets/img/grey/record.svg');"></div>
+        <div style="background-image: url('../assets/img/grey/capture.svg');"></div>
+        <div style="background-image: url('../assets/img/grey/zoom.svg');"></div>
+        <div style="background-image: url('../assets/img/grey/ctrl_arrow.svg');"></div>
+        <div style="background-image: url('../assets/img/grey/faces.svg');"></div>
+        <div style="background-image: url('../assets/img/grey/movtion.svg');"></div>
+        <div style="background-image: url('../assets/img/grey/delete.svg');"></div>
     </footer>
-    <!-- <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.7.0/jquery.min.js"></script> -->
-    <script src="./control.js"></script>
-    <script src="./main.js"></script>
+    <script type="module" src="./js/main.js"></script>
 </body>
 </html>

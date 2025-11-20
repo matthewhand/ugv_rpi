@@ -1,7 +1,21 @@
 # import base_ctrl library
-from base_ctrl import BaseController
+from controllers.base_ctrl import BaseController
+from controllers.joy_ctrl import JoystickReader, JoyTeleop
+from controllers import cv_ctrl, audio_ctrl, os_info
+
+# Import necessary modules
+from flask import Flask, render_template, Response, request, jsonify, redirect, url_for, send_from_directory, send_file
+from flask_socketio import SocketIO, emit
+from werkzeug.utils import secure_filename
+
 import threading
-import yaml, os
+import yaml
+import os
+import json
+import uuid
+import asyncio
+import time
+import logging
 
 # raspberry pi version check.
 def is_raspberry_pi5():
@@ -17,7 +31,7 @@ if is_raspberry_pi5():
     base = BaseController('/dev/ttyAMA0', 115200)
 else:
     base = BaseController('/dev/serial0', 115200)
-
+    
 threading.Thread(target=lambda: base.breath_light(15), daemon=True).start()
 
 # config file.
@@ -31,96 +45,45 @@ base.base_oled(1, f"sbc_version: {f['base_config']['sbc_version']}")
 base.base_oled(2, f"{f['base_config']['main_type']}{f['base_config']['module_type']}")
 base.base_oled(3, "Starting...")
 
-
-# Import necessary modules
-from flask import Flask, render_template, Response, request, jsonify, redirect, url_for, send_from_directory, send_file
-from flask_socketio import SocketIO, emit
-from werkzeug.utils import secure_filename
-from aiortc import RTCPeerConnection, RTCSessionDescription
-import json
-import uuid
-import asyncio
-import time
-import logging
-import logging
-import cv_ctrl
-import audio_ctrl
-import os_info
-
 # Get system info
-UPLOAD_FOLDER = thisPath + '/sounds/others'
+UPLOAD_FOLDER = thisPath + '/templates/media/sounds/others'
 si = os_info.SystemInfo()
 
 # Create a Flask app instance
 app = Flask(__name__)
 # log = logging.getLogger('werkzeug')
 # log.disabled = True
-socketio = SocketIO(app)
-
-# Set to keep track of RTCPeerConnection instances
-active_pcs = {}
-
-# Maximum number of active connections allowed
-MAX_CONNECTIONS = 1
-
-# Set to keep track of RTCPeerConnection instances
-pcs = set()
+socketio = SocketIO(app, async_mode='threading', cors_allowed_origins="*")
 
 # Camera funcs
 cvf = cv_ctrl.OpencvFuncs(thisPath, base)
 
 cmd_actions = {
-    f['code']['zoom_x1']: lambda: cvf.scale_ctrl(1),
-    f['code']['zoom_x2']: lambda: cvf.scale_ctrl(2),
-    f['code']['zoom_x4']: lambda: cvf.scale_ctrl(4),
+    f['code']['zoom']: lambda mode: cvf.scale_ctrl(mode),
 
-    f['code']['pic_cap']: cvf.picture_capture,
-    f['code']['vid_sta']: lambda: cvf.video_record(True),
-    f['code']['vid_end']: lambda: cvf.video_record(False),
+    f['code']['pic_cap']: lambda mode: cvf.picture_capture(),
+    f['code']['video']: lambda mode: cvf.video_record(mode),
 
-    f['code']['cv_none']: lambda: cvf.set_cv_mode(f['code']['cv_none']),
-    f['code']['cv_moti']: lambda: cvf.set_cv_mode(f['code']['cv_moti']),
-    f['code']['cv_face']: lambda: cvf.set_cv_mode(f['code']['cv_face']),
-    f['code']['cv_objs']: lambda: cvf.set_cv_mode(f['code']['cv_objs']),
-    f['code']['cv_clor']: lambda: cvf.set_cv_mode(f['code']['cv_clor']),
-    f['code']['mp_hand']: lambda: cvf.set_cv_mode(f['code']['mp_hand']),
-    f['code']['cv_auto']: lambda: cvf.set_cv_mode(f['code']['cv_auto']),
-    f['code']['mp_face']: lambda: cvf.set_cv_mode(f['code']['mp_face']),
-    f['code']['mp_pose']: lambda: cvf.set_cv_mode(f['code']['mp_pose']),
+    f['fb']['detect_type']: lambda mode: cvf.set_cv_mode(mode),
 
-    f['code']['re_none']: lambda: cvf.set_detection_reaction(f['code']['re_none']),
-    f['code']['re_capt']: lambda: cvf.set_detection_reaction(f['code']['re_capt']),
-    f['code']['re_reco']: lambda: cvf.set_detection_reaction(f['code']['re_reco']),
+    f['fb']['detect_react']: lambda mode: cvf.set_detection_reaction(mode),
 
-    f['code']['mc_lock']: lambda: cvf.set_movtion_lock(True),
-    f['code']['mc_unlo']: lambda: cvf.set_movtion_lock(False),
+    f['fb']['cv_movtion_mode']: lambda mode: cvf.set_movtion_lock(mode),
 
-    f['code']['led_off']: lambda: cvf.head_light_ctrl(0),
-    f['code']['led_aut']: lambda: cvf.head_light_ctrl(1),
-    f['code']['led_ton']: lambda: cvf.head_light_ctrl(2),
+    f['fb']['led_mode']: lambda mode: cvf.head_light_ctrl(mode),
 
-    f['code']['release']: lambda: base.bus_servo_torque_lock(255, 0),
-    f['code']['s_panid']: lambda: base.bus_servo_id_set(255, 2),
-    f['code']['s_tilid']: lambda: base.bus_servo_id_set(255, 1),
-    f['code']['set_mid']: lambda: base.bus_servo_mid_set(255),
+    f['code']['release']: lambda mode: base.bus_servo_torque_lock(255, 0),
+    f['code']['s_panid']: lambda mode: base.bus_servo_id_set(255, 2),
+    f['code']['s_tilid']: lambda mode: base.bus_servo_id_set(255, 1),
+    f['code']['set_mid']: lambda mode: base.bus_servo_mid_set(255),
 
-    f['code']['base_of']: lambda: base.lights_ctrl(0, base.head_light_status),
-    f['code']['base_on']: lambda: base.lights_ctrl(255, base.head_light_status),
-    f['code']['head_ct']: lambda: cvf.head_light_ctrl(3),
-    f['code']['base_ct']: base.base_lights_ctrl
+    f['fb']['base_light']: lambda mode: base.lights_ctrl(mode, base.head_light_status),
+    f['code']['base_ct']: lambda mode: base.base_lights_ctrl(),
 }
 
-cmd_feedback_actions = [f['code']['cv_none'], f['code']['cv_moti'],
-                        f['code']['cv_face'], f['code']['cv_objs'],
-                        f['code']['cv_clor'], f['code']['mp_hand'],
-                        f['code']['cv_auto'], f['code']['mp_face'],
-                        f['code']['mp_pose'], f['code']['re_none'],
-                        f['code']['re_capt'], f['code']['re_reco'],
-                        f['code']['mc_lock'], f['code']['mc_unlo'],
-                        f['code']['led_off'], f['code']['led_aut'],
-                        f['code']['led_ton'], f['code']['base_of'],
-                        f['code']['base_on'], f['code']['head_ct'],
-                        f['code']['base_ct']
+cmd_feedback_actions = [f['fb']['detect_type'], f['fb']['detect_react'],
+                        f['fb']['cv_movtion_mode'],f['fb']['led_mode'], 
+                        f['fb']['base_light'],f['code']['base_ct']
                         ]
 
 # cv info process
@@ -128,22 +91,6 @@ def process_cv_info(cmd):
     if cmd[f['fb']['detect_type']] != f['code']['cv_none']:
         print(cmd[f['fb']['detect_type']])
         pass
-
-# Function to generate video frames from the camera
-def generate_frames():
-    while True:
-        frame = cvf.frame_process()
-        # print(cvf.cv_info())
-        try:
-            yield (b'--frame\r\n'
-               b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n') 
-        except Exception as e:
-            print("An [generate_frames] error occurred:", e)
-
-
-
-
-
 
 # Route to render the HTML template
 @app.route('/')
@@ -164,14 +111,14 @@ def serve_static(filename):
 
 @app.route('/get_photo_names')
 def get_photo_names():
-    photo_files = sorted(os.listdir(thisPath + '/templates/pictures'), key=lambda x: os.path.getmtime(os.path.join(thisPath + '/templates/pictures', x)), reverse=True)
+    photo_files = sorted(os.listdir(thisPath + '/templates/media/pictures'), key=lambda x: os.path.getmtime(os.path.join(thisPath + '/templates/media/pictures', x)), reverse=True)
     return jsonify(photo_files)
 
 @app.route('/delete_photo', methods=['POST'])
 def delete_photo():
     filename = request.form.get('filename')
     try:
-        os.remove(os.path.join(thisPath + '/templates/pictures', filename))
+        os.remove(os.path.join(thisPath + '/templates/media/pictures', filename))
         return jsonify(success=True)
     except Exception as e:
         print(e)
@@ -179,13 +126,13 @@ def delete_photo():
 
 @app.route('/videos/<path:filename>')
 def videos(filename):
-    return send_from_directory(thisPath + '/templates/videos', filename)
+    return send_from_directory(thisPath + '/templates/media/videos', filename)
 
 @app.route('/get_video_names')
 def get_video_names():
     video_files = sorted(
-        [filename for filename in os.listdir(thisPath + '/templates/videos/') if filename.endswith('.mp4')],
-        key=lambda filename: os.path.getctime(os.path.join(thisPath + '/templates/videos/', filename)),
+        [filename for filename in os.listdir(thisPath + '/templates/media/videos/') if filename.endswith('.mp4')],
+        key=lambda filename: os.path.getctime(os.path.join(thisPath + '/templates/media/videos/', filename)),
         reverse=True
     )
     return jsonify(video_files)
@@ -194,58 +141,11 @@ def get_video_names():
 def delete_video():
     filename = request.form.get('filename')
     try:
-        os.remove(os.path.join(thisPath + '/templates/videos', filename))
+        os.remove(os.path.join(thisPath + '/templates/media/videos', filename))
         return jsonify(success=True)
     except Exception as e:
         print(e)
         return jsonify(success=False)
-
-
-
-
-# Video WebRTC
-# Function to manage connections
-def manage_connections(pc_id):
-    if len(active_pcs) >= MAX_CONNECTIONS:
-        # If maximum connections reached, terminate the oldest connection
-        oldest_pc_id = next(iter(active_pcs))
-        old_pc = active_pcs.pop(oldest_pc_id)
-        old_pc.close()
-
-    # Add new connection to active connections
-    active_pcs[pc_id] = pc
-
-# Asynchronous function to handle offer exchange
-async def offer_async():
-    params = await request.json
-    offer = RTCSessionDescription(sdp=params["sdp"], type=params["type"])
-
-    # Create an RTCPeerConnection instance
-    pc = RTCPeerConnection()
-
-    # Generate a unique ID for the RTCPeerConnection
-    pc_id = "PeerConnection(%s)" % uuid.uuid4()
-    pc_id = pc_id[:8]
-
-    # Manage connections
-    manage_connections(pc_id)
-
-    # Create and set the local description
-    await pc.createOffer(offer)
-    await pc.setLocalDescription(offer)
-
-    # Prepare the response data with local SDP and type
-    response_data = {"sdp": pc.localDescription.sdp, "type": pc.localDescription.type}
-
-    return jsonify(response_data)
-
-# Wrapper function for running the asynchronous offer function
-def offer():
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    
-    future = asyncio.run_coroutine_threadsafe(offer_async(), loop)
-    return future.result()
 
 # set product version
 def set_version(input_main, input_module):
@@ -259,9 +159,11 @@ def set_version(input_main, input_module):
     if input_module == 0:
         cvf.info_update("No Module", (0,255,255), 0.36)
     elif input_module == 1:
-        cvf.info_update("ARM", (0,255,255), 0.36)
+        cvf.info_update("RoArm M2", (0,255,255), 0.36)
     elif input_module == 2:
         cvf.info_update("PT", (0,255,255), 0.36)
+    elif input_module == 3:
+        cvf.info_update("RoArm M3", (0,255,255), 0.36)
 
 # main cmdline for robot ctrl
 def cmdline_ctrl(args_string):
@@ -407,6 +309,14 @@ def cmdline_ctrl(args_string):
             f['base_config']['robot_name'] = "UGV Beast"
             f['args_config']['max_speed'] = 1.0
             f['args_config']['slow_speed'] = 0.2
+        elif main_type == 4:
+            f['base_config']['robot_name'] = "COBRA Flex"
+            f['args_config']['max_speed'] = 1.0
+            f['args_config']['slow_speed'] = 0.2
+        elif main_type == 5:
+            f['base_config']['robot_name'] = "COBRA Surge"
+            f['args_config']['max_speed'] = 1.0
+            f['args_config']['slow_speed'] = 0.2
         f['base_config']['main_type'] = main_type
         f['base_config']['module_type'] = module_type
         with open(thisPath + '/config.yaml', "w") as yaml_file:
@@ -415,17 +325,6 @@ def cmdline_ctrl(args_string):
 
     elif args[0] == 'test':
         cvf.update_base_data({"T":1003,"mac":1111,"megs":"helllo aaaaaaaa"})
-
-
-# Route to handle the offer request
-@app.route('/offer', methods=['POST'])
-def offer_route():
-    return offer()
-
-# Route to stream video frames
-@app.route('/video_feed')
-def video_feed():
-    return Response(generate_frames(), mimetype='multipart/x-mixed-replace; boundary=frame')
 
 @app.route('/send_command', methods=['POST'])
 def handle_command():
@@ -438,12 +337,12 @@ def handle_command():
         print(f"[app.handle_command] error: {e}")
     return jsonify({"status": "success", "message": "Command received"})
 
-@app.route('/getAudioFiles', methods=['GET'])
+@app.route('/get_audio_files', methods=['GET'])
 def get_audio_files():
     files = [f for f in os.listdir(UPLOAD_FOLDER) if os.path.isfile(os.path.join(UPLOAD_FOLDER, f)) and (f.endswith('.mp3') or f.endswith('.wav'))]
     return jsonify(files)
 
-@app.route('/uploadAudio', methods=['POST'])
+@app.route('/upload_audio', methods=['POST'])
 def upload_audio():
     if 'file' not in request.files:
         return jsonify({'error': 'No file part'})
@@ -455,11 +354,11 @@ def upload_audio():
         file.save(os.path.join(UPLOAD_FOLDER, filename))
         return jsonify({'success': 'File uploaded successfully'})
 
-@app.route('/playAudio', methods=['POST'])
+@app.route('/play_audio', methods=['POST'])
 def play_audio():
     audio_file = request.form['audio_file']
-    print(thisPath + '/sounds/others/' + audio_file)
-    audio_ctrl.play_audio_thread(thisPath + '/sounds/others/' + audio_file)
+    print(thisPath + '/templates/media/sounds/others/' + audio_file)
+    audio_ctrl.play_audio_thread(thisPath + '/templates/media/sounds/others/' + audio_file)
     return jsonify({'success': 'Audio is playing'})
 
 @app.route('/stop_audio', methods=['POST'])
@@ -467,11 +366,31 @@ def audio_stop():
     audio_ctrl.stop()
     return jsonify({'success': 'Audio stop'})
 
+@app.route('/delete_audio', methods=['POST'])
+def delete_audio():
+    filename = request.form.get('filename')
+    try:
+        os.remove(os.path.join(thisPath + '/templates/media/sounds/others/', filename))
+        return jsonify(success=True)
+    except Exception as e:
+        print(e)
+        return jsonify(success=False)
+
 @app.route('/settings/<path:filename>')
 def serve_static_settings(filename):
     return send_from_directory('templates', filename)
 
+def audio_send_thread():
+    while True:
+        data = audio_ctrl.audio_queue.get()
+        socketio.emit('audio', data, namespace='/audio')
+        audio_ctrl.audio_queue.task_done()
 
+@socketio.on('connect', namespace='/audio')
+def on_audio_connect():
+    print('Client connected to /audio')
+    threading.Thread(target=audio_ctrl.audio_capture_thread, daemon=True).start()
+    threading.Thread(target=audio_send_thread, daemon=True).start()
 
 # Web socket
 @socketio.on('json', namespace='/json')
@@ -499,9 +418,10 @@ def update_data_websocket_single():
             f['fb']['detect_react']:cvf.detection_reaction_mode,
             f['fb']['pan_angle']:   cvf.pan_angle,
             f['fb']['tilt_angle']:  cvf.tilt_angle,
-            f['fb']['base_voltage']:base.base_data['v'],
+            f['fb']['base_voltage']: base.base_voltage_status,
             f['fb']['video_fps']:   cvf.video_fps,
             f['fb']['cv_movtion_mode']: cvf.cv_movtion_lock,
+            f['fb']['pt_steady']:  base.pt_steady_status,
             f['fb']['base_light']:  base.base_light_status
         }
         socketio.emit('update', socket_data, namespace='/ctrl')
@@ -511,33 +431,48 @@ def update_data_websocket_single():
 # info feedback
 def update_data_loop():
     base.base_oled(2, "F/J:5000/8888")
+    
+    last_eth0 = None
+    last_wlan = None
     start_time = time.time()
-    time.sleep(1)
-    while 1:
+
+    while True:
         update_data_websocket_single()
+
         eth0 = si.eth0_ip
         wlan = si.wlan_ip
-        if eth0:
-            base.base_oled(0, f"E:{eth0}")
-        else:
-            base.base_oled(0, f"E: No Ethernet")
-        if wlan:
-            base.base_oled(1, f"W:{wlan}")
-        else:
-            base.base_oled(1, f"W: NO {si.net_interface}")
+
+        if eth0 != last_eth0:
+            if eth0:
+                base.base_oled(0, f"E:{eth0}")
+            else:
+                base.base_oled(0, "E: No Ethernet")
+            last_eth0 = eth0
+
+        if wlan != last_wlan:
+            if wlan:
+                base.base_oled(1, f"W:{wlan}")
+            else:
+                base.base_oled(1, f"W: NO {si.net_interface}")
+            last_wlan = wlan
+
         elapsed_time = time.time() - start_time
         hours = int(elapsed_time // 3600)
         minutes = int((elapsed_time % 3600) // 60)
         seconds = int(elapsed_time % 60)
         base.base_oled(3, f"{si.wifi_mode} {hours:02d}:{minutes:02d}:{seconds:02d} {si.wifi_rssi}dBm")
-        time.sleep(5)
+
+        time.sleep(1)  
 
 def base_data_loop():
     sensor_interval = 1
     sensor_read_time = time.time()
     while True:
         cvf.update_base_data(base.feedback_data())
-
+        base.base_json_ctrl({"T":105})   
+        data = base.feedback_data()
+        if data["T"] ==1051:
+            socketio.emit('arm_state_update', data, namespace='/arm_state_update')
         # get sensor data
         if base.extra_sensor:
             if time.time() - sensor_read_time > sensor_interval:
@@ -548,24 +483,48 @@ def base_data_loop():
         if base.use_lidar:
             base.rl.lidar_data_recv()
         
-        time.sleep(0.025)
+        time.sleep(0.05)
+
+@socketio.on('connect', namespace='/arm_state_update')
+def connect_arm():
+    print("Client connected to /arm_state_update")
 
 @socketio.on('message', namespace='/ctrl')
 def handle_socket_cmd(message):
     try:
         json_data = json.loads(message)
+        print("Received JSON data:", json_data)
     except json.JSONDecodeError:
         print("Error decoding JSON.[app.handle_socket_cmd]")
         return
-    cmd_a = float(json_data.get("A", 0))
-    if cmd_a in cmd_actions:
-        cmd_actions[cmd_a]()
+    cmd = float(json_data.get("cmd", 0))
+    mode = float(json_data.get("mode", 0))
+    if cmd in cmd_actions:
+        cmd_actions[cmd](mode)
     else:
         pass
-    if cmd_a in cmd_feedback_actions:
+    if cmd in cmd_feedback_actions:
         threading.Thread(target=update_data_websocket_single, daemon=True).start()
 
+class JoyCtrlThread(threading.Thread):
+    def __init__(self):
+        super().__init__()
+        self.daemon = True
+        self.js_reader = JoystickReader()
+        self.js_reader.start()
+        
+        self.joy_ctrl = JoyTeleop(self.js_reader, base.ser.port)
+        self.running = True
 
+    def run(self):
+        while self.running:
+            if self.js_reader.Joy_active:
+                self.joy_ctrl.handle_events()
+            time.sleep(0.05)
+
+    def stop(self):
+        self.running = False
+        pygame.quit()
 
 # commandline on boot
 def cmd_on_boot():
@@ -573,34 +532,29 @@ def cmd_on_boot():
         'base -c {"T":142,"cmd":50}',   # set feedback interval
         'base -c {"T":131,"cmd":1}',    # serial feedback flow on
         'base -c {"T":143,"cmd":0}',    # serial echo off
-        'base -c {{"T":4,"cmd":{}}}'.format(f['base_config']['module_type']),      # select the module - 0:None 1:RoArm-M2-S 2:Gimbal
+        'base -c {"T":4,"cmd":0}',      # select the module - 0:None 1:RoArm-M2-S 2:Gimbal
         'base -c {"T":300,"mode":0,"mac":"EF:EF:EF:EF:EF:EF"}',  # the base won't be ctrl by esp-now broadcast cmd, but it can still recv broadcast megs.
         'send -a -b'    # add broadcast mac addr to peer
     ]
-    print('base -c {{"T":4,"cmd":{}}}'.format(f['base_config']['module_type']))
+    # print('base -c {{"T":4,"cmd":{}}}'.format(f['base_config']['module_type']))
     for i in range(0, len(cmd_list)):
         cmdline_ctrl(cmd_list[i])
         cvf.info_update(cmd_list[i], (0,255,255), 0.36)
     set_version(f['base_config']['main_type'], f['base_config']['module_type'])
 
-
+def run_flask():
+    socketio.run(app, host='0.0.0.0', port=5000, allow_unsafe_werkzeug=True)
 
 # Run the Flask app
 if __name__ == "__main__":
-    # lights off
+    # lights on
     base.lights_ctrl(255, 255)
-    
-    # play a audio file in /sounds/robot_started/
+
+    # play a audio file in /templates/media/sounds/robot_started/
     audio_ctrl.play_random_audio("robot_started", False)
 
     # update the size of videos and pictures
     si.update_folder(thisPath)
-
-    # pt/arm looks forward
-    if f['base_config']['module_type'] == 1:
-        base.base_json_ctrl({"T":f['cmd_config']['cmd_arm_ctrl_ui'],"E":f['args_config']['arm_default_e'],"Z":f['args_config']['arm_default_z'],"R":f['args_config']['arm_default_r']})
-    else:
-        base.gimbal_ctrl(0, 0, 200, 10)
 
     # feedback loop starts
     si.start()
@@ -612,9 +566,26 @@ if __name__ == "__main__":
     base_update_thread = threading.Thread(target=base_data_loop, daemon=True)
     base_update_thread.start()
 
+    # cam update
+    cam_thread = threading.Thread(target=cvf.frame_process, daemon=True)
+    cam_thread.start()
+
     # lights off
     base.lights_ctrl(0, 0)
     cmd_on_boot()
 
+    # joy_ctrl 
+    joy_thread = JoyCtrlThread()
+    joy_thread.start()
+
+    # pt/arm looks forward
+    if f['base_config']['module_type'] == 1:
+        base.base_json_ctrl({"T":102,"base": 0,"shoulder": 0.0191,"elbow": 2.9569,"hand": 3.1415,"spd": 0,"acc": 30})
+    elif f['base_config']['module_type'] == 3:
+        base.base_json_ctrl({"T":102,"base": 0,"shoulder": 0.0191,"elbow": 2.9569,"wrist": -1.4053,"roll": 0,"hand": 3.1415,"spd": 0,"acc": 30})
+    elif f['base_config']['module_type'] == 2:
+        base.gimbal_ctrl(0, 0, 200, 10)
+
     # run the main web app
-    socketio.run(app, host='0.0.0.0', port=5000, allow_unsafe_werkzeug=True)
+    flask_thread = threading.Thread(target=run_flask, daemon=True)
+    flask_thread.start()
