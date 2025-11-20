@@ -483,7 +483,7 @@ def base_data_loop():
         if base.use_lidar:
             base.rl.lidar_data_recv()
         
-        time.sleep(0.05)
+        time.sleep(0.025)
 
 @socketio.on('connect', namespace='/arm_state_update')
 def connect_arm():

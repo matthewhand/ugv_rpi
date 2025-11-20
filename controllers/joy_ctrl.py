@@ -428,14 +428,15 @@ class JoyTeleop:
         self.base_controller.send_command(data.encode()) 
 
     def send_pt_joint_ctrl(self, ptPoseState):
-        x_degree = (180 * ptPoseState.x) / 3.1415926
-        y_degree = (180 * ptPoseState.y) / 3.1415926
+        if module_type == 2: 
+            x_degree = (180 * ptPoseState.x) / 3.1415926
+            y_degree = (180 * ptPoseState.y) / 3.1415926
 
-        data = json.dumps({'T': f['cmd_config']['cmd_gimbal_ctrl'], 'X': x_degree, 'Y': y_degree, "SPD": 0, "ACC": 0}) + "\n"
-        if data == self.last_pt_sent_data:
-            return
-        self.last_pt_sent_data = data     
-        self.base_controller.send_command(data.encode()) 
+            data = json.dumps({'T': f['cmd_config']['cmd_gimbal_ctrl'], 'X': x_degree, 'Y': y_degree, "SPD": 0, "ACC": 0}) + "\n"
+            if data == self.last_pt_sent_data:
+                return
+            self.last_pt_sent_data = data     
+            self.base_controller.send_command(data.encode()) 
 
     def send_arm_joint_ctrl(self, armJointState):
         if module_type == 1:       

@@ -1,64 +1,52 @@
-2025/11/20 16:52:35 INF MediaMTX v1.13.1
-2025/11/20 16:52:35 INF configuration loaded from /home/ws/ugv_rpi/controllers/Mediamtx/mediamtx.yml
-2025/11/20 16:52:35 INF [RTSP] listener opened on :8554 (TCP), :8000 (UDP/RTP), :8001 (UDP/RTCP)
-2025/11/20 16:52:35 INF [RTMP] listener opened on :1935
-2025/11/20 16:52:35 INF [HLS] listener opened on :8880
-2025/11/20 16:52:35 INF [WebRTC] listener opened on :8889 (HTTP), :8189 (ICE/UDP)
-2025/11/20 16:52:35 INF [SRT] listener opened on :8890 (UDP)
-2025/11/20 16:52:40 INF [RTSP] [conn [::1]:45854] opened
-2025/11/20 16:52:40 INF [RTSP] [session 235639d5] created by [::1]:45854
-2025/11/20 16:52:40 INF [RTSP] [session 235639d5] is publishing to path 'cam', 1 track (H264)
-2025/11/20 16:53:09 INF [WebRTC] [session f42aa929] created by 192.168.9.125:57957
-2025/11/20 16:53:09 INF [WebRTC] [session f42aa929] peer connection established, local candidate: host/udp/127.0.0.1/8189, remote candidate: prflx/udp/192.168.9.125/52064
-2025/11/20 16:53:09 INF [WebRTC] [session f42aa929] is reading from path 'cam', 1 track (H264)
-2025/11/20 16:53:29 INF [WebRTC] [session f42aa929] closed: peer connection closed
-2025/11/20 16:53:35 INF [WebRTC] [session 002b7421] created by 192.168.9.125:57957
-2025/11/20 16:53:35 INF [WebRTC] [session 002b7421] peer connection established, local candidate: host/udp/127.0.0.1/8189, remote candidate: prflx/udp/192.168.9.125/60053
-2025/11/20 16:53:35 INF [WebRTC] [session 002b7421] is reading from path 'cam', 1 track (H264)
-2025/11/20 16:54:35 INF [WebRTC] [session 002b7421] closed: peer connection closed
-2025/11/20 16:54:35 INF [WebRTC] [session 68375a80] created by 192.168.9.125:57957
-2025/11/20 16:54:36 INF [WebRTC] [session 68375a80] peer connection established, local candidate: host/udp/127.0.0.1/8189, remote candidate: prflx/udp/192.168.9.125/49941
-2025/11/20 16:54:36 INF [WebRTC] [session 68375a80] is reading from path 'cam', 1 track (H264)
-2025/11/20 16:55:25 INF [WebRTC] [session 68375a80] closed: peer connection closed
-2025/11/20 16:55:26 INF [WebRTC] [session 8952612d] created by 192.168.9.125:57957
-2025/11/20 16:55:26 INF [WebRTC] [session 8952612d] peer connection established, local candidate: host/udp/172.17.0.1/8189, remote candidate: prflx/udp/192.168.9.125/62386
-2025/11/20 16:55:26 INF [WebRTC] [session 8952612d] is reading from path 'cam', 1 track (H264)
+2025/11/20 18:20:42 INF MediaMTX v1.13.1
+2025/11/20 18:20:42 INF configuration loaded from /home/ws/ugv_rpi/controllers/Mediamtx/mediamtx.yml
+2025/11/20 18:20:42 INF [RTSP] listener opened on :8554 (TCP), :8000 (UDP/RTP), :8001 (UDP/RTCP)
+2025/11/20 18:20:42 INF [RTMP] listener opened on :1935
+2025/11/20 18:20:42 INF [HLS] listener opened on :8880
+2025/11/20 18:20:42 INF [WebRTC] listener opened on :8889 (HTTP), :8189 (ICE/UDP)
+2025/11/20 18:20:42 INF [SRT] listener opened on :8890 (UDP)
+2025/11/20 18:20:47 INF [RTSP] [conn [::1]:57810] opened
+2025/11/20 18:20:47 INF [RTSP] [session d65c0cd8] created by [::1]:57810
+2025/11/20 18:20:47 INF [RTSP] [session d65c0cd8] is publishing to path 'cam', 1 track (H264)
+2025/11/20 18:20:59 INF [WebRTC] [session 7c424ba3] created by 192.168.9.125:60425
+2025/11/20 18:20:59 INF [WebRTC] [session 7c424ba3] peer connection established, local candidate: host/udp/127.0.0.1/8189, remote candidate: prflx/udp/192.168.9.125/61097
+2025/11/20 18:20:59 INF [WebRTC] [session 7c424ba3] is reading from path 'cam', 1 track (H264)
 SIGQUIT: quit
 PC=0x9124c m=0 sigcode=128
 
 goroutine 0 gp=0x1ff3880 m=0 mp=0x1ff4e00 [idle]:
 runtime.futex(0x1ff4f40, 0x80, 0x0, 0x0, 0x0, 0x0)
-	/usr/local/go/src/runtime/sys_linux_arm64.s:651 +0x1c fp=0x7fffd72071c0 sp=0x7fffd72071c0 pc=0x9124c
-runtime.futexsleep(0x7fffd7207248?, 0x1ff3880?, 0x7fffd7207248?)
-	/usr/local/go/src/runtime/os_linux.go:75 +0x2c fp=0x7fffd7207210 sp=0x7fffd72071c0 pc=0x4bdfc
+	/usr/local/go/src/runtime/sys_linux_arm64.s:651 +0x1c fp=0x7fffe0ea3510 sp=0x7fffe0ea3510 pc=0x9124c
+runtime.futexsleep(0x7fffe0ea3598?, 0x1ff3880?, 0x7fffe0ea3598?)
+	/usr/local/go/src/runtime/os_linux.go:75 +0x2c fp=0x7fffe0ea3560 sp=0x7fffe0ea3510 pc=0x4bdfc
 runtime.notesleep(0x1ff4f40)
-	/usr/local/go/src/runtime/lock_futex.go:47 +0x8c fp=0x7fffd7207250 sp=0x7fffd7207210 pc=0x2516c
+	/usr/local/go/src/runtime/lock_futex.go:47 +0x8c fp=0x7fffe0ea35a0 sp=0x7fffe0ea3560 pc=0x2516c
 runtime.mPark(...)
 	/usr/local/go/src/runtime/proc.go:1887
 runtime.stoplockedm()
-	/usr/local/go/src/runtime/proc.go:3165 +0x64 fp=0x7fffd72072b0 sp=0x7fffd7207250 pc=0x57e34
+	/usr/local/go/src/runtime/proc.go:3165 +0x64 fp=0x7fffe0ea3600 sp=0x7fffe0ea35a0 pc=0x57e34
 runtime.schedule()
-	/usr/local/go/src/runtime/proc.go:3999 +0x34 fp=0x7fffd72072f0 sp=0x7fffd72072b0 pc=0x5a724
-runtime.park_m(0x40004ccc40)
-	/usr/local/go/src/runtime/proc.go:4144 +0x2b0 fp=0x7fffd7207350 sp=0x7fffd72072f0 pc=0x5ac80
+	/usr/local/go/src/runtime/proc.go:3999 +0x34 fp=0x7fffe0ea3640 sp=0x7fffe0ea3600 pc=0x5a724
+runtime.park_m(0x4000454fc0)
+	/usr/local/go/src/runtime/proc.go:4144 +0x2b0 fp=0x7fffe0ea36a0 sp=0x7fffe0ea3640 pc=0x5ac80
 runtime.mcall()
-	/usr/local/go/src/runtime/asm_arm64.s:193 +0x54 fp=0x7fffd7207360 sp=0x7fffd7207350 pc=0x8d9e4
+	/usr/local/go/src/runtime/asm_arm64.s:193 +0x54 fp=0x7fffe0ea36b0 sp=0x7fffe0ea36a0 pc=0x8d9e4
 
 goroutine 1 gp=0x40000021c0 m=nil [chan receive, 3 minutes]:
-runtime.gopark(0x40000626c8?, 0x40002d06c0?, 0x50?, 0x56?, 0x40003405a0?)
-	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x4000443e60 sp=0x4000443e40 pc=0x87d18
-runtime.chanrecv(0x4000108930, 0x0, 0x1)
-	/usr/local/go/src/runtime/chan.go:664 +0x42c fp=0x4000443ee0 sp=0x4000443e60 pc=0x2033c
+runtime.gopark(0x40000626c8?, 0x40002da6d0?, 0x50?, 0x56?, 0x400034a5a0?)
+	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x400045fe60 sp=0x400045fe40 pc=0x87d18
+runtime.chanrecv(0x4000110930, 0x0, 0x1)
+	/usr/local/go/src/runtime/chan.go:664 +0x42c fp=0x400045fee0 sp=0x400045fe60 pc=0x2033c
 runtime.chanrecv1(0x40000300d0?, 0x1?)
-	/usr/local/go/src/runtime/chan.go:506 +0x14 fp=0x4000443f10 sp=0x4000443ee0 pc=0x1fed4
+	/usr/local/go/src/runtime/chan.go:506 +0x14 fp=0x400045ff10 sp=0x400045fee0 pc=0x1fed4
 github.com/bluenviron/mediamtx/internal/core.(*Core).Wait(...)
 	/s/internal/core/core.go:174
 main.main()
-	/s/main.go:15 +0x78 fp=0x4000443f40 sp=0x4000443f10 pc=0x8fd018
+	/s/main.go:15 +0x78 fp=0x400045ff40 sp=0x400045ff10 pc=0x8fd018
 runtime.main()
-	/usr/local/go/src/runtime/proc.go:283 +0x284 fp=0x4000443fd0 sp=0x4000443f40 pc=0x522c4
+	/usr/local/go/src/runtime/proc.go:283 +0x284 fp=0x400045ffd0 sp=0x400045ff40 pc=0x522c4
 runtime.goexit({})
-	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x4000443fd0 sp=0x4000443fd0 pc=0x8fdc4
+	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x400045ffd0 sp=0x400045ffd0 pc=0x8fdc4
 
 goroutine 2 gp=0x4000002700 m=nil [force gc (idle), 3 minutes]:
 runtime.gopark(0x0?, 0x0?, 0x0?, 0x0?, 0x0?)
@@ -87,7 +75,7 @@ created by runtime.gcenable in goroutine 1
 	/usr/local/go/src/runtime/mgc.go:204 +0x6c
 
 goroutine 4 gp=0x4000002e00 m=nil [GC scavenge wait]:
-runtime.gopark(0x19dac8?, 0x17f0ec?, 0x0?, 0x0?, 0x0?)
+runtime.gopark(0x1ff3200?, 0x164d83?, 0x0?, 0x0?, 0x0?)
 	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x4000063f60 sp=0x4000063f40 pc=0x87d18
 runtime.goparkunlock(...)
 	/usr/local/go/src/runtime/proc.go:441
@@ -102,7 +90,7 @@ runtime.goexit({})
 created by runtime.gcenable in goroutine 1
 	/usr/local/go/src/runtime/mgc.go:205 +0xac
 
-goroutine 5 gp=0x4000003340 m=nil [finalizer wait, 3 minutes]:
+goroutine 5 gp=0x40000036c0 m=nil [finalizer wait, 3 minutes]:
 runtime.gopark(0x40000625c8?, 0x2a4a4?, 0x8?, 0x26?, 0x620f4?)
 	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x4000062590 sp=0x4000062570 pc=0x87d18
 runtime.runfinq()
@@ -112,10 +100,10 @@ runtime.goexit({})
 created by runtime.createfing in goroutine 1
 	/usr/local/go/src/runtime/mfinal.go:166 +0x80
 
-goroutine 6 gp=0x4000003c00 m=nil [chan receive]:
-runtime.gopark(0x40001b5400?, 0x400026e030?, 0x48?, 0x47?, 0x1fefa8?)
+goroutine 6 gp=0x400020a000 m=nil [chan receive]:
+runtime.gopark(0x40001bd360?, 0x4000803218?, 0x48?, 0x47?, 0x1fefa8?)
 	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x40000646f0 sp=0x40000646d0 pc=0x87d18
-runtime.chanrecv(0x4000108460, 0x0, 0x1)
+runtime.chanrecv(0x4000110460, 0x0, 0x1)
 	/usr/local/go/src/runtime/chan.go:664 +0x42c fp=0x4000064770 sp=0x40000646f0 pc=0x2033c
 runtime.chanrecv1(0x0?, 0x0?)
 	/usr/local/go/src/runtime/chan.go:506 +0x14 fp=0x40000647a0 sp=0x4000064770 pc=0x1fed4
@@ -128,160 +116,160 @@ runtime.goexit({})
 created by unique.runtime_registerUniqueMapCleanup in goroutine 1
 	/usr/local/go/src/runtime/mgc.go:1794 +0x78
 
-goroutine 7 gp=0x4000003dc0 m=nil [select, 3 minutes]:
-runtime.gopark(0x4000412f00?, 0x3?, 0x78?, 0x4a?, 0x4000412eda?)
-	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x4000412d60 sp=0x4000412d40 pc=0x87d18
-runtime.selectgo(0x4000412f00, 0x4000412ed4, 0x4000412f40?, 0x0, 0x0?, 0x1)
-	/usr/local/go/src/runtime/select.go:351 +0x6c4 fp=0x4000412e90 sp=0x4000412d60 pc=0x65cc4
-github.com/bluenviron/mediamtx/internal/recordcleaner.(*Cleaner).run(0x4000275000)
-	/s/internal/recordcleaner/cleaner.go:65 +0x10c fp=0x4000412fb0 sp=0x4000412e90 pc=0x8c643c
+goroutine 7 gp=0x400020a1c0 m=nil [select, 3 minutes]:
+runtime.gopark(0x4000112f00?, 0x3?, 0x78?, 0x8a?, 0x4000112eda?)
+	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x4000112d60 sp=0x4000112d40 pc=0x87d18
+runtime.selectgo(0x4000112f00, 0x4000112ed4, 0x4000112f40?, 0x0, 0x0?, 0x1)
+	/usr/local/go/src/runtime/select.go:351 +0x6c4 fp=0x4000112e90 sp=0x4000112d60 pc=0x65cc4
+github.com/bluenviron/mediamtx/internal/recordcleaner.(*Cleaner).run(0x400027f000)
+	/s/internal/recordcleaner/cleaner.go:65 +0x10c fp=0x4000112fb0 sp=0x4000112e90 pc=0x8c643c
 github.com/bluenviron/mediamtx/internal/recordcleaner.(*Cleaner).Initialize.gowrap1()
-	/s/internal/recordcleaner/cleaner.go:37 +0x28 fp=0x4000412fd0 sp=0x4000412fb0 pc=0x8c6148
+	/s/internal/recordcleaner/cleaner.go:37 +0x28 fp=0x4000112fd0 sp=0x4000112fb0 pc=0x8c6148
 runtime.goexit({})
-	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x4000412fd0 sp=0x4000412fd0 pc=0x8fdc4
+	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x4000112fd0 sp=0x4000112fd0 pc=0x8fdc4
 created by github.com/bluenviron/mediamtx/internal/recordcleaner.(*Cleaner).Initialize in goroutine 1
 	/s/internal/recordcleaner/cleaner.go:37 +0x120
 
-goroutine 8 gp=0x40003fe000 m=nil [select, 1 minutes]:
-runtime.gopark(0x40003837b0?, 0xe?, 0x3?, 0x0?, 0x40003836ac?)
-	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x40003d54b0 sp=0x40003d5490 pc=0x87d18
-runtime.selectgo(0x40003d57b0, 0x4000383690, 0x40000353fe?, 0x0, 0x0?, 0x1)
-	/usr/local/go/src/runtime/select.go:351 +0x6c4 fp=0x40003d55e0 sp=0x40003d54b0 pc=0x65cc4
-github.com/bluenviron/mediamtx/internal/core.(*path).runInner(0x40002ce3c0)
-	/s/internal/core/path.go:241 +0x224 fp=0x40003d5a90 sp=0x40003d55e0 pc=0x8f5074
-github.com/bluenviron/mediamtx/internal/core.(*path).run(0x40002ce3c0)
-	/s/internal/core/path.go:196 +0x258 fp=0x40003d5fb0 sp=0x40003d5a90 pc=0x8f4838
+goroutine 8 gp=0x400020a380 m=nil [select, 2 minutes]:
+runtime.gopark(0x40004bf7b0?, 0xe?, 0x1?, 0x0?, 0x40004bf6ac?)
+	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x40005154b0 sp=0x4000515490 pc=0x87d18
+runtime.selectgo(0x40005157b0, 0x40004bf690, 0x40003e6a6e?, 0x0, 0x0?, 0x1)
+	/usr/local/go/src/runtime/select.go:351 +0x6c4 fp=0x40005155e0 sp=0x40005154b0 pc=0x65cc4
+github.com/bluenviron/mediamtx/internal/core.(*path).runInner(0x40002d83c0)
+	/s/internal/core/path.go:241 +0x224 fp=0x4000515a90 sp=0x40005155e0 pc=0x8f5074
+github.com/bluenviron/mediamtx/internal/core.(*path).run(0x40002d83c0)
+	/s/internal/core/path.go:196 +0x258 fp=0x4000515fb0 sp=0x4000515a90 pc=0x8f4838
 github.com/bluenviron/mediamtx/internal/core.(*path).initialize.gowrap1()
-	/s/internal/core/path.go:140 +0x28 fp=0x40003d5fd0 sp=0x40003d5fb0 pc=0x8f4478
+	/s/internal/core/path.go:140 +0x28 fp=0x4000515fd0 sp=0x4000515fb0 pc=0x8f4478
 runtime.goexit({})
-	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x40003d5fd0 sp=0x40003d5fd0 pc=0x8fdc4
+	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x4000515fd0 sp=0x4000515fd0 pc=0x8fdc4
 created by github.com/bluenviron/mediamtx/internal/core.(*path).initialize in goroutine 1
 	/s/internal/core/path.go:140 +0x4d4
 
-goroutine 9 gp=0x40003fe1c0 m=nil [select, 1 minutes]:
-runtime.gopark(0x400010ab68?, 0xc?, 0x1?, 0xa8?, 0x400010aab8?)
-	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x400010a8c0 sp=0x400010a8a0 pc=0x87d18
-runtime.selectgo(0x400010ab68, 0x400010aaa0, 0x40000353fe?, 0x0, 0x0?, 0x1)
-	/usr/local/go/src/runtime/select.go:351 +0x6c4 fp=0x400010a9f0 sp=0x400010a8c0 pc=0x65cc4
-github.com/bluenviron/mediamtx/internal/core.(*pathManager).run(0x400021e600)
-	/s/internal/core/path_manager.go:154 +0x23c fp=0x400010afb0 sp=0x400010a9f0 pc=0x8fa1cc
+goroutine 9 gp=0x400020a540 m=nil [select, 2 minutes]:
+runtime.gopark(0x4000113b68?, 0xc?, 0x1?, 0x38?, 0x4000113ab8?)
+	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x40001138c0 sp=0x40001138a0 pc=0x87d18
+runtime.selectgo(0x4000113b68, 0x4000113aa0, 0x40003e6a6e?, 0x0, 0x0?, 0x1)
+	/usr/local/go/src/runtime/select.go:351 +0x6c4 fp=0x40001139f0 sp=0x40001138c0 pc=0x65cc4
+github.com/bluenviron/mediamtx/internal/core.(*pathManager).run(0x4000228600)
+	/s/internal/core/path_manager.go:154 +0x23c fp=0x4000113fb0 sp=0x40001139f0 pc=0x8fa1cc
 github.com/bluenviron/mediamtx/internal/core.(*pathManager).initialize.gowrap1()
-	/s/internal/core/path_manager.go:126 +0x28 fp=0x400010afd0 sp=0x400010afb0 pc=0x8f9e48
+	/s/internal/core/path_manager.go:126 +0x28 fp=0x4000113fd0 sp=0x4000113fb0 pc=0x8f9e48
 runtime.goexit({})
-	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x400010afd0 sp=0x400010afd0 pc=0x8fdc4
+	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x4000113fd0 sp=0x4000113fd0 pc=0x8fdc4
 created by github.com/bluenviron/mediamtx/internal/core.(*pathManager).initialize in goroutine 1
 	/s/internal/core/path_manager.go:126 +0x428
 
-goroutine 10 gp=0x40003fe380 m=nil [IO wait]:
-runtime.gopark(0x4000022c48?, 0x6e24bc?, 0x1?, 0xd5?, 0x8d9a41b?)
-	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x4000022c20 sp=0x4000022c00 pc=0x87d18
+goroutine 10 gp=0x400020a700 m=nil [IO wait]:
+runtime.gopark(0x4000118c48?, 0x6e24bc?, 0x1?, 0x54?, 0x4d60773?)
+	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x4000118c20 sp=0x4000118c00 pc=0x87d18
 runtime.netpollblock(0x0?, 0x0?, 0x0?)
-	/usr/local/go/src/runtime/netpoll.go:575 +0x158 fp=0x4000022c60 sp=0x4000022c20 pc=0x4b028
-internal/poll.runtime_pollWait(0x7fff613b66b0, 0x72)
-	/usr/local/go/src/runtime/netpoll.go:351 +0xa0 fp=0x4000022c90 sp=0x4000022c60 pc=0x86ed0
-internal/poll.(*pollDesc).wait(0x4000350600?, 0x40007f1800?, 0x0)
-	/usr/local/go/src/internal/poll/fd_poll_runtime.go:84 +0x28 fp=0x4000022cc0 sp=0x4000022c90 pc=0xce878
+	/usr/local/go/src/runtime/netpoll.go:575 +0x158 fp=0x4000118c60 sp=0x4000118c20 pc=0x4b028
+internal/poll.runtime_pollWait(0x7fff49d7a6b0, 0x72)
+	/usr/local/go/src/runtime/netpoll.go:351 +0xa0 fp=0x4000118c90 sp=0x4000118c60 pc=0x86ed0
+internal/poll.(*pollDesc).wait(0x400035a600?, 0x40007c3800?, 0x0)
+	/usr/local/go/src/internal/poll/fd_poll_runtime.go:84 +0x28 fp=0x4000118cc0 sp=0x4000118c90 pc=0xce878
 internal/poll.(*pollDesc).waitRead(...)
 	/usr/local/go/src/internal/poll/fd_poll_runtime.go:89
-internal/poll.(*FD).ReadFromInet6(0x4000350600, {0x40007f1800, 0x5c1, 0x5c1}, 0x4000022dd8)
-	/usr/local/go/src/internal/poll/fd_unix.go:275 +0x1e8 fp=0x4000022d50 sp=0x4000022cc0 pc=0xd06d8
-net.(*netFD).readFromInet6(0x4000350600, {0x40007f1800?, 0x35e40351ce?, 0x1ff3100?}, 0x4000022e28?)
-	/usr/local/go/src/net/fd_posix.go:72 +0x28 fp=0x4000022da0 sp=0x4000022d50 pc=0x2265c8
-net.(*UDPConn).readFrom(0x30?, {0x40007f1800?, 0x4000495601?, 0x4000022f68?}, 0x400035e630)
-	/usr/local/go/src/net/udpsock_posix.go:59 +0x68 fp=0x4000022e90 sp=0x4000022da0 pc=0x243b38
-net.(*UDPConn).readFromUDP(0x4000066a20, {0x40007f1800?, 0x1840240?, 0x418e60?}, 0x40003505d0?)
-	/usr/local/go/src/net/udpsock.go:149 +0x2c fp=0x4000022ef0 sp=0x4000022e90 pc=0x24236c
-net.(*UDPConn).ReadFrom(0x4000066a20, {0x40007f1800, 0x5c1, 0x5c1})
-	/usr/local/go/src/net/udpsock.go:158 +0x4c fp=0x4000022f30 sp=0x4000022ef0 pc=0x2424ec
-github.com/bluenviron/gortsplib/v4.(*serverUDPListener).run(0x4000350580)
-	/go/pkg/mod/github.com/bluenviron/gortsplib/v4@v4.16.0/server_udp_listener.go:136 +0xc4 fp=0x4000022fb0 sp=0x4000022f30 pc=0x418bd4
+internal/poll.(*FD).ReadFromInet6(0x400035a600, {0x40007c3800, 0x5c1, 0x5c1}, 0x4000118dd8)
+	/usr/local/go/src/internal/poll/fd_unix.go:275 +0x1e8 fp=0x4000118d50 sp=0x4000118cc0 pc=0xd06d8
+net.(*netFD).readFromInet6(0x400035a600, {0x40007c3800?, 0x2a8772263f?, 0x1ff3100?}, 0x4000118e28?)
+	/usr/local/go/src/net/fd_posix.go:72 +0x28 fp=0x4000118da0 sp=0x4000118d50 pc=0x2265c8
+net.(*UDPConn).readFrom(0x30?, {0x40007c3800?, 0x7fff90808a01?, 0x4000118f68?}, 0x4000508300)
+	/usr/local/go/src/net/udpsock_posix.go:59 +0x68 fp=0x4000118e90 sp=0x4000118da0 pc=0x243b38
+net.(*UDPConn).readFromUDP(0x4000066a20, {0x40007c3800?, 0x5c1?, 0x418e60?}, 0x400035a5d0?)
+	/usr/local/go/src/net/udpsock.go:149 +0x2c fp=0x4000118ef0 sp=0x4000118e90 pc=0x24236c
+net.(*UDPConn).ReadFrom(0x4000066a20, {0x40007c3800, 0x5c1, 0x5c1})
+	/usr/local/go/src/net/udpsock.go:158 +0x4c fp=0x4000118f30 sp=0x4000118ef0 pc=0x2424ec
+github.com/bluenviron/gortsplib/v4.(*serverUDPListener).run(0x400035a580)
+	/go/pkg/mod/github.com/bluenviron/gortsplib/v4@v4.16.0/server_udp_listener.go:136 +0xc4 fp=0x4000118fb0 sp=0x4000118f30 pc=0x418bd4
 github.com/bluenviron/gortsplib/v4.(*serverUDPListener).initialize.gowrap1()
-	/go/pkg/mod/github.com/bluenviron/gortsplib/v4@v4.16.0/server_udp_listener.go:106 +0x28 fp=0x4000022fd0 sp=0x4000022fb0 pc=0x418a78
+	/go/pkg/mod/github.com/bluenviron/gortsplib/v4@v4.16.0/server_udp_listener.go:106 +0x28 fp=0x4000118fd0 sp=0x4000118fb0 pc=0x418a78
 runtime.goexit({})
-	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x4000022fd0 sp=0x4000022fd0 pc=0x8fdc4
+	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x4000118fd0 sp=0x4000118fd0 pc=0x8fdc4
 created by github.com/bluenviron/gortsplib/v4.(*serverUDPListener).initialize in goroutine 1
 	/go/pkg/mod/github.com/bluenviron/gortsplib/v4@v4.16.0/server_udp_listener.go:106 +0x1fc
 
-goroutine 11 gp=0x40003fe540 m=nil [IO wait]:
-runtime.gopark(0x400043dc40?, 0x66abc?, 0xa0?, 0xf6?, 0x3e3f0?)
-	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x400043dc20 sp=0x400043dc00 pc=0x87d18
+goroutine 11 gp=0x400020a8c0 m=nil [IO wait]:
+runtime.gopark(0x70045cc88?, 0x7fff499fe060?, 0x98?, 0xcc?, 0x85448?)
+	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x400045cc20 sp=0x400045cc00 pc=0x87d18
 runtime.netpollblock(0x0?, 0x0?, 0x0?)
-	/usr/local/go/src/runtime/netpoll.go:575 +0x158 fp=0x400043dc60 sp=0x400043dc20 pc=0x4b028
-internal/poll.runtime_pollWait(0x7fff613b6598, 0x72)
-	/usr/local/go/src/runtime/netpoll.go:351 +0xa0 fp=0x400043dc90 sp=0x400043dc60 pc=0x86ed0
-internal/poll.(*pollDesc).wait(0x4000350700?, 0x4000686000?, 0x0)
-	/usr/local/go/src/internal/poll/fd_poll_runtime.go:84 +0x28 fp=0x400043dcc0 sp=0x400043dc90 pc=0xce878
+	/usr/local/go/src/runtime/netpoll.go:575 +0x158 fp=0x400045cc60 sp=0x400045cc20 pc=0x4b028
+internal/poll.runtime_pollWait(0x7fff49d7a598, 0x72)
+	/usr/local/go/src/runtime/netpoll.go:351 +0xa0 fp=0x400045cc90 sp=0x400045cc60 pc=0x86ed0
+internal/poll.(*pollDesc).wait(0x400035a700?, 0x40007c0600?, 0x0)
+	/usr/local/go/src/internal/poll/fd_poll_runtime.go:84 +0x28 fp=0x400045ccc0 sp=0x400045cc90 pc=0xce878
 internal/poll.(*pollDesc).waitRead(...)
 	/usr/local/go/src/internal/poll/fd_poll_runtime.go:89
-internal/poll.(*FD).ReadFromInet6(0x4000350700, {0x4000686000, 0x5c1, 0x5c1}, 0x400043ddd8)
-	/usr/local/go/src/internal/poll/fd_unix.go:275 +0x1e8 fp=0x400043dd50 sp=0x400043dcc0 pc=0xd06d8
-net.(*netFD).readFromInet6(0x4000350700, {0x4000686000?, 0x201d860?, 0x7fffa7e845f0?}, 0x400043de28?)
-	/usr/local/go/src/net/fd_posix.go:72 +0x28 fp=0x400043dda0 sp=0x400043dd50 pc=0x2265c8
-net.(*UDPConn).readFrom(0x30?, {0x4000686000?, 0x7fffa7e84501?, 0x400043df68?}, 0x400091ce70)
-	/usr/local/go/src/net/udpsock_posix.go:59 +0x68 fp=0x400043de90 sp=0x400043dda0 pc=0x243b38
-net.(*UDPConn).readFromUDP(0x4000066a28, {0x4000686000?, 0x5c1?, 0x418e60?}, 0x40003506d0?)
-	/usr/local/go/src/net/udpsock.go:149 +0x2c fp=0x400043def0 sp=0x400043de90 pc=0x24236c
-net.(*UDPConn).ReadFrom(0x4000066a28, {0x4000686000, 0x5c1, 0x5c1})
-	/usr/local/go/src/net/udpsock.go:158 +0x4c fp=0x400043df30 sp=0x400043def0 pc=0x2424ec
-github.com/bluenviron/gortsplib/v4.(*serverUDPListener).run(0x4000350680)
-	/go/pkg/mod/github.com/bluenviron/gortsplib/v4@v4.16.0/server_udp_listener.go:136 +0xc4 fp=0x400043dfb0 sp=0x400043df30 pc=0x418bd4
+internal/poll.(*FD).ReadFromInet6(0x400035a700, {0x40007c0600, 0x5c1, 0x5c1}, 0x400045cdd8)
+	/usr/local/go/src/internal/poll/fd_unix.go:275 +0x1e8 fp=0x400045cd50 sp=0x400045ccc0 pc=0xd06d8
+net.(*netFD).readFromInet6(0x400035a700, {0x40007c0600?, 0x201d860?, 0x7fff90808138?}, 0x400045ce28?)
+	/usr/local/go/src/net/fd_posix.go:72 +0x28 fp=0x400045cda0 sp=0x400045cd50 pc=0x2265c8
+net.(*UDPConn).readFrom(0x30?, {0x40007c0600?, 0x7fff90808a01?, 0x400045cf68?}, 0x40000a76b0)
+	/usr/local/go/src/net/udpsock_posix.go:59 +0x68 fp=0x400045ce90 sp=0x400045cda0 pc=0x243b38
+net.(*UDPConn).readFromUDP(0x4000066a28, {0x40007c0600?, 0x5c1?, 0x418e60?}, 0x400035a6d0?)
+	/usr/local/go/src/net/udpsock.go:149 +0x2c fp=0x400045cef0 sp=0x400045ce90 pc=0x24236c
+net.(*UDPConn).ReadFrom(0x4000066a28, {0x40007c0600, 0x5c1, 0x5c1})
+	/usr/local/go/src/net/udpsock.go:158 +0x4c fp=0x400045cf30 sp=0x400045cef0 pc=0x2424ec
+github.com/bluenviron/gortsplib/v4.(*serverUDPListener).run(0x400035a680)
+	/go/pkg/mod/github.com/bluenviron/gortsplib/v4@v4.16.0/server_udp_listener.go:136 +0xc4 fp=0x400045cfb0 sp=0x400045cf30 pc=0x418bd4
 github.com/bluenviron/gortsplib/v4.(*serverUDPListener).initialize.gowrap1()
-	/go/pkg/mod/github.com/bluenviron/gortsplib/v4@v4.16.0/server_udp_listener.go:106 +0x28 fp=0x400043dfd0 sp=0x400043dfb0 pc=0x418a78
+	/go/pkg/mod/github.com/bluenviron/gortsplib/v4@v4.16.0/server_udp_listener.go:106 +0x28 fp=0x400045cfd0 sp=0x400045cfb0 pc=0x418a78
 runtime.goexit({})
-	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x400043dfd0 sp=0x400043dfd0 pc=0x8fdc4
+	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x400045cfd0 sp=0x400045cfd0 pc=0x8fdc4
 created by github.com/bluenviron/gortsplib/v4.(*serverUDPListener).initialize in goroutine 1
 	/go/pkg/mod/github.com/bluenviron/gortsplib/v4@v4.16.0/server_udp_listener.go:106 +0x1fc
 
-goroutine 12 gp=0x40003fe700 m=nil [IO wait, 3 minutes]:
+goroutine 12 gp=0x400020aa80 m=nil [IO wait, 3 minutes]:
 runtime.gopark(0x0?, 0x0?, 0x0?, 0x0?, 0x0?)
-	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x400010fc70 sp=0x400010fc50 pc=0x87d18
+	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x4000116c70 sp=0x4000116c50 pc=0x87d18
 runtime.netpollblock(0x7000000000?, 0x0?, 0x0?)
-	/usr/local/go/src/runtime/netpoll.go:575 +0x158 fp=0x400010fcb0 sp=0x400010fc70 pc=0x4b028
-internal/poll.runtime_pollWait(0x7fff613b6480, 0x72)
-	/usr/local/go/src/runtime/netpoll.go:351 +0xa0 fp=0x400010fce0 sp=0x400010fcb0 pc=0x86ed0
-internal/poll.(*pollDesc).wait(0x4000350780?, 0xd52d8?, 0x0)
-	/usr/local/go/src/internal/poll/fd_poll_runtime.go:84 +0x28 fp=0x400010fd10 sp=0x400010fce0 pc=0xce878
+	/usr/local/go/src/runtime/netpoll.go:575 +0x158 fp=0x4000116cb0 sp=0x4000116c70 pc=0x4b028
+internal/poll.runtime_pollWait(0x7fff49d7a480, 0x72)
+	/usr/local/go/src/runtime/netpoll.go:351 +0xa0 fp=0x4000116ce0 sp=0x4000116cb0 pc=0x86ed0
+internal/poll.(*pollDesc).wait(0x400035a780?, 0xd52d8?, 0x0)
+	/usr/local/go/src/internal/poll/fd_poll_runtime.go:84 +0x28 fp=0x4000116d10 sp=0x4000116ce0 pc=0xce878
 internal/poll.(*pollDesc).waitRead(...)
 	/usr/local/go/src/internal/poll/fd_poll_runtime.go:89
-internal/poll.(*FD).Accept(0x4000350780)
-	/usr/local/go/src/internal/poll/fd_unix.go:620 +0x24c fp=0x400010fdc0 sp=0x400010fd10 pc=0xd314c
-net.(*netFD).accept(0x4000350780)
-	/usr/local/go/src/net/fd_unix.go:172 +0x28 fp=0x400010fe80 sp=0x400010fdc0 pc=0x227d48
-net.(*TCPListener).accept(0x4000275040)
-	/usr/local/go/src/net/tcpsock_posix.go:159 +0x24 fp=0x400010fed0 sp=0x400010fe80 pc=0x241074
-net.(*TCPListener).Accept(0x4000275040)
-	/usr/local/go/src/net/tcpsock.go:380 +0x2c fp=0x400010ff10 sp=0x400010fed0 pc=0x24000c
-github.com/bluenviron/gortsplib/v4.(*serverTCPListener).run(0x400026f6f8)
-	/go/pkg/mod/github.com/bluenviron/gortsplib/v4@v4.16.0/server_tcp_listener.go:34 +0x88 fp=0x400010ffb0 sp=0x400010ff10 pc=0x418238
+internal/poll.(*FD).Accept(0x400035a780)
+	/usr/local/go/src/internal/poll/fd_unix.go:620 +0x24c fp=0x4000116dc0 sp=0x4000116d10 pc=0xd314c
+net.(*netFD).accept(0x400035a780)
+	/usr/local/go/src/net/fd_unix.go:172 +0x28 fp=0x4000116e80 sp=0x4000116dc0 pc=0x227d48
+net.(*TCPListener).accept(0x400027f040)
+	/usr/local/go/src/net/tcpsock_posix.go:159 +0x24 fp=0x4000116ed0 sp=0x4000116e80 pc=0x241074
+net.(*TCPListener).Accept(0x400027f040)
+	/usr/local/go/src/net/tcpsock.go:380 +0x2c fp=0x4000116f10 sp=0x4000116ed0 pc=0x24000c
+github.com/bluenviron/gortsplib/v4.(*serverTCPListener).run(0x40002796f8)
+	/go/pkg/mod/github.com/bluenviron/gortsplib/v4@v4.16.0/server_tcp_listener.go:34 +0x88 fp=0x4000116fb0 sp=0x4000116f10 pc=0x418238
 github.com/bluenviron/gortsplib/v4.(*serverTCPListener).initialize.gowrap1()
-	/go/pkg/mod/github.com/bluenviron/gortsplib/v4@v4.16.0/server_tcp_listener.go:21 +0x28 fp=0x400010ffd0 sp=0x400010ffb0 pc=0x418128
+	/go/pkg/mod/github.com/bluenviron/gortsplib/v4@v4.16.0/server_tcp_listener.go:21 +0x28 fp=0x4000116fd0 sp=0x4000116fb0 pc=0x418128
 runtime.goexit({})
-	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x400010ffd0 sp=0x400010ffd0 pc=0x8fdc4
+	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x4000116fd0 sp=0x4000116fd0 pc=0x8fdc4
 created by github.com/bluenviron/gortsplib/v4.(*serverTCPListener).initialize in goroutine 1
 	/go/pkg/mod/github.com/bluenviron/gortsplib/v4@v4.16.0/server_tcp_listener.go:21 +0xcc
 
-goroutine 13 gp=0x40003fe8c0 m=nil [select, 3 minutes]:
-runtime.gopark(0x400040ede0?, 0x7?, 0xc0?, 0x45?, 0x400040ed22?)
-	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x400040eb90 sp=0x400040eb70 pc=0x87d18
-runtime.selectgo(0x400040ede0, 0x400040ed14, 0x40003aa920?, 0x0, 0x0?, 0x1)
-	/usr/local/go/src/runtime/select.go:351 +0x6c4 fp=0x400040ecc0 sp=0x400040eb90 pc=0x65cc4
-github.com/bluenviron/gortsplib/v4.(*Server).runInner(0x40003444e0)
-	/go/pkg/mod/github.com/bluenviron/gortsplib/v4@v4.16.0/server.go:365 +0x13c fp=0x400040ef60 sp=0x400040ecc0 pc=0x403e8c
-github.com/bluenviron/gortsplib/v4.(*Server).run(0x40003444e0)
-	/go/pkg/mod/github.com/bluenviron/gortsplib/v4@v4.16.0/server.go:348 +0x50 fp=0x400040efb0 sp=0x400040ef60 pc=0x403bf0
+goroutine 13 gp=0x400020ac40 m=nil [select, 3 minutes]:
+runtime.gopark(0x4000500de0?, 0x7?, 0xc0?, 0x85?, 0x4000500d22?)
+	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x4000500b90 sp=0x4000500b70 pc=0x87d18
+runtime.selectgo(0x4000500de0, 0x4000500d14, 0x40003b45c0?, 0x0, 0x0?, 0x1)
+	/usr/local/go/src/runtime/select.go:351 +0x6c4 fp=0x4000500cc0 sp=0x4000500b90 pc=0x65cc4
+github.com/bluenviron/gortsplib/v4.(*Server).runInner(0x400034e4e0)
+	/go/pkg/mod/github.com/bluenviron/gortsplib/v4@v4.16.0/server.go:365 +0x13c fp=0x4000500f60 sp=0x4000500cc0 pc=0x403e8c
+github.com/bluenviron/gortsplib/v4.(*Server).run(0x400034e4e0)
+	/go/pkg/mod/github.com/bluenviron/gortsplib/v4@v4.16.0/server.go:348 +0x50 fp=0x4000500fb0 sp=0x4000500f60 pc=0x403bf0
 github.com/bluenviron/gortsplib/v4.(*Server).Start.gowrap1()
-	/go/pkg/mod/github.com/bluenviron/gortsplib/v4@v4.16.0/server.go:327 +0x28 fp=0x400040efd0 sp=0x400040efb0 pc=0x403aa8
+	/go/pkg/mod/github.com/bluenviron/gortsplib/v4@v4.16.0/server.go:327 +0x28 fp=0x4000500fd0 sp=0x4000500fb0 pc=0x403aa8
 runtime.goexit({})
-	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x400040efd0 sp=0x400040efd0 pc=0x8fdc4
+	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x4000500fd0 sp=0x4000500fd0 pc=0x8fdc4
 created by github.com/bluenviron/gortsplib/v4.(*Server).Start in goroutine 1
 	/go/pkg/mod/github.com/bluenviron/gortsplib/v4@v4.16.0/server.go:327 +0xae8
 
-goroutine 14 gp=0x40003fea80 m=nil [select, 3 minutes]:
-runtime.gopark(0x4000060780?, 0x2?, 0x78?, 0x4a?, 0x4000060744?)
+goroutine 14 gp=0x400020ae00 m=nil [select, 3 minutes]:
+runtime.gopark(0x4000060780?, 0x2?, 0xc0?, 0x85?, 0x4000060744?)
 	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x40000605c0 sp=0x40000605a0 pc=0x87d18
 runtime.selectgo(0x4000060780, 0x4000060740, 0x0?, 0x0, 0x0?, 0x1)
 	/usr/local/go/src/runtime/select.go:351 +0x6c4 fp=0x40000606f0 sp=0x40000605c0 pc=0x65cc4
-github.com/bluenviron/mediamtx/internal/servers/rtsp.(*Server).run(0x4000344340)
+github.com/bluenviron/mediamtx/internal/servers/rtsp.(*Server).run(0x400034e340)
 	/s/internal/servers/rtsp/server.go:210 +0x104 fp=0x40000607b0 sp=0x40000606f0 pc=0x71d2e4
 github.com/bluenviron/mediamtx/internal/servers/rtsp.(*Server).Initialize.gowrap1()
 	/s/internal/servers/rtsp/server.go:157 +0x28 fp=0x40000607d0 sp=0x40000607b0 pc=0x71cdd8
@@ -290,48 +278,48 @@ runtime.goexit({})
 created by github.com/bluenviron/mediamtx/internal/servers/rtsp.(*Server).Initialize in goroutine 1
 	/s/internal/servers/rtsp/server.go:157 +0x35c
 
-goroutine 17 gp=0x4000402380 m=nil [sync.WaitGroup.Wait, 3 minutes]:
-runtime.gopark(0x2002600?, 0x0?, 0xe0?, 0xa1?, 0x0?)
-	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x4000064ee0 sp=0x4000064ec0 pc=0x87d18
+goroutine 17 gp=0x4000092380 m=nil [sync.WaitGroup.Wait, 3 minutes]:
+runtime.gopark(0x1ffda80?, 0x0?, 0xc0?, 0xe3?, 0x0?)
+	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x400005fee0 sp=0x400005fec0 pc=0x87d18
 runtime.goparkunlock(...)
 	/usr/local/go/src/runtime/proc.go:441
-runtime.semacquire1(0x40003445e0, 0x0, 0x1, 0x0, 0x18)
-	/usr/local/go/src/runtime/sema.go:188 +0x204 fp=0x4000064f30 sp=0x4000064ee0 pc=0x66b34
+runtime.semacquire1(0x400034e5e0, 0x0, 0x1, 0x0, 0x18)
+	/usr/local/go/src/runtime/sema.go:188 +0x204 fp=0x400005ff30 sp=0x400005fee0 pc=0x66b34
 sync.runtime_SemacquireWaitGroup(0x0?)
-	/usr/local/go/src/runtime/sema.go:110 +0x2c fp=0x4000064f70 sp=0x4000064f30 pc=0x8972c
-sync.(*WaitGroup).Wait(0x40003445d8)
-	/usr/local/go/src/sync/waitgroup.go:118 +0x70 fp=0x4000064f90 sp=0x4000064f70 pc=0x9b400
+	/usr/local/go/src/runtime/sema.go:110 +0x2c fp=0x400005ff70 sp=0x400005ff30 pc=0x8972c
+sync.(*WaitGroup).Wait(0x400034e5d8)
+	/usr/local/go/src/sync/waitgroup.go:118 +0x70 fp=0x400005ff90 sp=0x400005ff70 pc=0x9b400
 github.com/bluenviron/gortsplib/v4.(*Server).Wait(...)
 	/go/pkg/mod/github.com/bluenviron/gortsplib/v4@v4.16.0/server.go:341
 github.com/bluenviron/mediamtx/internal/servers/rtsp.(*Server).run.func1()
-	/s/internal/servers/rtsp/server.go:206 +0x38 fp=0x4000064fd0 sp=0x4000064f90 pc=0x71d3d8
+	/s/internal/servers/rtsp/server.go:206 +0x38 fp=0x400005ffd0 sp=0x400005ff90 pc=0x71d3d8
 runtime.goexit({})
-	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x4000064fd0 sp=0x4000064fd0 pc=0x8fdc4
+	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x400005ffd0 sp=0x400005ffd0 pc=0x8fdc4
 created by github.com/bluenviron/mediamtx/internal/servers/rtsp.(*Server).run in goroutine 14
 	/s/internal/servers/rtsp/server.go:205 +0xb4
 
-goroutine 15 gp=0x40003fec40 m=nil [IO wait, 3 minutes]:
+goroutine 15 gp=0x400020afc0 m=nil [IO wait, 3 minutes]:
 runtime.gopark(0x0?, 0x0?, 0x0?, 0x0?, 0x0?)
 	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x4000060c40 sp=0x4000060c20 pc=0x87d18
 runtime.netpollblock(0x7000000000?, 0x0?, 0x0?)
 	/usr/local/go/src/runtime/netpoll.go:575 +0x158 fp=0x4000060c80 sp=0x4000060c40 pc=0x4b028
-internal/poll.runtime_pollWait(0x7fff613b6368, 0x72)
+internal/poll.runtime_pollWait(0x7fff49d7a368, 0x72)
 	/usr/local/go/src/runtime/netpoll.go:351 +0xa0 fp=0x4000060cb0 sp=0x4000060c80 pc=0x86ed0
-internal/poll.(*pollDesc).wait(0x4000350800?, 0x0?, 0x0)
+internal/poll.(*pollDesc).wait(0x400035a800?, 0x0?, 0x0)
 	/usr/local/go/src/internal/poll/fd_poll_runtime.go:84 +0x28 fp=0x4000060ce0 sp=0x4000060cb0 pc=0xce878
 internal/poll.(*pollDesc).waitRead(...)
 	/usr/local/go/src/internal/poll/fd_poll_runtime.go:89
-internal/poll.(*FD).Accept(0x4000350800)
+internal/poll.(*FD).Accept(0x400035a800)
 	/usr/local/go/src/internal/poll/fd_unix.go:620 +0x24c fp=0x4000060d90 sp=0x4000060ce0 pc=0xd314c
-net.(*netFD).accept(0x4000350800)
+net.(*netFD).accept(0x400035a800)
 	/usr/local/go/src/net/fd_unix.go:172 +0x28 fp=0x4000060e50 sp=0x4000060d90 pc=0x227d48
-net.(*TCPListener).accept(0x40002750c0)
+net.(*TCPListener).accept(0x400027f0c0)
 	/usr/local/go/src/net/tcpsock_posix.go:159 +0x24 fp=0x4000060ea0 sp=0x4000060e50 pc=0x241074
-net.(*TCPListener).Accept(0x40002750c0)
+net.(*TCPListener).Accept(0x400027f0c0)
 	/usr/local/go/src/net/tcpsock.go:380 +0x2c fp=0x4000060ee0 sp=0x4000060ea0 pc=0x24000c
-github.com/bluenviron/mediamtx/internal/servers/rtmp.(*listener).runInner(0x40003f2500)
+github.com/bluenviron/mediamtx/internal/servers/rtmp.(*listener).runInner(0x40003fc500)
 	/s/internal/servers/rtmp/listener.go:29 +0x4c fp=0x4000060f10 sp=0x4000060ee0 pc=0x71975c
-github.com/bluenviron/mediamtx/internal/servers/rtmp.(*listener).run(0x40003f2500)
+github.com/bluenviron/mediamtx/internal/servers/rtmp.(*listener).run(0x40003fc500)
 	/s/internal/servers/rtmp/listener.go:22 +0x50 fp=0x4000060fb0 sp=0x4000060f10 pc=0x719610
 github.com/bluenviron/mediamtx/internal/servers/rtmp.(*listener).initialize.gowrap1()
 	/s/internal/servers/rtmp/listener.go:16 +0x28 fp=0x4000060fd0 sp=0x4000060fb0 pc=0x719588
@@ -340,1061 +328,1103 @@ runtime.goexit({})
 created by github.com/bluenviron/mediamtx/internal/servers/rtmp.(*listener).initialize in goroutine 1
 	/s/internal/servers/rtmp/listener.go:16 +0x68
 
-goroutine 16 gp=0x40003fee00 m=nil [select, 3 minutes]:
-runtime.gopark(0x4000413e00?, 0x7?, 0x7?, 0x0?, 0x4000413d52?)
-	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x4000413ba0 sp=0x4000413b80 pc=0x87d18
-runtime.selectgo(0x4000413e00, 0x4000413d44, 0x0?, 0x0, 0x0?, 0x1)
-	/usr/local/go/src/runtime/select.go:351 +0x6c4 fp=0x4000413cd0 sp=0x4000413ba0 pc=0x65cc4
-github.com/bluenviron/mediamtx/internal/servers/rtmp.(*Server).run(0x40003d9540)
-	/s/internal/servers/rtmp/server.go:201 +0x16c fp=0x4000413fb0 sp=0x4000413cd0 pc=0x71a48c
+goroutine 16 gp=0x400020b180 m=nil [select, 3 minutes]:
+runtime.gopark(0x4000114e00?, 0x7?, 0x7?, 0x0?, 0x4000114d52?)
+	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x4000114ba0 sp=0x4000114b80 pc=0x87d18
+runtime.selectgo(0x4000114e00, 0x4000114d44, 0x0?, 0x0, 0x0?, 0x1)
+	/usr/local/go/src/runtime/select.go:351 +0x6c4 fp=0x4000114cd0 sp=0x4000114ba0 pc=0x65cc4
+github.com/bluenviron/mediamtx/internal/servers/rtmp.(*Server).run(0x40003e3540)
+	/s/internal/servers/rtmp/server.go:201 +0x16c fp=0x4000114fb0 sp=0x4000114cd0 pc=0x71a48c
 github.com/bluenviron/mediamtx/internal/servers/rtmp.(*Server).Initialize.gowrap1()
-	/s/internal/servers/rtmp/server.go:152 +0x28 fp=0x4000413fd0 sp=0x4000413fb0 pc=0x719f18
+	/s/internal/servers/rtmp/server.go:152 +0x28 fp=0x4000114fd0 sp=0x4000114fb0 pc=0x719f18
 runtime.goexit({})
-	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x4000413fd0 sp=0x4000413fd0 pc=0x8fdc4
+	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x4000114fd0 sp=0x4000114fd0 pc=0x8fdc4
 created by github.com/bluenviron/mediamtx/internal/servers/rtmp.(*Server).Initialize in goroutine 1
 	/s/internal/servers/rtmp/server.go:152 +0x3b8
 
-goroutine 33 gp=0x40003fefc0 m=nil [IO wait, 3 minutes]:
+goroutine 33 gp=0x400020b340 m=nil [IO wait, 3 minutes]:
 runtime.gopark(0x0?, 0x0?, 0x0?, 0x0?, 0x0?)
-	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x4000414bb0 sp=0x4000414b90 pc=0x87d18
+	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x4000501bb0 sp=0x4000501b90 pc=0x87d18
 runtime.netpollblock(0x7000000000?, 0x0?, 0x0?)
-	/usr/local/go/src/runtime/netpoll.go:575 +0x158 fp=0x4000414bf0 sp=0x4000414bb0 pc=0x4b028
-internal/poll.runtime_pollWait(0x7fff613b6250, 0x72)
-	/usr/local/go/src/runtime/netpoll.go:351 +0xa0 fp=0x4000414c20 sp=0x4000414bf0 pc=0x86ed0
-internal/poll.(*pollDesc).wait(0x4000350880?, 0x2edf0?, 0x0)
-	/usr/local/go/src/internal/poll/fd_poll_runtime.go:84 +0x28 fp=0x4000414c50 sp=0x4000414c20 pc=0xce878
+	/usr/local/go/src/runtime/netpoll.go:575 +0x158 fp=0x4000501bf0 sp=0x4000501bb0 pc=0x4b028
+internal/poll.runtime_pollWait(0x7fff49d7a250, 0x72)
+	/usr/local/go/src/runtime/netpoll.go:351 +0xa0 fp=0x4000501c20 sp=0x4000501bf0 pc=0x86ed0
+internal/poll.(*pollDesc).wait(0x400035a880?, 0x2edf0?, 0x0)
+	/usr/local/go/src/internal/poll/fd_poll_runtime.go:84 +0x28 fp=0x4000501c50 sp=0x4000501c20 pc=0xce878
 internal/poll.(*pollDesc).waitRead(...)
 	/usr/local/go/src/internal/poll/fd_poll_runtime.go:89
-internal/poll.(*FD).Accept(0x4000350880)
-	/usr/local/go/src/internal/poll/fd_unix.go:620 +0x24c fp=0x4000414d00 sp=0x4000414c50 pc=0xd314c
-net.(*netFD).accept(0x4000350880)
-	/usr/local/go/src/net/fd_unix.go:172 +0x28 fp=0x4000414dc0 sp=0x4000414d00 pc=0x227d48
-net.(*TCPListener).accept(0x4000275100)
-	/usr/local/go/src/net/tcpsock_posix.go:159 +0x24 fp=0x4000414e10 sp=0x4000414dc0 pc=0x241074
-net.(*TCPListener).Accept(0x4000275100)
-	/usr/local/go/src/net/tcpsock.go:380 +0x2c fp=0x4000414e50 sp=0x4000414e10 pc=0x24000c
+internal/poll.(*FD).Accept(0x400035a880)
+	/usr/local/go/src/internal/poll/fd_unix.go:620 +0x24c fp=0x4000501d00 sp=0x4000501c50 pc=0xd314c
+net.(*netFD).accept(0x400035a880)
+	/usr/local/go/src/net/fd_unix.go:172 +0x28 fp=0x4000501dc0 sp=0x4000501d00 pc=0x227d48
+net.(*TCPListener).accept(0x400027f100)
+	/usr/local/go/src/net/tcpsock_posix.go:159 +0x24 fp=0x4000501e10 sp=0x4000501dc0 pc=0x241074
+net.(*TCPListener).Accept(0x400027f100)
+	/usr/local/go/src/net/tcpsock.go:380 +0x2c fp=0x4000501e50 sp=0x4000501e10 pc=0x24000c
 net/http.(*onceCloseListener).Accept(0x182b050?)
-	<autogenerated>:1 +0x30 fp=0x4000414e70 sp=0x4000414e50 pc=0x380ca0
-net/http.(*Server).Serve(0x400021e800, {0x1828d00, 0x4000275100})
-	/usr/local/go/src/net/http/server.go:3424 +0x290 fp=0x4000414fa0 sp=0x4000414e70 pc=0x35a2c0
+	<autogenerated>:1 +0x30 fp=0x4000501e70 sp=0x4000501e50 pc=0x380ca0
+net/http.(*Server).Serve(0x4000228800, {0x1828d00, 0x400027f100})
+	/usr/local/go/src/net/http/server.go:3424 +0x290 fp=0x4000501fa0 sp=0x4000501e70 pc=0x35a2c0
 github.com/bluenviron/mediamtx/internal/protocols/httpp.(*Server).Initialize.gowrap2()
-	/s/internal/protocols/httpp/server.go:91 +0x30 fp=0x4000414fd0 sp=0x4000414fa0 pc=0x6eb9d0
+	/s/internal/protocols/httpp/server.go:91 +0x30 fp=0x4000501fd0 sp=0x4000501fa0 pc=0x6eb9d0
 runtime.goexit({})
-	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x4000414fd0 sp=0x4000414fd0 pc=0x8fdc4
+	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x4000501fd0 sp=0x4000501fd0 pc=0x8fdc4
 created by github.com/bluenviron/mediamtx/internal/protocols/httpp.(*Server).Initialize in goroutine 1
 	/s/internal/protocols/httpp/server.go:91 +0x4cc
 
-goroutine 34 gp=0x40003ff180 m=nil [select, 3 minutes]:
-runtime.gopark(0x400040fd78?, 0x7?, 0x30?, 0x4f?, 0x400040fc92?)
-	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x400040fb00 sp=0x400040fae0 pc=0x87d18
-runtime.selectgo(0x400040fd78, 0x400040fc84, 0x0?, 0x0, 0x0?, 0x1)
-	/usr/local/go/src/runtime/select.go:351 +0x6c4 fp=0x400040fc30 sp=0x400040fb00 pc=0x65cc4
-github.com/bluenviron/mediamtx/internal/servers/hls.(*Server).run(0x40001ba580)
-	/s/internal/servers/hls/server.go:185 +0x1d0 fp=0x400040ffb0 sp=0x400040fc30 pc=0x6f55d0
+goroutine 34 gp=0x400020b500 m=nil [select, 3 minutes]:
+runtime.gopark(0x4000502d78?, 0x7?, 0xc0?, 0x85?, 0x4000502c92?)
+	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x4000502b00 sp=0x4000502ae0 pc=0x87d18
+runtime.selectgo(0x4000502d78, 0x4000502c84, 0x0?, 0x0, 0x0?, 0x1)
+	/usr/local/go/src/runtime/select.go:351 +0x6c4 fp=0x4000502c30 sp=0x4000502b00 pc=0x65cc4
+github.com/bluenviron/mediamtx/internal/servers/hls.(*Server).run(0x40001c2580)
+	/s/internal/servers/hls/server.go:185 +0x1d0 fp=0x4000502fb0 sp=0x4000502c30 pc=0x6f55d0
 github.com/bluenviron/mediamtx/internal/servers/hls.(*Server).Initialize.gowrap1()
-	/s/internal/servers/hls/server.go:141 +0x28 fp=0x400040ffd0 sp=0x400040ffb0 pc=0x6f5218
+	/s/internal/servers/hls/server.go:141 +0x28 fp=0x4000502fd0 sp=0x4000502fb0 pc=0x6f5218
 runtime.goexit({})
-	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x400040ffd0 sp=0x400040ffd0 pc=0x8fdc4
+	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x4000502fd0 sp=0x4000502fd0 pc=0x8fdc4
 created by github.com/bluenviron/mediamtx/internal/servers/hls.(*Server).Initialize in goroutine 1
 	/s/internal/servers/hls/server.go:141 +0x3f0
 
-goroutine 35 gp=0x40003ff340 m=nil [IO wait, 3 minutes]:
+goroutine 35 gp=0x400020b6c0 m=nil [IO wait, 2 minutes]:
 runtime.gopark(0x0?, 0x0?, 0x0?, 0x0?, 0x0?)
-	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x4000410bb0 sp=0x4000410b90 pc=0x87d18
+	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x4000115bb0 sp=0x4000115b90 pc=0x87d18
 runtime.netpollblock(0x7000000000?, 0x6?, 0x0?)
-	/usr/local/go/src/runtime/netpoll.go:575 +0x158 fp=0x4000410bf0 sp=0x4000410bb0 pc=0x4b028
-internal/poll.runtime_pollWait(0x7fff613b6138, 0x72)
-	/usr/local/go/src/runtime/netpoll.go:351 +0xa0 fp=0x4000410c20 sp=0x4000410bf0 pc=0x86ed0
-internal/poll.(*pollDesc).wait(0x4000350900?, 0x2abcc?, 0x0)
-	/usr/local/go/src/internal/poll/fd_poll_runtime.go:84 +0x28 fp=0x4000410c50 sp=0x4000410c20 pc=0xce878
+	/usr/local/go/src/runtime/netpoll.go:575 +0x158 fp=0x4000115bf0 sp=0x4000115bb0 pc=0x4b028
+internal/poll.runtime_pollWait(0x7fff49d7a138, 0x72)
+	/usr/local/go/src/runtime/netpoll.go:351 +0xa0 fp=0x4000115c20 sp=0x4000115bf0 pc=0x86ed0
+internal/poll.(*pollDesc).wait(0x400035a900?, 0xd52d8?, 0x0)
+	/usr/local/go/src/internal/poll/fd_poll_runtime.go:84 +0x28 fp=0x4000115c50 sp=0x4000115c20 pc=0xce878
 internal/poll.(*pollDesc).waitRead(...)
 	/usr/local/go/src/internal/poll/fd_poll_runtime.go:89
-internal/poll.(*FD).Accept(0x4000350900)
-	/usr/local/go/src/internal/poll/fd_unix.go:620 +0x24c fp=0x4000410d00 sp=0x4000410c50 pc=0xd314c
-net.(*netFD).accept(0x4000350900)
-	/usr/local/go/src/net/fd_unix.go:172 +0x28 fp=0x4000410dc0 sp=0x4000410d00 pc=0x227d48
-net.(*TCPListener).accept(0x4000275140)
-	/usr/local/go/src/net/tcpsock_posix.go:159 +0x24 fp=0x4000410e10 sp=0x4000410dc0 pc=0x241074
-net.(*TCPListener).Accept(0x4000275140)
-	/usr/local/go/src/net/tcpsock.go:380 +0x2c fp=0x4000410e50 sp=0x4000410e10 pc=0x24000c
-net/http.(*onceCloseListener).Accept(0x40004390e0?)
-	<autogenerated>:1 +0x30 fp=0x4000410e70 sp=0x4000410e50 pc=0x380ca0
-net/http.(*Server).Serve(0x400021e900, {0x1828d00, 0x4000275140})
-	/usr/local/go/src/net/http/server.go:3424 +0x290 fp=0x4000410fa0 sp=0x4000410e70 pc=0x35a2c0
+internal/poll.(*FD).Accept(0x400035a900)
+	/usr/local/go/src/internal/poll/fd_unix.go:620 +0x24c fp=0x4000115d00 sp=0x4000115c50 pc=0xd314c
+net.(*netFD).accept(0x400035a900)
+	/usr/local/go/src/net/fd_unix.go:172 +0x28 fp=0x4000115dc0 sp=0x4000115d00 pc=0x227d48
+net.(*TCPListener).accept(0x400027f140)
+	/usr/local/go/src/net/tcpsock_posix.go:159 +0x24 fp=0x4000115e10 sp=0x4000115dc0 pc=0x241074
+net.(*TCPListener).Accept(0x400027f140)
+	/usr/local/go/src/net/tcpsock.go:380 +0x2c fp=0x4000115e50 sp=0x4000115e10 pc=0x24000c
+net/http.(*onceCloseListener).Accept(0x400059af30?)
+	<autogenerated>:1 +0x30 fp=0x4000115e70 sp=0x4000115e50 pc=0x380ca0
+net/http.(*Server).Serve(0x4000228900, {0x1828d00, 0x400027f140})
+	/usr/local/go/src/net/http/server.go:3424 +0x290 fp=0x4000115fa0 sp=0x4000115e70 pc=0x35a2c0
 github.com/bluenviron/mediamtx/internal/protocols/httpp.(*Server).Initialize.gowrap2()
-	/s/internal/protocols/httpp/server.go:91 +0x30 fp=0x4000410fd0 sp=0x4000410fa0 pc=0x6eb9d0
+	/s/internal/protocols/httpp/server.go:91 +0x30 fp=0x4000115fd0 sp=0x4000115fa0 pc=0x6eb9d0
 runtime.goexit({})
-	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x4000410fd0 sp=0x4000410fd0 pc=0x8fdc4
+	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x4000115fd0 sp=0x4000115fd0 pc=0x8fdc4
 created by github.com/bluenviron/mediamtx/internal/protocols/httpp.(*Server).Initialize in goroutine 1
 	/s/internal/protocols/httpp/server.go:91 +0x4cc
 
-goroutine 36 gp=0x40003ff500 m=nil [IO wait]:
-runtime.gopark(0x4000415ae8?, 0x67?, 0x58?, 0x5b?, 0x2af8c?)
-	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x4000415b00 sp=0x4000415ae0 pc=0x87d18
+goroutine 36 gp=0x400020b880 m=nil [IO wait]:
+runtime.gopark(0x40004aaae8?, 0x67?, 0x58?, 0xab?, 0x2af8c?)
+	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x40004aab00 sp=0x40004aaae0 pc=0x87d18
 runtime.netpollblock(0x0?, 0x0?, 0x0?)
-	/usr/local/go/src/runtime/netpoll.go:575 +0x158 fp=0x4000415b40 sp=0x4000415b00 pc=0x4b028
-internal/poll.runtime_pollWait(0x7fff613b6020, 0x72)
-	/usr/local/go/src/runtime/netpoll.go:351 +0xa0 fp=0x4000415b70 sp=0x4000415b40 pc=0x86ed0
-internal/poll.(*pollDesc).wait(0x4000350980?, 0x400043a000?, 0x0)
-	/usr/local/go/src/internal/poll/fd_poll_runtime.go:84 +0x28 fp=0x4000415ba0 sp=0x4000415b70 pc=0xce878
+	/usr/local/go/src/runtime/netpoll.go:575 +0x158 fp=0x40004aab40 sp=0x40004aab00 pc=0x4b028
+internal/poll.runtime_pollWait(0x7fff49d7a020, 0x72)
+	/usr/local/go/src/runtime/netpoll.go:351 +0xa0 fp=0x40004aab70 sp=0x40004aab40 pc=0x86ed0
+internal/poll.(*pollDesc).wait(0x400035a980?, 0x40004a4000?, 0x0)
+	/usr/local/go/src/internal/poll/fd_poll_runtime.go:84 +0x28 fp=0x40004aaba0 sp=0x40004aab70 pc=0xce878
 internal/poll.(*pollDesc).waitRead(...)
 	/usr/local/go/src/internal/poll/fd_poll_runtime.go:89
-internal/poll.(*FD).ReadFromInet6(0x4000350980, {0x400043a000, 0x2000, 0x2000}, 0x4000415cb8)
-	/usr/local/go/src/internal/poll/fd_unix.go:275 +0x1e8 fp=0x4000415c30 sp=0x4000415ba0 pc=0xd06d8
-net.(*netFD).readFromInet6(0x4000350980, {0x400043a000?, 0x65?, 0x768ec2?}, 0x2000000500415ce8?)
-	/usr/local/go/src/net/fd_posix.go:72 +0x28 fp=0x4000415c80 sp=0x4000415c30 pc=0x2265c8
-net.(*UDPConn).readFrom(0x30?, {0x400043a000?, 0x40000c6b08?, 0x0?}, 0x400035e180)
-	/usr/local/go/src/net/udpsock_posix.go:59 +0x68 fp=0x4000415d70 sp=0x4000415c80 pc=0x243b38
-net.(*UDPConn).readFromUDP(0x4000066a68, {0x400043a000?, 0x7d09a8c0ffff0000?, 0x0?}, 0x40007ec000?)
-	/usr/local/go/src/net/udpsock.go:149 +0x2c fp=0x4000415dd0 sp=0x4000415d70 pc=0x24236c
-net.(*UDPConn).ReadFrom(0x4000066a68, {0x400043a000, 0x2000, 0x2000})
-	/usr/local/go/src/net/udpsock.go:158 +0x4c fp=0x4000415e10 sp=0x4000415dd0 pc=0x2424ec
-github.com/pion/ice/v4.(*UDPMuxDefault).connWorker(0x400014c370)
-	/go/pkg/mod/github.com/aler9/ice/v4@v4.0.0-20250301104324-b2df7db9f75d/udp_mux.go:280 +0xa0 fp=0x4000415fb0 sp=0x4000415e10 pc=0x8123b0
+internal/poll.(*FD).ReadFromInet6(0x400035a980, {0x40004a4000, 0x2000, 0x2000}, 0x40004aacb8)
+	/usr/local/go/src/internal/poll/fd_unix.go:275 +0x1e8 fp=0x40004aac30 sp=0x40004aaba0 pc=0xd06d8
+net.(*netFD).readFromInet6(0x400035a980, {0x40004a4000?, 0x40004aacb8?, 0x1f6e4?}, 0x40004aacb8?)
+	/usr/local/go/src/net/fd_posix.go:72 +0x28 fp=0x40004aac80 sp=0x40004aac30 pc=0x2265c8
+net.(*UDPConn).readFrom(0x30?, {0x40004a4000?, 0x40004205b0?, 0x40004aadd8?}, 0x40008e9980)
+	/usr/local/go/src/net/udpsock_posix.go:59 +0x68 fp=0x40004aad70 sp=0x40004aac80 pc=0x243b38
+net.(*UDPConn).readFromUDP(0x4000066a68, {0x40004a4000?, 0x7d09a8c0ffff0000?, 0x0?}, 0x4000956000?)
+	/usr/local/go/src/net/udpsock.go:149 +0x2c fp=0x40004aadd0 sp=0x40004aad70 pc=0x24236c
+net.(*UDPConn).ReadFrom(0x4000066a68, {0x40004a4000, 0x2000, 0x2000})
+	/usr/local/go/src/net/udpsock.go:158 +0x4c fp=0x40004aae10 sp=0x40004aadd0 pc=0x2424ec
+github.com/pion/ice/v4.(*UDPMuxDefault).connWorker(0x4000154370)
+	/go/pkg/mod/github.com/aler9/ice/v4@v4.0.0-20250301104324-b2df7db9f75d/udp_mux.go:280 +0xa0 fp=0x40004aafb0 sp=0x40004aae10 pc=0x8123b0
 github.com/pion/ice/v4.NewUDPMuxDefault.gowrap1()
-	/go/pkg/mod/github.com/aler9/ice/v4@v4.0.0-20250301104324-b2df7db9f75d/udp_mux.go:126 +0x28 fp=0x4000415fd0 sp=0x4000415fb0 pc=0x811318
+	/go/pkg/mod/github.com/aler9/ice/v4@v4.0.0-20250301104324-b2df7db9f75d/udp_mux.go:126 +0x28 fp=0x40004aafd0 sp=0x40004aafb0 pc=0x811318
 runtime.goexit({})
-	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x4000415fd0 sp=0x4000415fd0 pc=0x8fdc4
+	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x40004aafd0 sp=0x40004aafd0 pc=0x8fdc4
 created by github.com/pion/ice/v4.NewUDPMuxDefault in goroutine 1
 	/go/pkg/mod/github.com/aler9/ice/v4@v4.0.0-20250301104324-b2df7db9f75d/udp_mux.go:126 +0x33c
 
-goroutine 37 gp=0x40003ff6c0 m=nil [select, 1 minutes]:
-runtime.gopark(0x40000a9cb0?, 0x8?, 0x8?, 0x9a?, 0x40000a9b88?)
-	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x40000a99d0 sp=0x40000a99b0 pc=0x87d18
-runtime.selectgo(0x40000a9cb0, 0x40000a9b78, 0x40000a9c28?, 0x0, 0x0?, 0x1)
-	/usr/local/go/src/runtime/select.go:351 +0x6c4 fp=0x40000a9b00 sp=0x40000a99d0 pc=0x65cc4
-github.com/bluenviron/mediamtx/internal/servers/webrtc.(*Server).run(0x40002ce5a0)
-	/s/internal/servers/webrtc/server.go:328 +0x1c0 fp=0x40000a9fb0 sp=0x40000a9b00 pc=0x87cb10
+goroutine 37 gp=0x400020ba40 m=nil [select, 2 minutes]:
+runtime.gopark(0x4000503cb0?, 0x8?, 0x8?, 0x3a?, 0x4000503b88?)
+	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x40005039d0 sp=0x40005039b0 pc=0x87d18
+runtime.selectgo(0x4000503cb0, 0x4000503b78, 0x4000503c28?, 0x0, 0x0?, 0x1)
+	/usr/local/go/src/runtime/select.go:351 +0x6c4 fp=0x4000503b00 sp=0x40005039d0 pc=0x65cc4
+github.com/bluenviron/mediamtx/internal/servers/webrtc.(*Server).run(0x40002d85a0)
+	/s/internal/servers/webrtc/server.go:328 +0x1c0 fp=0x4000503fb0 sp=0x4000503b00 pc=0x87cb10
 github.com/bluenviron/mediamtx/internal/servers/webrtc.(*Server).Initialize.gowrap1()
-	/s/internal/servers/webrtc/server.go:295 +0x28 fp=0x40000a9fd0 sp=0x40000a9fb0 pc=0x87c768
+	/s/internal/servers/webrtc/server.go:295 +0x28 fp=0x4000503fd0 sp=0x4000503fb0 pc=0x87c768
 runtime.goexit({})
-	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x40000a9fd0 sp=0x40000a9fd0 pc=0x8fdc4
+	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x4000503fd0 sp=0x4000503fd0 pc=0x8fdc4
 created by github.com/bluenviron/mediamtx/internal/servers/webrtc.(*Server).Initialize in goroutine 1
 	/s/internal/servers/webrtc/server.go:295 +0x6b8
 
-goroutine 38 gp=0x40003ff880 m=nil [select, 3 minutes]:
-runtime.gopark(0x4000496740?, 0x2?, 0xc0?, 0x45?, 0x400049670c?)
-	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x4000496590 sp=0x4000496570 pc=0x87d18
-runtime.selectgo(0x4000496740, 0x4000496708, 0x6?, 0x0, 0x2?, 0x1)
-	/usr/local/go/src/runtime/select.go:351 +0x6c4 fp=0x40004966c0 sp=0x4000496590 pc=0x65cc4
-github.com/datarhei/gosrt.(*listener).reader(0x40001c3908, {0x182b130, 0x4000340e10})
-	/go/pkg/mod/github.com/datarhei/gosrt@v0.9.0/listen.go:380 +0xe4 fp=0x40004967a0 sp=0x40004966c0 pc=0x745214
+goroutine 38 gp=0x400020bc00 m=nil [select, 3 minutes]:
+runtime.gopark(0x400041e740?, 0x2?, 0xc0?, 0x85?, 0x400041e70c?)
+	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x400041e590 sp=0x400041e570 pc=0x87d18
+runtime.selectgo(0x400041e740, 0x400041e708, 0x6?, 0x0, 0x2?, 0x1)
+	/usr/local/go/src/runtime/select.go:351 +0x6c4 fp=0x400041e6c0 sp=0x400041e590 pc=0x65cc4
+github.com/datarhei/gosrt.(*listener).reader(0x40001cb908, {0x182b130, 0x400034ae10})
+	/go/pkg/mod/github.com/datarhei/gosrt@v0.9.0/listen.go:380 +0xe4 fp=0x400041e7a0 sp=0x400041e6c0 pc=0x745214
 github.com/datarhei/gosrt.Listen.gowrap1()
-	/go/pkg/mod/github.com/datarhei/gosrt@v0.9.0/listen.go:213 +0x30 fp=0x40004967d0 sp=0x40004967a0 pc=0x7444e0
+	/go/pkg/mod/github.com/datarhei/gosrt@v0.9.0/listen.go:213 +0x30 fp=0x400041e7d0 sp=0x400041e7a0 pc=0x7444e0
 runtime.goexit({})
-	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x40004967d0 sp=0x40004967d0 pc=0x8fdc4
+	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x400041e7d0 sp=0x400041e7d0 pc=0x8fdc4
 created by github.com/datarhei/gosrt.Listen in goroutine 1
 	/go/pkg/mod/github.com/datarhei/gosrt@v0.9.0/listen.go:213 +0x600
 
-goroutine 39 gp=0x40003ffa40 m=nil [IO wait]:
-runtime.gopark(0x0?, 0x0?, 0x0?, 0x0?, 0x0?)
-	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x400010bc40 sp=0x400010bc20 pc=0x87d18
+goroutine 39 gp=0x400020bdc0 m=nil [IO wait]:
+runtime.gopark(0x4000090008?, 0x400050c180?, 0x88?, 0x5c?, 0x8a9e4?)
+	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x4000505c40 sp=0x4000505c20 pc=0x87d18
 runtime.netpollblock(0x0?, 0x0?, 0x0?)
-	/usr/local/go/src/runtime/netpoll.go:575 +0x158 fp=0x400010bc80 sp=0x400010bc40 pc=0x4b028
-internal/poll.runtime_pollWait(0x7fff613b5f08, 0x72)
-	/usr/local/go/src/runtime/netpoll.go:351 +0xa0 fp=0x400010bcb0 sp=0x400010bc80 pc=0x86ed0
-internal/poll.(*pollDesc).wait(0x4000350f00?, 0x40000b0c00?, 0x0)
-	/usr/local/go/src/internal/poll/fd_poll_runtime.go:84 +0x28 fp=0x400010bce0 sp=0x400010bcb0 pc=0xce878
+	/usr/local/go/src/runtime/netpoll.go:575 +0x158 fp=0x4000505c80 sp=0x4000505c40 pc=0x4b028
+internal/poll.runtime_pollWait(0x7fff49d79f08, 0x72)
+	/usr/local/go/src/runtime/netpoll.go:351 +0xa0 fp=0x4000505cb0 sp=0x4000505c80 pc=0x86ed0
+internal/poll.(*pollDesc).wait(0x400035af00?, 0x400051a000?, 0x0)
+	/usr/local/go/src/internal/poll/fd_poll_runtime.go:84 +0x28 fp=0x4000505ce0 sp=0x4000505cb0 pc=0xce878
 internal/poll.(*pollDesc).waitRead(...)
 	/usr/local/go/src/internal/poll/fd_poll_runtime.go:89
-internal/poll.(*FD).ReadFromInet6(0x4000350f00, {0x40000b0c00, 0x5dc, 0x5dc}, 0x400010bdf8)
-	/usr/local/go/src/internal/poll/fd_unix.go:275 +0x1e8 fp=0x400010bd70 sp=0x400010bce0 pc=0xd06d8
-net.(*netFD).readFromInet6(0x4000350f00, {0x40000b0c00?, 0x7fff613b5f50?, 0x39dd2908e52?}, 0x0?)
-	/usr/local/go/src/net/fd_posix.go:72 +0x28 fp=0x400010bdc0 sp=0x400010bd70 pc=0x2265c8
-net.(*UDPConn).readFrom(0x30?, {0x40000b0c00?, 0xc23fd3cf6d31c12a?, 0x367f910746?}, 0x400091cea0)
-	/usr/local/go/src/net/udpsock_posix.go:59 +0x68 fp=0x400010beb0 sp=0x400010bdc0 pc=0x243b38
-net.(*UDPConn).readFromUDP(0x4000066a80, {0x40000b0c00?, 0x72?, 0x74430c?}, 0x400010bf48?)
-	/usr/local/go/src/net/udpsock.go:149 +0x2c fp=0x400010bf10 sp=0x400010beb0 pc=0x24236c
-net.(*UDPConn).ReadFrom(0x4000066a80, {0x40000b0c00, 0x5dc, 0x5dc})
-	/usr/local/go/src/net/udpsock.go:158 +0x4c fp=0x400010bf50 sp=0x400010bf10 pc=0x2424ec
+internal/poll.(*FD).ReadFromInet6(0x400035af00, {0x400051a000, 0x5dc, 0x5dc}, 0x4000505df8)
+	/usr/local/go/src/internal/poll/fd_unix.go:275 +0x1e8 fp=0x4000505d70 sp=0x4000505ce0 pc=0xd06d8
+net.(*netFD).readFromInet6(0x400035af00, {0x400051a000?, 0x7fff49d79f50?, 0x860dc0f920f?}, 0x0?)
+	/usr/local/go/src/net/fd_posix.go:72 +0x28 fp=0x4000505dc0 sp=0x4000505d70 pc=0x2265c8
+net.(*UDPConn).readFrom(0x30?, {0x400051a000?, 0xc23fd8ec5cc5438e?, 0x2a9f616499?}, 0x40008e9770)
+	/usr/local/go/src/net/udpsock_posix.go:59 +0x68 fp=0x4000505eb0 sp=0x4000505dc0 pc=0x243b38
+net.(*UDPConn).readFromUDP(0x4000066a80, {0x400051a000?, 0x72?, 0x74430c?}, 0x4000505f48?)
+	/usr/local/go/src/net/udpsock.go:149 +0x2c fp=0x4000505f10 sp=0x4000505eb0 pc=0x24236c
+net.(*UDPConn).ReadFrom(0x4000066a80, {0x400051a000, 0x5dc, 0x5dc})
+	/usr/local/go/src/net/udpsock.go:158 +0x4c fp=0x4000505f50 sp=0x4000505f10 pc=0x2424ec
 github.com/datarhei/gosrt.Listen.func1()
-	/go/pkg/mod/github.com/datarhei/gosrt@v0.9.0/listen.go:225 +0xb0 fp=0x400010bfd0 sp=0x400010bf50 pc=0x744350
+	/go/pkg/mod/github.com/datarhei/gosrt@v0.9.0/listen.go:225 +0xb0 fp=0x4000505fd0 sp=0x4000505f50 pc=0x744350
 runtime.goexit({})
-	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x400010bfd0 sp=0x400010bfd0 pc=0x8fdc4
+	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x4000505fd0 sp=0x4000505fd0 pc=0x8fdc4
 created by github.com/datarhei/gosrt.Listen in goroutine 1
 	/go/pkg/mod/github.com/datarhei/gosrt@v0.9.0/listen.go:215 +0x650
 
-goroutine 40 gp=0x40003ffc00 m=nil [select, 3 minutes]:
-runtime.gopark(0x40004976b8?, 0x2?, 0x0?, 0x0?, 0x40004976a4?)
-	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x4000497530 sp=0x4000497510 pc=0x87d18
-runtime.selectgo(0x40004976b8, 0x40004976a0, 0x0?, 0x0, 0x0?, 0x1)
-	/usr/local/go/src/runtime/select.go:351 +0x6c4 fp=0x4000497660 sp=0x4000497530 pc=0x65cc4
-github.com/datarhei/gosrt.(*listener).Accept2(0x40001c3908)
-	/go/pkg/mod/github.com/datarhei/gosrt@v0.9.0/listen.go:263 +0x90 fp=0x40004976e0 sp=0x4000497660 pc=0x7447f0
-github.com/bluenviron/mediamtx/internal/servers/srt.(*listener).runInner(0x40003f2880)
-	/s/internal/servers/srt/listener.go:30 +0x4c fp=0x4000497710 sp=0x40004976e0 pc=0x75036c
-github.com/bluenviron/mediamtx/internal/servers/srt.(*listener).run(0x40003f2880)
-	/s/internal/servers/srt/listener.go:23 +0x50 fp=0x40004977b0 sp=0x4000497710 pc=0x750220
+goroutine 40 gp=0x4000454000 m=nil [select, 3 minutes]:
+runtime.gopark(0x400041f6b8?, 0x2?, 0x0?, 0x0?, 0x400041f6a4?)
+	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x400041f530 sp=0x400041f510 pc=0x87d18
+runtime.selectgo(0x400041f6b8, 0x400041f6a0, 0x0?, 0x0, 0x0?, 0x1)
+	/usr/local/go/src/runtime/select.go:351 +0x6c4 fp=0x400041f660 sp=0x400041f530 pc=0x65cc4
+github.com/datarhei/gosrt.(*listener).Accept2(0x40001cb908)
+	/go/pkg/mod/github.com/datarhei/gosrt@v0.9.0/listen.go:263 +0x90 fp=0x400041f6e0 sp=0x400041f660 pc=0x7447f0
+github.com/bluenviron/mediamtx/internal/servers/srt.(*listener).runInner(0x40003fc880)
+	/s/internal/servers/srt/listener.go:30 +0x4c fp=0x400041f710 sp=0x400041f6e0 pc=0x75036c
+github.com/bluenviron/mediamtx/internal/servers/srt.(*listener).run(0x40003fc880)
+	/s/internal/servers/srt/listener.go:23 +0x50 fp=0x400041f7b0 sp=0x400041f710 pc=0x750220
 github.com/bluenviron/mediamtx/internal/servers/srt.(*listener).initialize.gowrap1()
-	/s/internal/servers/srt/listener.go:17 +0x28 fp=0x40004977d0 sp=0x40004977b0 pc=0x750198
+	/s/internal/servers/srt/listener.go:17 +0x28 fp=0x400041f7d0 sp=0x400041f7b0 pc=0x750198
 runtime.goexit({})
-	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x40004977d0 sp=0x40004977d0 pc=0x8fdc4
+	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x400041f7d0 sp=0x400041f7d0 pc=0x8fdc4
 created by github.com/bluenviron/mediamtx/internal/servers/srt.(*listener).initialize in goroutine 1
 	/s/internal/servers/srt/listener.go:17 +0x68
 
-goroutine 41 gp=0x40003ffdc0 m=nil [select, 3 minutes]:
-runtime.gopark(0x400010ce10?, 0x7?, 0x7?, 0x0?, 0x400010cd4a?)
-	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x400010cb90 sp=0x400010cb70 pc=0x87d18
-runtime.selectgo(0x400010ce10, 0x400010cd3c, 0x0?, 0x0, 0x0?, 0x1)
-	/usr/local/go/src/runtime/select.go:351 +0x6c4 fp=0x400010ccc0 sp=0x400010cb90 pc=0x65cc4
-github.com/bluenviron/mediamtx/internal/servers/srt.(*Server).run(0x400038b680)
-	/s/internal/servers/srt/server.go:169 +0x16c fp=0x400010cfb0 sp=0x400010ccc0 pc=0x750d3c
+goroutine 41 gp=0x40004541c0 m=nil [select, 3 minutes]:
+runtime.gopark(0x4000504e10?, 0x7?, 0x7?, 0x0?, 0x4000504d4a?)
+	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x4000504b90 sp=0x4000504b70 pc=0x87d18
+runtime.selectgo(0x4000504e10, 0x4000504d3c, 0x0?, 0x0, 0x0?, 0x1)
+	/usr/local/go/src/runtime/select.go:351 +0x6c4 fp=0x4000504cc0 sp=0x4000504b90 pc=0x65cc4
+github.com/bluenviron/mediamtx/internal/servers/srt.(*Server).run(0x4000395680)
+	/s/internal/servers/srt/server.go:169 +0x16c fp=0x4000504fb0 sp=0x4000504cc0 pc=0x750d3c
 github.com/bluenviron/mediamtx/internal/servers/srt.(*Server).Initialize.gowrap1()
-	/s/internal/servers/srt/server.go:138 +0x28 fp=0x400010cfd0 sp=0x400010cfb0 pc=0x7509e8
+	/s/internal/servers/srt/server.go:138 +0x28 fp=0x4000504fd0 sp=0x4000504fb0 pc=0x7509e8
 runtime.goexit({})
-	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x400010cfd0 sp=0x400010cfd0 pc=0x8fdc4
+	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x4000504fd0 sp=0x4000504fd0 pc=0x8fdc4
 created by github.com/bluenviron/mediamtx/internal/servers/srt.(*Server).Initialize in goroutine 1
 	/s/internal/servers/srt/server.go:138 +0x408
 
-goroutine 42 gp=0x40004cc000 m=nil [select]:
-runtime.gopark(0x4000483ed8?, 0x2?, 0x3f?, 0x0?, 0x4000483e50?)
-	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x4000473ce0 sp=0x4000473cc0 pc=0x87d18
-runtime.selectgo(0x4000483ed8, 0x4000483e4c, 0x4000473e4b?, 0x1, 0x0?, 0x1)
-	/usr/local/go/src/runtime/select.go:351 +0x6c4 fp=0x4000473e10 sp=0x4000473ce0 pc=0x65cc4
-github.com/fsnotify/fsnotify.(*shared).sendEvent(...)
-	/go/pkg/mod/github.com/fsnotify/fsnotify@v1.9.0/shared.go:25
-github.com/fsnotify/fsnotify.(*inotify).readEvents(0x40003d9cc0)
-	/go/pkg/mod/github.com/fsnotify/fsnotify@v1.9.0/backend_inotify.go:396 +0x680 fp=0x4000483fb0 sp=0x4000473e10 pc=0x6e6ad0
+goroutine 42 gp=0x4000454380 m=nil [IO wait]:
+runtime.gopark(0x400054dcc0?, 0x4000000002?, 0x68?, 0xdf?, 0x658a8?)
+	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x400054dc90 sp=0x400054dc70 pc=0x87d18
+runtime.netpollblock(0x0?, 0xffffffff?, 0xff?)
+	/usr/local/go/src/runtime/netpoll.go:575 +0x158 fp=0x400054dcd0 sp=0x400054dc90 pc=0x4b028
+internal/poll.runtime_pollWait(0x7fff49d79df0, 0x72)
+	/usr/local/go/src/runtime/netpoll.go:351 +0xa0 fp=0x400054dd00 sp=0x400054dcd0 pc=0x86ed0
+internal/poll.(*pollDesc).wait(0x40004301e0?, 0x400054de4b?, 0x1)
+	/usr/local/go/src/internal/poll/fd_poll_runtime.go:84 +0x28 fp=0x400054dd30 sp=0x400054dd00 pc=0xce878
+internal/poll.(*pollDesc).waitRead(...)
+	/usr/local/go/src/internal/poll/fd_poll_runtime.go:89
+internal/poll.(*FD).Read(0x40004301e0, {0x400054de4b, 0x10000, 0x10000})
+	/usr/local/go/src/internal/poll/fd_unix.go:165 +0x1fc fp=0x400054ddd0 sp=0x400054dd30 pc=0xcfb2c
+os.(*File).read(...)
+	/usr/local/go/src/os/file_posix.go:29
+os.(*File).Read(0x4000066a88, {0x400054de4b?, 0x400054de4b?, 0x1?})
+	/usr/local/go/src/os/file.go:124 +0x6c fp=0x400054de10 sp=0x400054ddd0 pc=0xdab3c
+github.com/fsnotify/fsnotify.(*inotify).readEvents(0x40003e3cc0)
+	/go/pkg/mod/github.com/fsnotify/fsnotify@v1.9.0/backend_inotify.go:357 +0xdc fp=0x400055dfb0 sp=0x400054de10 pc=0x6e652c
 github.com/fsnotify/fsnotify.newBackend.gowrap1()
-	/go/pkg/mod/github.com/fsnotify/fsnotify@v1.9.0/backend_inotify.go:155 +0x28 fp=0x4000483fd0 sp=0x4000483fb0 pc=0x6e50d8
+	/go/pkg/mod/github.com/fsnotify/fsnotify@v1.9.0/backend_inotify.go:155 +0x28 fp=0x400055dfd0 sp=0x400055dfb0 pc=0x6e50d8
 runtime.goexit({})
-	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x4000483fd0 sp=0x4000483fd0 pc=0x8fdc4
+	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x400055dfd0 sp=0x400055dfd0 pc=0x8fdc4
 created by github.com/fsnotify/fsnotify.newBackend in goroutine 1
 	/go/pkg/mod/github.com/fsnotify/fsnotify@v1.9.0/backend_inotify.go:155 +0x1e8
 
-goroutine 43 gp=0x40004cc1c0 m=nil [GC worker (idle)]:
-runtime.gopark(0x39cef56d9ab?, 0x3?, 0x5?, 0xdf?, 0x0?)
-	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x4000490f10 sp=0x4000490ef0 pc=0x87d18
-runtime.gcBgMarkWorker(0x40004985b0)
-	/usr/local/go/src/runtime/mgc.go:1423 +0xdc fp=0x4000490fb0 sp=0x4000490f10 pc=0x30e1c
+goroutine 43 gp=0x4000454540 m=nil [GC worker (idle)]:
+runtime.gopark(0x860757f4514?, 0x3?, 0x46?, 0xe4?, 0x0?)
+	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x4000418f10 sp=0x4000418ef0 pc=0x87d18
+runtime.gcBgMarkWorker(0x40004205b0)
+	/usr/local/go/src/runtime/mgc.go:1423 +0xdc fp=0x4000418fb0 sp=0x4000418f10 pc=0x30e1c
 runtime.gcBgMarkStartWorkers.gowrap1()
-	/usr/local/go/src/runtime/mgc.go:1339 +0x28 fp=0x4000490fd0 sp=0x4000490fb0 pc=0x30d08
+	/usr/local/go/src/runtime/mgc.go:1339 +0x28 fp=0x4000418fd0 sp=0x4000418fb0 pc=0x30d08
 runtime.goexit({})
-	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x4000490fd0 sp=0x4000490fd0 pc=0x8fdc4
+	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x4000418fd0 sp=0x4000418fd0 pc=0x8fdc4
 created by runtime.gcBgMarkStartWorkers in goroutine 1
 	/usr/local/go/src/runtime/mgc.go:1339 +0x140
 
-goroutine 44 gp=0x40004cc380 m=nil [GC worker (idle)]:
-runtime.gopark(0x39cef559e90?, 0x3?, 0xaa?, 0xba?, 0x0?)
-	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x4000491710 sp=0x40004916f0 pc=0x87d18
-runtime.gcBgMarkWorker(0x40004985b0)
-	/usr/local/go/src/runtime/mgc.go:1423 +0xdc fp=0x40004917b0 sp=0x4000491710 pc=0x30e1c
+goroutine 44 gp=0x4000454700 m=nil [GC worker (idle)]:
+runtime.gopark(0x201d860?, 0x1?, 0x3e?, 0x2?, 0x0?)
+	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x4000419710 sp=0x40004196f0 pc=0x87d18
+runtime.gcBgMarkWorker(0x40004205b0)
+	/usr/local/go/src/runtime/mgc.go:1423 +0xdc fp=0x40004197b0 sp=0x4000419710 pc=0x30e1c
 runtime.gcBgMarkStartWorkers.gowrap1()
-	/usr/local/go/src/runtime/mgc.go:1339 +0x28 fp=0x40004917d0 sp=0x40004917b0 pc=0x30d08
+	/usr/local/go/src/runtime/mgc.go:1339 +0x28 fp=0x40004197d0 sp=0x40004197b0 pc=0x30d08
 runtime.goexit({})
-	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x40004917d0 sp=0x40004917d0 pc=0x8fdc4
+	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x40004197d0 sp=0x40004197d0 pc=0x8fdc4
 created by runtime.gcBgMarkStartWorkers in goroutine 1
 	/usr/local/go/src/runtime/mgc.go:1339 +0x140
 
-goroutine 45 gp=0x40004cc540 m=nil [GC worker (idle)]:
-runtime.gopark(0x39c92aa579b?, 0x3?, 0xc6?, 0x4?, 0x0?)
-	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x4000491f10 sp=0x4000491ef0 pc=0x87d18
-runtime.gcBgMarkWorker(0x40004985b0)
-	/usr/local/go/src/runtime/mgc.go:1423 +0xdc fp=0x4000491fb0 sp=0x4000491f10 pc=0x30e1c
+goroutine 45 gp=0x40004548c0 m=nil [GC worker (idle)]:
+runtime.gopark(0x860757efc98?, 0x3?, 0xfb?, 0xea?, 0x0?)
+	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x4000419f10 sp=0x4000419ef0 pc=0x87d18
+runtime.gcBgMarkWorker(0x40004205b0)
+	/usr/local/go/src/runtime/mgc.go:1423 +0xdc fp=0x4000419fb0 sp=0x4000419f10 pc=0x30e1c
 runtime.gcBgMarkStartWorkers.gowrap1()
-	/usr/local/go/src/runtime/mgc.go:1339 +0x28 fp=0x4000491fd0 sp=0x4000491fb0 pc=0x30d08
+	/usr/local/go/src/runtime/mgc.go:1339 +0x28 fp=0x4000419fd0 sp=0x4000419fb0 pc=0x30d08
 runtime.goexit({})
-	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x4000491fd0 sp=0x4000491fd0 pc=0x8fdc4
+	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x4000419fd0 sp=0x4000419fd0 pc=0x8fdc4
 created by runtime.gcBgMarkStartWorkers in goroutine 1
 	/usr/local/go/src/runtime/mgc.go:1339 +0x140
 
-goroutine 46 gp=0x40004cc700 m=nil [GC worker (idle)]:
-runtime.gopark(0x39cef5792ff?, 0x3?, 0xf0?, 0x82?, 0x0?)
-	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x4000492710 sp=0x40004926f0 pc=0x87d18
-runtime.gcBgMarkWorker(0x40004985b0)
-	/usr/local/go/src/runtime/mgc.go:1423 +0xdc fp=0x40004927b0 sp=0x4000492710 pc=0x30e1c
+goroutine 46 gp=0x4000454a80 m=nil [GC worker (idle)]:
+runtime.gopark(0x860757f03d4?, 0x1?, 0xa?, 0x14?, 0x0?)
+	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x400041a710 sp=0x400041a6f0 pc=0x87d18
+runtime.gcBgMarkWorker(0x40004205b0)
+	/usr/local/go/src/runtime/mgc.go:1423 +0xdc fp=0x400041a7b0 sp=0x400041a710 pc=0x30e1c
 runtime.gcBgMarkStartWorkers.gowrap1()
-	/usr/local/go/src/runtime/mgc.go:1339 +0x28 fp=0x40004927d0 sp=0x40004927b0 pc=0x30d08
+	/usr/local/go/src/runtime/mgc.go:1339 +0x28 fp=0x400041a7d0 sp=0x400041a7b0 pc=0x30d08
 runtime.goexit({})
-	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x40004927d0 sp=0x40004927d0 pc=0x8fdc4
+	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x400041a7d0 sp=0x400041a7d0 pc=0x8fdc4
 created by runtime.gcBgMarkStartWorkers in goroutine 1
 	/usr/local/go/src/runtime/mgc.go:1339 +0x140
 
-goroutine 47 gp=0x40004cc8c0 m=nil [runnable]:
-runtime.gopark(0x4000411f38?, 0x3?, 0xc0?, 0xe9?, 0x4000411e8a?)
-	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x4000411d10 sp=0x4000411cf0 pc=0x87d18
-runtime.selectgo(0x4000411f38, 0x4000411e84, 0x0?, 0x0, 0x0?, 0x1)
-	/usr/local/go/src/runtime/select.go:351 +0x6c4 fp=0x4000411e40 sp=0x4000411d10 pc=0x65cc4
-github.com/bluenviron/mediamtx/internal/confwatcher.(*ConfWatcher).run(0x40002755c0)
-	/s/internal/confwatcher/confwatcher.go:77 +0xf8 fp=0x4000411fb0 sp=0x4000411e40 pc=0x6e97b8
+goroutine 47 gp=0x4000454c40 m=nil [runnable]:
+runtime.gopark(0x40004acf38?, 0x3?, 0x40?, 0x28?, 0x40004ace8a?)
+	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x40004acd10 sp=0x40004accf0 pc=0x87d18
+runtime.selectgo(0x40004acf38, 0x40004ace84, 0x0?, 0x0, 0x0?, 0x1)
+	/usr/local/go/src/runtime/select.go:351 +0x6c4 fp=0x40004ace40 sp=0x40004acd10 pc=0x65cc4
+github.com/bluenviron/mediamtx/internal/confwatcher.(*ConfWatcher).run(0x400027f5c0)
+	/s/internal/confwatcher/confwatcher.go:77 +0xf8 fp=0x40004acfb0 sp=0x40004ace40 pc=0x6e97b8
 github.com/bluenviron/mediamtx/internal/confwatcher.(*ConfWatcher).Initialize.gowrap1()
-	/s/internal/confwatcher/confwatcher.go:58 +0x28 fp=0x4000411fd0 sp=0x4000411fb0 pc=0x6e9628
+	/s/internal/confwatcher/confwatcher.go:58 +0x28 fp=0x40004acfd0 sp=0x40004acfb0 pc=0x6e9628
 runtime.goexit({})
-	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x4000411fd0 sp=0x4000411fd0 pc=0x8fdc4
+	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x40004acfd0 sp=0x40004acfd0 pc=0x8fdc4
 created by github.com/bluenviron/mediamtx/internal/confwatcher.(*ConfWatcher).Initialize in goroutine 1
 	/s/internal/confwatcher/confwatcher.go:58 +0x1c4
 
-goroutine 48 gp=0x40004cca80 m=nil [select, 3 minutes]:
-runtime.gopark(0x4000493730?, 0x4?, 0xa8?, 0x35?, 0x40004936f0?)
-	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x4000493570 sp=0x4000493550 pc=0x87d18
-runtime.selectgo(0x4000493730, 0x40004936e8, 0x1?, 0x0, 0x0?, 0x1)
-	/usr/local/go/src/runtime/select.go:351 +0x6c4 fp=0x40004936a0 sp=0x4000493570 pc=0x65cc4
-github.com/bluenviron/mediamtx/internal/core.(*Core).run(0x40002cd2b0)
-	/s/internal/core/core.go:197 +0x12c fp=0x40004937b0 sp=0x40004936a0 pc=0x8ee52c
+goroutine 48 gp=0x4000454e00 m=nil [select, 3 minutes]:
+runtime.gopark(0x400041b730?, 0x4?, 0xa8?, 0xb5?, 0x400041b6f0?)
+	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x400041b570 sp=0x400041b550 pc=0x87d18
+runtime.selectgo(0x400041b730, 0x400041b6e8, 0x1?, 0x0, 0x0?, 0x1)
+	/usr/local/go/src/runtime/select.go:351 +0x6c4 fp=0x400041b6a0 sp=0x400041b570 pc=0x65cc4
+github.com/bluenviron/mediamtx/internal/core.(*Core).run(0x40002d72b0)
+	/s/internal/core/core.go:197 +0x12c fp=0x400041b7b0 sp=0x400041b6a0 pc=0x8ee52c
 github.com/bluenviron/mediamtx/internal/core.New.gowrap1()
-	/s/internal/core/core.go:161 +0x28 fp=0x40004937d0 sp=0x40004937b0 pc=0x8ee0d8
+	/s/internal/core/core.go:161 +0x28 fp=0x400041b7d0 sp=0x400041b7b0 pc=0x8ee0d8
 runtime.goexit({})
-	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x40004937d0 sp=0x40004937d0 pc=0x8fdc4
+	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x400041b7d0 sp=0x400041b7d0 pc=0x8fdc4
 created by github.com/bluenviron/mediamtx/internal/core.New in goroutine 1
 	/s/internal/core/core.go:161 +0x4d4
 
-goroutine 49 gp=0x40004ccc40 m=nil [select, 3 minutes, locked to thread]:
-runtime.gopark(0x4000493fa0?, 0x2?, 0x98?, 0x3e?, 0x4000493f8c?)
-	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x4000493e10 sp=0x4000493df0 pc=0x87d18
-runtime.selectgo(0x4000493fa0, 0x4000493f88, 0x0?, 0x0, 0x0?, 0x1)
-	/usr/local/go/src/runtime/select.go:351 +0x6c4 fp=0x4000493f40 sp=0x4000493e10 pc=0x65cc4
+goroutine 49 gp=0x4000454fc0 m=nil [select, 3 minutes, locked to thread]:
+runtime.gopark(0x400041bfa0?, 0x2?, 0x98?, 0xbe?, 0x400041bf8c?)
+	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x400041be10 sp=0x400041bdf0 pc=0x87d18
+runtime.selectgo(0x400041bfa0, 0x400041bf88, 0x0?, 0x0, 0x0?, 0x1)
+	/usr/local/go/src/runtime/select.go:351 +0x6c4 fp=0x400041bf40 sp=0x400041be10 pc=0x65cc4
 runtime.ensureSigM.func1()
-	/usr/local/go/src/runtime/signal_unix.go:1085 +0x194 fp=0x4000493fd0 sp=0x4000493f40 pc=0x82134
+	/usr/local/go/src/runtime/signal_unix.go:1085 +0x194 fp=0x400041bfd0 sp=0x400041bf40 pc=0x82134
 runtime.goexit({})
-	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x4000493fd0 sp=0x4000493fd0 pc=0x8fdc4
+	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x400041bfd0 sp=0x400041bfd0 pc=0x8fdc4
 created by runtime.ensureSigM in goroutine 48
 	/usr/local/go/src/runtime/signal_unix.go:1068 +0xd8
 
-goroutine 50 gp=0x40004cd180 m=2 mp=0x4000068808 [syscall, 3 minutes]:
+goroutine 50 gp=0x4000455500 m=3 mp=0x4000069008 [syscall, 3 minutes]:
 runtime.notetsleepg(0x201c340, 0xffffffffffffffff)
-	/usr/local/go/src/runtime/lock_futex.go:123 +0x34 fp=0x40004ee790 sp=0x40004ee760 pc=0x253f4
+	/usr/local/go/src/runtime/lock_futex.go:123 +0x34 fp=0x4000476790 sp=0x4000476760 pc=0x253f4
 os/signal.signal_recv()
-	/usr/local/go/src/runtime/sigqueue.go:152 +0x30 fp=0x40004ee7b0 sp=0x40004ee790 pc=0x8a240
+	/usr/local/go/src/runtime/sigqueue.go:152 +0x30 fp=0x40004767b0 sp=0x4000476790 pc=0x8a240
 os/signal.loop()
-	/usr/local/go/src/os/signal/signal_unix.go:23 +0x1c fp=0x40004ee7d0 sp=0x40004ee7b0 pc=0x12cc3c
+	/usr/local/go/src/os/signal/signal_unix.go:23 +0x1c fp=0x40004767d0 sp=0x40004767b0 pc=0x12cc3c
 runtime.goexit({})
-	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x40004ee7d0 sp=0x40004ee7d0 pc=0x8fdc4
+	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x40004767d0 sp=0x40004767d0 pc=0x8fdc4
 created by os/signal.Notify.func1.1 in goroutine 48
 	/usr/local/go/src/os/signal/signal.go:152 +0x28
 
-goroutine 51 gp=0x40004cd6c0 m=nil [select, 3 minutes]:
-runtime.gopark(0x4000110de0?, 0x4?, 0x68?, 0xc?, 0x4000110da0?)
-	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x4000110c30 sp=0x4000110c10 pc=0x87d18
-runtime.selectgo(0x4000110de0, 0x4000110d98, 0x2a7e84108?, 0x0, 0x7fffa7e84108?, 0x1)
-	/usr/local/go/src/runtime/select.go:351 +0x6c4 fp=0x4000110d60 sp=0x4000110c30 pc=0x65cc4
-github.com/bluenviron/gortsplib/v4.(*ServerConn).runInner(0x4000160090)
-	/go/pkg/mod/github.com/bluenviron/gortsplib/v4@v4.16.0/server_conn.go:373 +0xc8 fp=0x4000110e40 sp=0x4000110d60 pc=0x4063b8
-github.com/bluenviron/gortsplib/v4.(*ServerConn).run(0x4000160090)
-	/go/pkg/mod/github.com/bluenviron/gortsplib/v4@v4.16.0/server_conn.go:347 +0x374 fp=0x4000110fb0 sp=0x4000110e40 pc=0x405fb4
+goroutine 18 gp=0x4000092540 m=nil [select, 3 minutes]:
+runtime.gopark(0x4000511de0?, 0x4?, 0x68?, 0x1c?, 0x4000511da0?)
+	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x4000119c30 sp=0x4000119c10 pc=0x87d18
+runtime.selectgo(0x4000119de0, 0x4000511d98, 0x2908085c0?, 0x0, 0x7fff908085c0?, 0x1)
+	/usr/local/go/src/runtime/select.go:351 +0x6c4 fp=0x4000119d60 sp=0x4000119c30 pc=0x65cc4
+github.com/bluenviron/gortsplib/v4.(*ServerConn).runInner(0x40000b4090)
+	/go/pkg/mod/github.com/bluenviron/gortsplib/v4@v4.16.0/server_conn.go:373 +0xc8 fp=0x4000119e40 sp=0x4000119d60 pc=0x4063b8
+github.com/bluenviron/gortsplib/v4.(*ServerConn).run(0x40000b4090)
+	/go/pkg/mod/github.com/bluenviron/gortsplib/v4@v4.16.0/server_conn.go:347 +0x374 fp=0x4000119fb0 sp=0x4000119e40 pc=0x405fb4
 github.com/bluenviron/gortsplib/v4.(*ServerConn).initialize.gowrap1()
-	/go/pkg/mod/github.com/bluenviron/gortsplib/v4@v4.16.0/server_conn.go:231 +0x28 fp=0x4000110fd0 sp=0x4000110fb0 pc=0x405838
+	/go/pkg/mod/github.com/bluenviron/gortsplib/v4@v4.16.0/server_conn.go:231 +0x28 fp=0x4000119fd0 sp=0x4000119fb0 pc=0x405838
 runtime.goexit({})
-	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x4000110fd0 sp=0x4000110fd0 pc=0x8fdc4
+	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x4000119fd0 sp=0x4000119fd0 pc=0x8fdc4
 created by github.com/bluenviron/gortsplib/v4.(*ServerConn).initialize in goroutine 13
 	/go/pkg/mod/github.com/bluenviron/gortsplib/v4@v4.16.0/server_conn.go:231 +0x338
 
-goroutine 52 gp=0x40004cd880 m=nil [IO wait, 3 minutes]:
-runtime.gopark(0x4000111c88?, 0x1b494?, 0x7?, 0x0?, 0x40003f84f0?)
-	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x4000111c10 sp=0x4000111bf0 pc=0x87d18
+goroutine 19 gp=0x4000092700 m=nil [IO wait, 3 minutes]:
+runtime.gopark(0x4000117c88?, 0x1b494?, 0x7?, 0x0?, 0x40000b6660?)
+	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x4000117c10 sp=0x4000117bf0 pc=0x87d18
 runtime.netpollblock(0x0?, 0xffffffff?, 0xff?)
-	/usr/local/go/src/runtime/netpoll.go:575 +0x158 fp=0x4000111c50 sp=0x4000111c10 pc=0x4b028
-internal/poll.runtime_pollWait(0x7fff613b5cd8, 0x72)
-	/usr/local/go/src/runtime/netpoll.go:351 +0xa0 fp=0x4000111c80 sp=0x4000111c50 pc=0x86ed0
-internal/poll.(*pollDesc).wait(0x40001aa280?, 0x40001d0000?, 0x0)
-	/usr/local/go/src/internal/poll/fd_poll_runtime.go:84 +0x28 fp=0x4000111cb0 sp=0x4000111c80 pc=0xce878
+	/usr/local/go/src/runtime/netpoll.go:575 +0x158 fp=0x4000117c50 sp=0x4000117c10 pc=0x4b028
+internal/poll.runtime_pollWait(0x7fff49d79cd8, 0x72)
+	/usr/local/go/src/runtime/netpoll.go:351 +0xa0 fp=0x4000117c80 sp=0x4000117c50 pc=0x86ed0
+internal/poll.(*pollDesc).wait(0x40001b2200?, 0x40001d8000?, 0x0)
+	/usr/local/go/src/internal/poll/fd_poll_runtime.go:84 +0x28 fp=0x4000117cb0 sp=0x4000117c80 pc=0xce878
 internal/poll.(*pollDesc).waitRead(...)
 	/usr/local/go/src/internal/poll/fd_poll_runtime.go:89
-internal/poll.(*FD).Read(0x40001aa280, {0x40001d0000, 0x1000, 0x1000})
-	/usr/local/go/src/internal/poll/fd_unix.go:165 +0x1fc fp=0x4000111d50 sp=0x4000111cb0 pc=0xcfb2c
-net.(*netFD).Read(0x40001aa280, {0x40001d0000?, 0x4000111dc8?, 0x1f768?})
-	/usr/local/go/src/net/fd_posix.go:55 +0x28 fp=0x4000111da0 sp=0x4000111d50 pc=0x226318
-net.(*conn).Read(0x4000066000, {0x40001d0000?, 0x4000111e88?, 0x1fed4?})
-	/usr/local/go/src/net/net.go:194 +0x34 fp=0x4000111df0 sp=0x4000111da0 pc=0x237c54
-github.com/bluenviron/gortsplib/v4/pkg/bytecounter.(*ByteCounter).Read(0x40003f36c0, {0x40001d0000?, 0x40001f9008?, 0x4000111e78?})
-	/go/pkg/mod/github.com/bluenviron/gortsplib/v4@v4.16.0/pkg/bytecounter/bytecounter.go:34 +0x30 fp=0x4000111e20 sp=0x4000111df0 pc=0x38fa70
-bufio.(*Reader).fill(0x40004a8180)
-	/usr/local/go/src/bufio/bufio.go:113 +0xf8 fp=0x4000111e60 sp=0x4000111e20 pc=0x18a008
-bufio.(*Reader).Peek(0x40004a8180, 0x2)
-	/usr/local/go/src/bufio/bufio.go:152 +0x60 fp=0x4000111e80 sp=0x4000111e60 pc=0x18a170
-github.com/bluenviron/gortsplib/v4/pkg/conn.(*Conn).Read(0x4000275680)
-	/go/pkg/mod/github.com/bluenviron/gortsplib/v4@v4.16.0/pkg/conn/conn.go:35 +0x30 fp=0x4000111ec0 sp=0x4000111e80 pc=0x38fc50
-github.com/bluenviron/gortsplib/v4.(*serverConnReader).readFuncStandard(0x400026e660)
-	/go/pkg/mod/github.com/bluenviron/gortsplib/v4@v4.16.0/server_conn_reader.go:77 +0x50 fp=0x4000111f20 sp=0x4000111ec0 pc=0x4084f0
+internal/poll.(*FD).Read(0x40001b2200, {0x40001d8000, 0x1000, 0x1000})
+	/usr/local/go/src/internal/poll/fd_unix.go:165 +0x1fc fp=0x4000117d50 sp=0x4000117cb0 pc=0xcfb2c
+net.(*netFD).Read(0x40001b2200, {0x40001d8000?, 0x4000117dc8?, 0x1f768?})
+	/usr/local/go/src/net/fd_posix.go:55 +0x28 fp=0x4000117da0 sp=0x4000117d50 pc=0x226318
+net.(*conn).Read(0x40000ac008, {0x40001d8000?, 0x4000117e88?, 0x1fed4?})
+	/usr/local/go/src/net/net.go:194 +0x34 fp=0x4000117df0 sp=0x4000117da0 pc=0x237c54
+github.com/bluenviron/gortsplib/v4/pkg/bytecounter.(*ByteCounter).Read(0x40000b14c0, {0x40001d8000?, 0x40004ae008?, 0x4000117e78?})
+	/go/pkg/mod/github.com/bluenviron/gortsplib/v4@v4.16.0/pkg/bytecounter/bytecounter.go:34 +0x30 fp=0x4000117e20 sp=0x4000117df0 pc=0x38fa70
+bufio.(*Reader).fill(0x400009eb40)
+	/usr/local/go/src/bufio/bufio.go:113 +0xf8 fp=0x4000117e60 sp=0x4000117e20 pc=0x18a008
+bufio.(*Reader).Peek(0x400009eb40, 0x2)
+	/usr/local/go/src/bufio/bufio.go:152 +0x60 fp=0x4000117e80 sp=0x4000117e60 pc=0x18a170
+github.com/bluenviron/gortsplib/v4/pkg/conn.(*Conn).Read(0x400027f640)
+	/go/pkg/mod/github.com/bluenviron/gortsplib/v4@v4.16.0/pkg/conn/conn.go:35 +0x30 fp=0x4000117ec0 sp=0x4000117e80 pc=0x38fc50
+github.com/bluenviron/gortsplib/v4.(*serverConnReader).readFuncStandard(0x4000278630)
+	/go/pkg/mod/github.com/bluenviron/gortsplib/v4@v4.16.0/server_conn_reader.go:77 +0x50 fp=0x4000117f20 sp=0x4000117ec0 pc=0x4084f0
 github.com/bluenviron/gortsplib/v4.(*serverConnReader).readFuncStandard-fm()
-	<autogenerated>:1 +0x28 fp=0x4000111f40 sp=0x4000111f20 pc=0x41a868
-github.com/bluenviron/gortsplib/v4.(*serverConnReader).run(0x400026e660)
-	/go/pkg/mod/github.com/bluenviron/gortsplib/v4@v4.16.0/server_conn_reader.go:55 +0x44 fp=0x4000111fb0 sp=0x4000111f40 pc=0x408394
+	<autogenerated>:1 +0x28 fp=0x4000117f40 sp=0x4000117f20 pc=0x41a868
+github.com/bluenviron/gortsplib/v4.(*serverConnReader).run(0x4000278630)
+	/go/pkg/mod/github.com/bluenviron/gortsplib/v4@v4.16.0/server_conn_reader.go:55 +0x44 fp=0x4000117fb0 sp=0x4000117f40 pc=0x408394
 github.com/bluenviron/gortsplib/v4.(*serverConnReader).initialize.gowrap1()
-	/go/pkg/mod/github.com/bluenviron/gortsplib/v4@v4.16.0/server_conn_reader.go:36 +0x28 fp=0x4000111fd0 sp=0x4000111fb0 pc=0x408248
+	/go/pkg/mod/github.com/bluenviron/gortsplib/v4@v4.16.0/server_conn_reader.go:36 +0x28 fp=0x4000117fd0 sp=0x4000117fb0 pc=0x408248
 runtime.goexit({})
-	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x4000111fd0 sp=0x4000111fd0 pc=0x8fdc4
-created by github.com/bluenviron/gortsplib/v4.(*serverConnReader).initialize in goroutine 51
+	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x4000117fd0 sp=0x4000117fd0 pc=0x8fdc4
+created by github.com/bluenviron/gortsplib/v4.(*serverConnReader).initialize in goroutine 18
 	/go/pkg/mod/github.com/bluenviron/gortsplib/v4@v4.16.0/server_conn_reader.go:36 +0xd0
 
-goroutine 65 gp=0x400008a380 m=nil [select]:
-runtime.gopark(0x400010dd60?, 0x6?, 0x8?, 0x90?, 0x400010dccc?)
-	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x400010db50 sp=0x400010db30 pc=0x87d18
-runtime.selectgo(0x400010dd60, 0x400010dcc0, 0x1ff3100?, 0x0, 0xee0b0ceba?, 0x1)
-	/usr/local/go/src/runtime/select.go:351 +0x6c4 fp=0x400010dc80 sp=0x400010db50 pc=0x65cc4
-github.com/bluenviron/gortsplib/v4.(*ServerSession).runInner(0x40000c6160)
-	/go/pkg/mod/github.com/bluenviron/gortsplib/v4@v4.16.0/server_session.go:860 +0xfc fp=0x400010de60 sp=0x400010dc80 pc=0x40c3ac
-github.com/bluenviron/gortsplib/v4.(*ServerSession).run(0x40000c6160)
-	/go/pkg/mod/github.com/bluenviron/gortsplib/v4@v4.16.0/server_session.go:812 +0xf4 fp=0x400010dfb0 sp=0x400010de60 pc=0x40bf34
+goroutine 20 gp=0x40000928c0 m=nil [select]:
+runtime.gopark(0x40004a7d60?, 0x6?, 0x8?, 0xe0?, 0x40004a7ccc?)
+	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x40004a7b50 sp=0x40004a7b30 pc=0x87d18
+runtime.selectgo(0x40004a7d60, 0x40004a7cc0, 0x1ff3100?, 0x0, 0xee0b0e330?, 0x1)
+	/usr/local/go/src/runtime/select.go:351 +0x6c4 fp=0x40004a7c80 sp=0x40004a7b50 pc=0x65cc4
+github.com/bluenviron/gortsplib/v4.(*ServerSession).runInner(0x40001c2840)
+	/go/pkg/mod/github.com/bluenviron/gortsplib/v4@v4.16.0/server_session.go:860 +0xfc fp=0x40004a7e60 sp=0x40004a7c80 pc=0x40c3ac
+github.com/bluenviron/gortsplib/v4.(*ServerSession).run(0x40001c2840)
+	/go/pkg/mod/github.com/bluenviron/gortsplib/v4@v4.16.0/server_session.go:812 +0xf4 fp=0x40004a7fb0 sp=0x40004a7e60 pc=0x40bf34
 github.com/bluenviron/gortsplib/v4.(*ServerSession).initialize.gowrap1()
-	/go/pkg/mod/github.com/bluenviron/gortsplib/v4@v4.16.0/server_session.go:476 +0x28 fp=0x400010dfd0 sp=0x400010dfb0 pc=0x40abc8
+	/go/pkg/mod/github.com/bluenviron/gortsplib/v4@v4.16.0/server_session.go:476 +0x28 fp=0x40004a7fd0 sp=0x40004a7fb0 pc=0x40abc8
 runtime.goexit({})
-	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x400010dfd0 sp=0x400010dfd0 pc=0x8fdc4
+	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x40004a7fd0 sp=0x40004a7fd0 pc=0x8fdc4
 created by github.com/bluenviron/gortsplib/v4.(*ServerSession).initialize in goroutine 13
 	/go/pkg/mod/github.com/bluenviron/gortsplib/v4@v4.16.0/server_session.go:476 +0x2d8
 
-goroutine 66 gp=0x400008a540 m=nil [select]:
-runtime.gopark(0x4000492f68?, 0x2?, 0x2?, 0x0?, 0x4000492f4c?)
-	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x4000492dd0 sp=0x4000492db0 pc=0x87d18
-runtime.selectgo(0x4000492f68, 0x4000492f48, 0x0?, 0x0, 0x40c250?, 0x1)
-	/usr/local/go/src/runtime/select.go:351 +0x6c4 fp=0x4000492f00 sp=0x4000492dd0 pc=0x65cc4
-github.com/bluenviron/mediamtx/internal/counterdumper.(*CounterDumper).run(0x40004340a0)
-	/s/internal/counterdumper/counterdumper.go:55 +0xc0 fp=0x4000492fb0 sp=0x4000492f00 pc=0x6d8160
+goroutine 21 gp=0x4000092a80 m=nil [select]:
+runtime.gopark(0x4000506f68?, 0x2?, 0x8?, 0x88?, 0x4000506f4c?)
+	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x4000506dd0 sp=0x4000506db0 pc=0x87d18
+runtime.selectgo(0x4000506f68, 0x4000506f48, 0x400005f738?, 0x0, 0x40c250?, 0x1)
+	/usr/local/go/src/runtime/select.go:351 +0x6c4 fp=0x4000506f00 sp=0x4000506dd0 pc=0x65cc4
+github.com/bluenviron/mediamtx/internal/counterdumper.(*CounterDumper).run(0x40000b1600)
+	/s/internal/counterdumper/counterdumper.go:55 +0xc0 fp=0x4000506fb0 sp=0x4000506f00 pc=0x6d8160
 github.com/bluenviron/mediamtx/internal/counterdumper.(*CounterDumper).Start.gowrap1()
-	/s/internal/counterdumper/counterdumper.go:29 +0x28 fp=0x4000492fd0 sp=0x4000492fb0 pc=0x6d7f98
+	/s/internal/counterdumper/counterdumper.go:29 +0x28 fp=0x4000506fd0 sp=0x4000506fb0 pc=0x6d7f98
 runtime.goexit({})
-	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x4000492fd0 sp=0x4000492fd0 pc=0x8fdc4
-created by github.com/bluenviron/mediamtx/internal/counterdumper.(*CounterDumper).Start in goroutine 65
+	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x4000506fd0 sp=0x4000506fd0 pc=0x8fdc4
+created by github.com/bluenviron/mediamtx/internal/counterdumper.(*CounterDumper).Start in goroutine 20
 	/s/internal/counterdumper/counterdumper.go:29 +0x108
 
-goroutine 67 gp=0x400008a700 m=nil [select]:
-runtime.gopark(0x4000494f68?, 0x2?, 0x8?, 0x80?, 0x4000494f4c?)
-	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x4000494dd0 sp=0x4000494db0 pc=0x87d18
-runtime.selectgo(0x4000494f68, 0x4000494f48, 0x0?, 0x0, 0x0?, 0x1)
-	/usr/local/go/src/runtime/select.go:351 +0x6c4 fp=0x4000494f00 sp=0x4000494dd0 pc=0x65cc4
-github.com/bluenviron/mediamtx/internal/counterdumper.(*CounterDumper).run(0x40004340c0)
-	/s/internal/counterdumper/counterdumper.go:55 +0xc0 fp=0x4000494fb0 sp=0x4000494f00 pc=0x6d8160
+goroutine 22 gp=0x4000092c40 m=nil [select]:
+runtime.gopark(0x40004adf68?, 0x2?, 0x8?, 0x88?, 0x40004adf4c?)
+	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x40004addd0 sp=0x40004addb0 pc=0x87d18
+runtime.selectgo(0x40004adf68, 0x40004adf48, 0x1aab66ef0041ef48?, 0x0, 0x72?, 0x1)
+	/usr/local/go/src/runtime/select.go:351 +0x6c4 fp=0x40004adf00 sp=0x40004addd0 pc=0x65cc4
+github.com/bluenviron/mediamtx/internal/counterdumper.(*CounterDumper).run(0x40000b1620)
+	/s/internal/counterdumper/counterdumper.go:55 +0xc0 fp=0x40004adfb0 sp=0x40004adf00 pc=0x6d8160
 github.com/bluenviron/mediamtx/internal/counterdumper.(*CounterDumper).Start.gowrap1()
-	/s/internal/counterdumper/counterdumper.go:29 +0x28 fp=0x4000494fd0 sp=0x4000494fb0 pc=0x6d7f98
+	/s/internal/counterdumper/counterdumper.go:29 +0x28 fp=0x40004adfd0 sp=0x40004adfb0 pc=0x6d7f98
 runtime.goexit({})
-	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x4000494fd0 sp=0x4000494fd0 pc=0x8fdc4
-created by github.com/bluenviron/mediamtx/internal/counterdumper.(*CounterDumper).Start in goroutine 65
+	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x40004adfd0 sp=0x40004adfd0 pc=0x8fdc4
+created by github.com/bluenviron/mediamtx/internal/counterdumper.(*CounterDumper).Start in goroutine 20
 	/s/internal/counterdumper/counterdumper.go:29 +0x108
 
-goroutine 68 gp=0x400008a8c0 m=nil [select]:
-runtime.gopark(0x4000494768?, 0x2?, 0x2?, 0x0?, 0x400049474c?)
-	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x40004945d0 sp=0x40004945b0 pc=0x87d18
-runtime.selectgo(0x4000494768, 0x4000494748, 0x0?, 0x0, 0x2?, 0x1)
-	/usr/local/go/src/runtime/select.go:351 +0x6c4 fp=0x4000494700 sp=0x40004945d0 pc=0x65cc4
-github.com/bluenviron/mediamtx/internal/counterdumper.(*CounterDumper).run(0x40004340e0)
-	/s/internal/counterdumper/counterdumper.go:55 +0xc0 fp=0x40004947b0 sp=0x4000494700 pc=0x6d8160
+goroutine 23 gp=0x4000092e00 m=nil [select]:
+runtime.gopark(0x4000507f68?, 0x2?, 0x8?, 0x88?, 0x4000507f4c?)
+	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x4000507dd0 sp=0x4000507db0 pc=0x87d18
+runtime.selectgo(0x4000507f68, 0x4000507f48, 0x0?, 0x0, 0x0?, 0x1)
+	/usr/local/go/src/runtime/select.go:351 +0x6c4 fp=0x4000507f00 sp=0x4000507dd0 pc=0x65cc4
+github.com/bluenviron/mediamtx/internal/counterdumper.(*CounterDumper).run(0x40000b1640)
+	/s/internal/counterdumper/counterdumper.go:55 +0xc0 fp=0x4000507fb0 sp=0x4000507f00 pc=0x6d8160
 github.com/bluenviron/mediamtx/internal/counterdumper.(*CounterDumper).Start.gowrap1()
-	/s/internal/counterdumper/counterdumper.go:29 +0x28 fp=0x40004947d0 sp=0x40004947b0 pc=0x6d7f98
+	/s/internal/counterdumper/counterdumper.go:29 +0x28 fp=0x4000507fd0 sp=0x4000507fb0 pc=0x6d7f98
 runtime.goexit({})
-	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x40004947d0 sp=0x40004947d0 pc=0x8fdc4
-created by github.com/bluenviron/mediamtx/internal/counterdumper.(*CounterDumper).Start in goroutine 65
+	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x4000507fd0 sp=0x4000507fd0 pc=0x8fdc4
+created by github.com/bluenviron/mediamtx/internal/counterdumper.(*CounterDumper).Start in goroutine 20
 	/s/internal/counterdumper/counterdumper.go:29 +0x108
 
-goroutine 53 gp=0x40004cda40 m=nil [select]:
-runtime.gopark(0x400005f768?, 0x2?, 0x2?, 0x0?, 0x400005f74c?)
-	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x400005f5d0 sp=0x400005f5b0 pc=0x87d18
-runtime.selectgo(0x400005f768, 0x400005f748, 0x0?, 0x0, 0x2?, 0x1)
-	/usr/local/go/src/runtime/select.go:351 +0x6c4 fp=0x400005f700 sp=0x400005f5d0 pc=0x65cc4
-github.com/bluenviron/mediamtx/internal/counterdumper.(*CounterDumper).run(0x40003f37a0)
-	/s/internal/counterdumper/counterdumper.go:55 +0xc0 fp=0x400005f7b0 sp=0x400005f700 pc=0x6d8160
+goroutine 24 gp=0x4000092fc0 m=nil [select]:
+runtime.gopark(0x40004a6f68?, 0x2?, 0x8?, 0x98?, 0x40004a6f4c?)
+	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x40004a6dd0 sp=0x40004a6db0 pc=0x87d18
+runtime.selectgo(0x40004a6f68, 0x40004a6f48, 0x0?, 0x0, 0x2?, 0x1)
+	/usr/local/go/src/runtime/select.go:351 +0x6c4 fp=0x40004a6f00 sp=0x40004a6dd0 pc=0x65cc4
+github.com/bluenviron/mediamtx/internal/counterdumper.(*CounterDumper).run(0x40000b1900)
+	/s/internal/counterdumper/counterdumper.go:55 +0xc0 fp=0x40004a6fb0 sp=0x40004a6f00 pc=0x6d8160
 github.com/bluenviron/mediamtx/internal/counterdumper.(*CounterDumper).Start.gowrap1()
-	/s/internal/counterdumper/counterdumper.go:29 +0x28 fp=0x400005f7d0 sp=0x400005f7b0 pc=0x6d7f98
+	/s/internal/counterdumper/counterdumper.go:29 +0x28 fp=0x40004a6fd0 sp=0x40004a6fb0 pc=0x6d7f98
 runtime.goexit({})
-	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x400005f7d0 sp=0x400005f7d0 pc=0x8fdc4
+	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x40004a6fd0 sp=0x40004a6fd0 pc=0x8fdc4
 created by github.com/bluenviron/mediamtx/internal/counterdumper.(*CounterDumper).Start in goroutine 8
 	/s/internal/counterdumper/counterdumper.go:29 +0x108
 
-goroutine 54 gp=0x40004cdc00 m=nil [select]:
-runtime.gopark(0x400043cf68?, 0x2?, 0x1?, 0x47?, 0x400043cf4c?)
-	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x400043cdd0 sp=0x400043cdb0 pc=0x87d18
-runtime.selectgo(0x400043cf68, 0x400043cf48, 0x0?, 0x0, 0x0?, 0x1)
-	/usr/local/go/src/runtime/select.go:351 +0x6c4 fp=0x400043cf00 sp=0x400043cdd0 pc=0x65cc4
-github.com/bluenviron/gortsplib/v4/pkg/rtcpreceiver.(*RTCPReceiver).run(0x4000516480)
-	/go/pkg/mod/github.com/bluenviron/gortsplib/v4@v4.16.0/pkg/rtcpreceiver/rtcpreceiver.go:125 +0xbc fp=0x400043cfb0 sp=0x400043cf00 pc=0x3dc4bc
+goroutine 25 gp=0x4000093180 m=nil [select]:
+runtime.gopark(0x400045ef68?, 0x2?, 0x1?, 0x76?, 0x400045ef4c?)
+	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x400045edd0 sp=0x400045edb0 pc=0x87d18
+runtime.selectgo(0x400045ef68, 0x400045ef48, 0x0?, 0x0, 0x0?, 0x1)
+	/usr/local/go/src/runtime/select.go:351 +0x6c4 fp=0x400045ef00 sp=0x400045edd0 pc=0x65cc4
+github.com/bluenviron/gortsplib/v4/pkg/rtcpreceiver.(*RTCPReceiver).run(0x40000ce0c0)
+	/go/pkg/mod/github.com/bluenviron/gortsplib/v4@v4.16.0/pkg/rtcpreceiver/rtcpreceiver.go:125 +0xbc fp=0x400045efb0 sp=0x400045ef00 pc=0x3dc4bc
 github.com/bluenviron/gortsplib/v4/pkg/rtcpreceiver.(*RTCPReceiver).Initialize.gowrap1()
-	/go/pkg/mod/github.com/bluenviron/gortsplib/v4@v4.16.0/pkg/rtcpreceiver/rtcpreceiver.go:107 +0x28 fp=0x400043cfd0 sp=0x400043cfb0 pc=0x3dc368
+	/go/pkg/mod/github.com/bluenviron/gortsplib/v4@v4.16.0/pkg/rtcpreceiver/rtcpreceiver.go:107 +0x28 fp=0x400045efd0 sp=0x400045efb0 pc=0x3dc368
 runtime.goexit({})
-	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x400043cfd0 sp=0x400043cfd0 pc=0x8fdc4
-created by github.com/bluenviron/gortsplib/v4/pkg/rtcpreceiver.(*RTCPReceiver).Initialize in goroutine 65
+	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x400045efd0 sp=0x400045efd0 pc=0x8fdc4
+created by github.com/bluenviron/gortsplib/v4/pkg/rtcpreceiver.(*RTCPReceiver).Initialize in goroutine 20
 	/go/pkg/mod/github.com/bluenviron/gortsplib/v4@v4.16.0/pkg/rtcpreceiver/rtcpreceiver.go:107 +0x158
 
-goroutine 55 gp=0x40004cddc0 m=nil [sync.Cond.Wait]:
-runtime.gopark(0x1ff3100?, 0x1ff3100?, 0x38?, 0x51?, 0x40000a0450?)
-	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x40004f16b0 sp=0x40004f1690 pc=0x87d18
+goroutine 26 gp=0x4000093340 m=nil [sync.Cond.Wait]:
+runtime.gopark(0x1ff3100?, 0x1ff3100?, 0x38?, 0x51?, 0x400048c2a0?)
+	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x40000616b0 sp=0x4000061690 pc=0x87d18
 runtime.goparkunlock(...)
 	/usr/local/go/src/runtime/proc.go:441
-sync.runtime_notifyListWait(0x40002757d0, 0x16)
-	/usr/local/go/src/runtime/sema.go:597 +0x150 fp=0x40004f1700 sp=0x40004f16b0 pc=0x89980
-sync.(*Cond).Wait(0x40002757c0)
-	/usr/local/go/src/sync/cond.go:71 +0xc4 fp=0x40004f1740 sp=0x40004f1700 pc=0x99234
-github.com/bluenviron/gortsplib/v4/pkg/ringbuffer.(*RingBuffer).Pull(0x40003403c0)
-	/go/pkg/mod/github.com/bluenviron/gortsplib/v4@v4.16.0/pkg/ringbuffer/ringbuffer.go:102 +0xd8 fp=0x40004f1780 sp=0x40004f1740 pc=0x1bb978
-github.com/bluenviron/gortsplib/v4.(*asyncProcessor).runInner(0x40003e5890)
-	/go/pkg/mod/github.com/bluenviron/gortsplib/v4@v4.16.0/async_processor.go:44 +0x2c fp=0x40004f17b0 sp=0x40004f1780 pc=0x3f3e6c
+sync.runtime_notifyListWait(0x400027f9d0, 0x11)
+	/usr/local/go/src/runtime/sema.go:597 +0x150 fp=0x4000061700 sp=0x40000616b0 pc=0x89980
+sync.(*Cond).Wait(0x400027f9c0)
+	/usr/local/go/src/sync/cond.go:71 +0xc4 fp=0x4000061740 sp=0x4000061700 pc=0x99234
+github.com/bluenviron/gortsplib/v4/pkg/ringbuffer.(*RingBuffer).Pull(0x400034a4b0)
+	/go/pkg/mod/github.com/bluenviron/gortsplib/v4@v4.16.0/pkg/ringbuffer/ringbuffer.go:102 +0xd8 fp=0x4000061780 sp=0x4000061740 pc=0x1bb978
+github.com/bluenviron/gortsplib/v4.(*asyncProcessor).runInner(0x40000a7110)
+	/go/pkg/mod/github.com/bluenviron/gortsplib/v4@v4.16.0/async_processor.go:44 +0x2c fp=0x40000617b0 sp=0x4000061780 pc=0x3f3e6c
 github.com/bluenviron/gortsplib/v4.(*asyncProcessor).run(...)
 	/go/pkg/mod/github.com/bluenviron/gortsplib/v4@v4.16.0/async_processor.go:38
 github.com/bluenviron/gortsplib/v4.(*asyncProcessor).start.gowrap1()
-	/go/pkg/mod/github.com/bluenviron/gortsplib/v4@v4.16.0/async_processor.go:34 +0x2c fp=0x40004f17d0 sp=0x40004f17b0 pc=0x3f3d6c
+	/go/pkg/mod/github.com/bluenviron/gortsplib/v4@v4.16.0/async_processor.go:34 +0x2c fp=0x40000617d0 sp=0x40000617b0 pc=0x3f3d6c
 runtime.goexit({})
-	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x40004f17d0 sp=0x40004f17d0 pc=0x8fdc4
-created by github.com/bluenviron/gortsplib/v4.(*asyncProcessor).start in goroutine 65
+	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x40000617d0 sp=0x40000617d0 pc=0x8fdc4
+created by github.com/bluenviron/gortsplib/v4.(*asyncProcessor).start in goroutine 20
 	/go/pkg/mod/github.com/bluenviron/gortsplib/v4@v4.16.0/async_processor.go:34 +0xa0
 
-goroutine 18 gp=0x400008aa80 m=nil [IO wait, 1 minutes]:
-runtime.gopark(0x4000383908?, 0xd17d8?, 0x40?, 0x0?, 0xf?)
-	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x40000ab8e0 sp=0x40000ab8c0 pc=0x87d18
+goroutine 65 gp=0x4000093500 m=nil [IO wait, 2 minutes]:
+runtime.gopark(0x40004bf908?, 0xd17d8?, 0x40?, 0x0?, 0xf?)
+	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x400050f8e0 sp=0x400050f8c0 pc=0x87d18
 runtime.netpollblock(0x0?, 0xffffffff?, 0xff?)
-	/usr/local/go/src/runtime/netpoll.go:575 +0x158 fp=0x40000ab920 sp=0x40000ab8e0 pc=0x4b028
-internal/poll.runtime_pollWait(0x7fff613b5bc0, 0x72)
-	/usr/local/go/src/runtime/netpoll.go:351 +0xa0 fp=0x40000ab950 sp=0x40000ab920 pc=0x86ed0
-internal/poll.(*pollDesc).wait(0x40001aa000?, 0x4000624000?, 0x0)
-	/usr/local/go/src/internal/poll/fd_poll_runtime.go:84 +0x28 fp=0x40000ab980 sp=0x40000ab950 pc=0xce878
+	/usr/local/go/src/runtime/netpoll.go:575 +0x158 fp=0x400050f920 sp=0x400050f8e0 pc=0x4b028
+internal/poll.runtime_pollWait(0x7fff49d79bc0, 0x72)
+	/usr/local/go/src/runtime/netpoll.go:351 +0xa0 fp=0x400050f950 sp=0x400050f920 pc=0x86ed0
+internal/poll.(*pollDesc).wait(0x400035b980?, 0x40005aa000?, 0x0)
+	/usr/local/go/src/internal/poll/fd_poll_runtime.go:84 +0x28 fp=0x400050f980 sp=0x400050f950 pc=0xce878
 internal/poll.(*pollDesc).waitRead(...)
 	/usr/local/go/src/internal/poll/fd_poll_runtime.go:89
-internal/poll.(*FD).Read(0x40001aa000, {0x4000624000, 0x1000, 0x1000})
-	/usr/local/go/src/internal/poll/fd_unix.go:165 +0x1fc fp=0x40000aba20 sp=0x40000ab980 pc=0xcfb2c
-net.(*netFD).Read(0x40001aa000, {0x4000624000?, 0x4000383ab8?, 0x35020c?})
-	/usr/local/go/src/net/fd_posix.go:55 +0x28 fp=0x40000aba70 sp=0x40000aba20 pc=0x226318
-net.(*conn).Read(0x4000430198, {0x4000624000?, 0x72?, 0x0?})
-	/usr/local/go/src/net/net.go:194 +0x34 fp=0x40000abac0 sp=0x40000aba70 pc=0x237c54
-net/http.(*connReader).Read(0x4000506120, {0x4000624000, 0x1000, 0x1000})
-	/usr/local/go/src/net/http/server.go:798 +0x234 fp=0x40000abb20 sp=0x40000abac0 pc=0x350414
-bufio.(*Reader).fill(0x40004a8600)
-	/usr/local/go/src/bufio/bufio.go:113 +0xf8 fp=0x40000abb60 sp=0x40000abb20 pc=0x18a008
-bufio.(*Reader).Peek(0x40004a8600, 0x4)
-	/usr/local/go/src/bufio/bufio.go:152 +0x60 fp=0x40000abb80 sp=0x40000abb60 pc=0x18a170
-net/http.(*conn).serve(0x40004390e0, {0x182b0f8, 0x40005060c0})
-	/usr/local/go/src/net/http/server.go:2137 +0x664 fp=0x40000abfa0 sp=0x40000abb80 pc=0x3555b4
+internal/poll.(*FD).Read(0x400035b980, {0x40005aa000, 0x1000, 0x1000})
+	/usr/local/go/src/internal/poll/fd_unix.go:165 +0x1fc fp=0x400050fa20 sp=0x400050f980 pc=0xcfb2c
+net.(*netFD).Read(0x400035b980, {0x40005aa000?, 0x40004bfab8?, 0x35020c?})
+	/usr/local/go/src/net/fd_posix.go:55 +0x28 fp=0x400050fa70 sp=0x400050fa20 pc=0x226318
+net.(*conn).Read(0x40000adb40, {0x40005aa000?, 0x72?, 0x0?})
+	/usr/local/go/src/net/net.go:194 +0x34 fp=0x400050fac0 sp=0x400050fa70 pc=0x237c54
+net/http.(*connReader).Read(0x40005a8030, {0x40005aa000, 0x1000, 0x1000})
+	/usr/local/go/src/net/http/server.go:798 +0x234 fp=0x400050fb20 sp=0x400050fac0 pc=0x350414
+bufio.(*Reader).fill(0x400009ed80)
+	/usr/local/go/src/bufio/bufio.go:113 +0xf8 fp=0x400050fb60 sp=0x400050fb20 pc=0x18a008
+bufio.(*Reader).Peek(0x400009ed80, 0x4)
+	/usr/local/go/src/bufio/bufio.go:152 +0x60 fp=0x400050fb80 sp=0x400050fb60 pc=0x18a170
+net/http.(*conn).serve(0x400059af30, {0x182b0f8, 0x400048c150})
+	/usr/local/go/src/net/http/server.go:2137 +0x664 fp=0x400050ffa0 sp=0x400050fb80 pc=0x3555b4
 net/http.(*Server).Serve.gowrap3()
-	/usr/local/go/src/net/http/server.go:3454 +0x30 fp=0x40000abfd0 sp=0x40000abfa0 pc=0x35a650
+	/usr/local/go/src/net/http/server.go:3454 +0x30 fp=0x400050ffd0 sp=0x400050ffa0 pc=0x35a650
 runtime.goexit({})
-	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x40000abfd0 sp=0x40000abfd0 pc=0x8fdc4
+	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x400050ffd0 sp=0x400050ffd0 pc=0x8fdc4
 created by net/http.(*Server).Serve in goroutine 35
 	/usr/local/go/src/net/http/server.go:3454 +0x3d8
 
-goroutine 350 gp=0x400008b6c0 m=nil [select, 1 minutes]:
-runtime.gopark(0x400043ff98?, 0x2?, 0xc0?, 0x45?, 0x400043ff6c?)
-	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x400043fe00 sp=0x400043fde0 pc=0x87d18
-runtime.selectgo(0x400043ff98, 0x400043ff68, 0xa131c0?, 0x0, 0xb3b800?, 0x1)
-	/usr/local/go/src/runtime/select.go:351 +0x6c4 fp=0x400043ff30 sp=0x400043fe00 pc=0x65cc4
+goroutine 97 gp=0x4000455a40 m=nil [select, 2 minutes]:
+runtime.gopark(0x40004daf98?, 0x2?, 0x38?, 0xae?, 0x40004daf6c?)
+	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x40004dae00 sp=0x40004dade0 pc=0x87d18
+runtime.selectgo(0x40004daf98, 0x40004daf68, 0x0?, 0x0, 0x0?, 0x1)
+	/usr/local/go/src/runtime/select.go:351 +0x6c4 fp=0x40004daf30 sp=0x40004dae00 pc=0x65cc4
 context.(*cancelCtx).propagateCancel.func2()
-	/usr/local/go/src/context/context.go:514 +0x88 fp=0x400043ffd0 sp=0x400043ff30 pc=0xe5a18
+	/usr/local/go/src/context/context.go:514 +0x88 fp=0x40004dafd0 sp=0x40004daf30 pc=0xe5a18
 runtime.goexit({})
-	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x400043ffd0 sp=0x400043ffd0 pc=0x8fdc4
-created by context.(*cancelCtx).propagateCancel in goroutine 303
+	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x40004dafd0 sp=0x40004dafd0 pc=0x8fdc4
+created by context.(*cancelCtx).propagateCancel in goroutine 82
 	/usr/local/go/src/context/context.go:513 +0x4b8
 
-goroutine 349 gp=0x4000522700 m=nil [select, 1 minutes]:
-runtime.gopark(0x4000440d28?, 0x2?, 0x20?, 0x70?, 0x4000440d0c?)
-	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x4000440ba0 sp=0x4000440b80 pc=0x87d18
-runtime.selectgo(0x4000440d28, 0x4000440d08, 0x0?, 0x0, 0x4000440d58?, 0x1)
-	/usr/local/go/src/runtime/select.go:351 +0x6c4 fp=0x4000440cd0 sp=0x4000440ba0 pc=0x65cc4
-github.com/pion/transport/v3/packetio.(*Buffer).Read(0x4000631800, {0x400078a000, 0x5dc, 0x5dc})
-	/go/pkg/mod/github.com/pion/transport/v3@v3.0.7/packetio/buffer.go:255 +0x1a8 fp=0x4000440d50 sp=0x4000440cd0 pc=0x3e62f8
-github.com/pion/srtp/v3.(*ReadStreamSRTCP).Read(...)
-	/go/pkg/mod/github.com/pion/srtp/v3@v3.0.6/stream_srtcp.go:66
-github.com/pion/webrtc/v4.(*srtpWriterFuture).Read(0x40000a4300?, {0x400078a000?, 0x4000069008?, 0x65cc4?})
-	/go/pkg/mod/github.com/aler9/webrtc/v4@v4.0.0-20250228091429-18796cd12b4f/srtp_writer_future.go:98 +0x88 fp=0x4000440db0 sp=0x4000440d50 pc=0x864378
-github.com/pion/webrtc/v4.(*srtpWriterFuture).Read(0x40000a4300, {0x400078a000, 0x5dc, 0x5dc})
-	/go/pkg/mod/github.com/aler9/webrtc/v4@v4.0.0-20250228091429-18796cd12b4f/srtp_writer_future.go:105 +0x128 fp=0x4000440e10 sp=0x4000440db0 pc=0x864418
-github.com/pion/webrtc/v4.(*RTPSender).Send.func1({0x400078a000?, 0x37ad0?, 0x1?}, 0x0)
-	/go/pkg/mod/github.com/aler9/webrtc/v4@v4.0.0-20250228091429-18796cd12b4f/rtpsender.go:329 +0x3c fp=0x4000440e40 sp=0x4000440e10 pc=0x85676c
-github.com/pion/interceptor.RTCPReaderFunc.Read(0x1?, {0x400078a000?, 0x7fff6122e750?, 0x849649?}, 0x4000502760?)
-	/go/pkg/mod/github.com/pion/interceptor@v0.1.40/interceptor.go:102 +0x38 fp=0x4000440e70 sp=0x4000440e40 pc=0x752e08
-github.com/pion/interceptor/pkg/nack.(*ResponderInterceptor).BindRTCPReader.func1({0x400078a000, 0x7fff6122e750?, 0x5dc}, 0x600?)
-	/go/pkg/mod/github.com/pion/interceptor@v0.1.40/pkg/nack/responder_interceptor.go:74 +0x4c fp=0x4000440ef0 sp=0x4000440e70 pc=0x81e7fc
-github.com/pion/interceptor.RTCPReaderFunc.Read(0x4000440f68?, {0x400078a000?, 0x1840240?, 0x0?}, 0xa13101?)
-	/go/pkg/mod/github.com/pion/interceptor@v0.1.40/interceptor.go:102 +0x38 fp=0x4000440f20 sp=0x4000440ef0 pc=0x752e08
-github.com/pion/webrtc/v4.(*RTPSender).Read(0x40001aa600, {0x400078a000, 0x5dc, 0x5dc})
-	/go/pkg/mod/github.com/aler9/webrtc/v4@v4.0.0-20250228091429-18796cd12b4f/rtpsender.go:414 +0x98 fp=0x4000440f90 sp=0x4000440f20 pc=0x856b88
-github.com/bluenviron/mediamtx/internal/protocols/webrtc.(*OutgoingTrack).setup.func2()
-	/s/internal/protocols/webrtc/outgoing_track.go:76 +0x54 fp=0x4000440fd0 sp=0x4000440f90 pc=0x8732c4
+goroutine 32 gp=0x4000455c00 m=nil [select]:
+runtime.gopark(0x40005afb68?, 0x4?, 0x0?, 0x0?, 0x40005af9d8?)
+	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x40005af840 sp=0x40005af820 pc=0x87d18
+runtime.selectgo(0x40005afb68, 0x40005af9d0, 0x392f343632482039?, 0x0, 0x9cef00?, 0x1)
+	/usr/local/go/src/runtime/select.go:351 +0x6c4 fp=0x40005af970 sp=0x40005af840 pc=0x65cc4
+github.com/pion/mdns/v2.(*Conn).QueryAddr(_, {_, _}, {_, _})
+	/go/pkg/mod/github.com/pion/mdns/v2@v2.0.7/conn.go:445 +0x314 fp=0x40005afd10 sp=0x40005af970 pc=0x7d3554
+github.com/pion/ice/v4.(*Agent).resolveAndAddMulticastCandidate(0x400056e608, 0x40001ac0f0)
+	/go/pkg/mod/github.com/aler9/ice/v4@v4.0.0-20250301104324-b2df7db9f75d/agent.go:663 +0x4c fp=0x40005affb0 sp=0x40005afd10 pc=0x7ee38c
+github.com/pion/ice/v4.(*Agent).AddRemoteCandidate.gowrap1()
+	/go/pkg/mod/github.com/aler9/ice/v4@v4.0.0-20250301104324-b2df7db9f75d/agent.go:639 +0x2c fp=0x40005affd0 sp=0x40005affb0 pc=0x7ee30c
 runtime.goexit({})
-	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x4000440fd0 sp=0x4000440fd0 pc=0x8fdc4
-created by github.com/bluenviron/mediamtx/internal/protocols/webrtc.(*OutgoingTrack).setup in goroutine 342
-	/s/internal/protocols/webrtc/outgoing_track.go:73 +0x2dc
+	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x40005affd0 sp=0x40005affd0 pc=0x8fdc4
+created by github.com/pion/ice/v4.(*Agent).AddRemoteCandidate in goroutine 66
+	/go/pkg/mod/github.com/aler9/ice/v4@v4.0.0-20250301104324-b2df7db9f75d/agent.go:639 +0x198
 
-goroutine 331 gp=0x40000f4000 m=nil [IO wait, 1 minutes]:
-runtime.gopark(0x40004260f0?, 0x40009960c0?, 0x0?, 0x0?, 0x40008c8ab0?)
-	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x40008c8ac0 sp=0x40008c8aa0 pc=0x87d18
-runtime.netpollblock(0xbb2eb1?, 0x3?, 0x0?)
-	/usr/local/go/src/runtime/netpoll.go:575 +0x158 fp=0x40008c8b00 sp=0x40008c8ac0 pc=0x4b028
-internal/poll.runtime_pollWait(0x7fff613b5aa8, 0x72)
-	/usr/local/go/src/runtime/netpoll.go:351 +0xa0 fp=0x40008c8b30 sp=0x40008c8b00 pc=0x86ed0
-internal/poll.(*pollDesc).wait(0x4000350280?, 0x7fff613f0aa8?, 0x0)
-	/usr/local/go/src/internal/poll/fd_poll_runtime.go:84 +0x28 fp=0x40008c8b60 sp=0x40008c8b30 pc=0xce878
-internal/poll.(*pollDesc).waitRead(...)
-	/usr/local/go/src/internal/poll/fd_poll_runtime.go:89
-internal/poll.(*FD).RawRead(0x4000350280, 0x400094e910)
-	/usr/local/go/src/internal/poll/fd_unix.go:717 +0x12c fp=0x40008c8bc0 sp=0x40008c8b60 pc=0xd3ddc
-net.(*rawConn).Read(0x4000a063c8, 0xa0ae80?)
-	/usr/local/go/src/net/rawconn.go:44 +0x30 fp=0x40008c8c00 sp=0x40008c8bc0 pc=0x23bbb0
-golang.org/x/net/internal/socket.(*Conn).recvMsg(0x40000b5040, 0x400087e420, 0x0)
-	/go/pkg/mod/golang.org/x/net@v0.42.0/internal/socket/rawconn_msg.go:27 +0x130 fp=0x40008c8c60 sp=0x40008c8c00 pc=0x7bc9b0
-golang.org/x/net/internal/socket.(*Conn).RecvMsg(...)
-	/go/pkg/mod/golang.org/x/net@v0.42.0/internal/socket/socket.go:247
-golang.org/x/net/ipv6.(*payloadHandler).ReadFrom(0x400094e600, {0x4000556000, 0x230c, 0x230c})
-	/go/pkg/mod/golang.org/x/net@v0.42.0/ipv6/payload_cmsg.go:31 +0x338 fp=0x40008c8d60 sp=0x40008c8c60 pc=0x7ce208
-github.com/pion/mdns/v2.ipPacketConn6.ReadFrom({{0x4000543c90, 0xc}, 0x400094e5f0, {0x18329e8, 0x4000216c00}}, {0x4000556000?, 0x40008c8e01?, 0x99cb0?})
-	/go/pkg/mod/github.com/pion/mdns/v2@v2.0.7/conn.go:833 +0x48 fp=0x40008c8dc0 sp=0x40008c8d60 pc=0x7d65c8
-github.com/pion/mdns/v2.(*ipPacketConn6).ReadFrom(0x40008c8e58?, {0x4000556000?, 0x40008c8ea8?, 0x1f54c?})
-	<autogenerated>:1 +0x70 fp=0x40008c8e40 sp=0x40008c8dc0 pc=0x7d9c60
-github.com/pion/mdns/v2.(*Conn).readLoop(0x4000436340, {0xbb4a45, 0x4}, {0x182a830, 0x40004233e0}, 0x230c, 0x4000350180)
-	/go/pkg/mod/github.com/pion/mdns/v2@v2.0.7/conn.go:863 +0x90 fp=0x40008c8f50 sp=0x40008c8e40 pc=0x7d69a0
-github.com/pion/mdns/v2.(*Conn).start.func5()
-	/go/pkg/mod/github.com/pion/mdns/v2@v2.0.7/conn.go:1161 +0x8c fp=0x40008c8fd0 sp=0x40008c8f50 pc=0x7d8d2c
-runtime.goexit({})
-	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x40008c8fd0 sp=0x40008c8fd0 pc=0x8fdc4
-created by github.com/pion/mdns/v2.(*Conn).start in goroutine 328
-	/go/pkg/mod/github.com/pion/mdns/v2@v2.0.7/conn.go:1156 +0x2c0
-
-goroutine 328 gp=0x4000523340 m=nil [chan receive, 1 minutes]:
-runtime.gopark(0x40008fc4e0?, 0x400009f3e0?, 0xb8?, 0xee?, 0x1fd40?)
-	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x400032ee70 sp=0x400032ee50 pc=0x87d18
-runtime.chanrecv(0x4000a1c540, 0x0, 0x1)
-	/usr/local/go/src/runtime/chan.go:664 +0x42c fp=0x400032eef0 sp=0x400032ee70 pc=0x2033c
-runtime.chanrecv1(0x4000a1c460?, 0x0?)
-	/usr/local/go/src/runtime/chan.go:506 +0x14 fp=0x400032ef20 sp=0x400032eef0 pc=0x1fed4
-github.com/pion/mdns/v2.(*Conn).start(0x4000436340, 0x4000a1c460, 0x230c, 0x4000350180)
-	/go/pkg/mod/github.com/pion/mdns/v2@v2.0.7/conn.go:1169 +0x320 fp=0x400032efa0 sp=0x400032ef20 pc=0x7d8c40
-github.com/pion/mdns/v2.Server.gowrap1()
-	/go/pkg/mod/github.com/pion/mdns/v2@v2.0.7/conn.go:347 +0x34 fp=0x400032efd0 sp=0x400032efa0 pc=0x7d2b14
-runtime.goexit({})
-	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x400032efd0 sp=0x400032efd0 pc=0x8fdc4
-created by github.com/pion/mdns/v2.Server in goroutine 342
-	/go/pkg/mod/github.com/pion/mdns/v2@v2.0.7/conn.go:347 +0x18ec
-
-goroutine 393 gp=0x40000f4540 m=nil [select, 1 minutes]:
-runtime.gopark(0x4000383e78?, 0x2?, 0x8?, 0x90?, 0x4000383e5c?)
-	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x4000484cf0 sp=0x4000484cd0 pc=0x87d18
-runtime.selectgo(0x4000484e78, 0x4000383e58, 0x40000aee60?, 0x0, 0x40000df6c0?, 0x1)
-	/usr/local/go/src/runtime/select.go:351 +0x6c4 fp=0x4000484e20 sp=0x4000484cf0 pc=0x65cc4
-github.com/pion/dtls/v3.(*handshakeFSM).finish(0x40005de230, {0x182b130, 0x40005de2d0}, {0x1830100?, 0x40001b8808?})
-	/go/pkg/mod/github.com/pion/dtls/v3@v3.0.4/handshaker.go:338 +0x8c fp=0x4000484ea0 sp=0x4000484e20 pc=0x78352c
-github.com/pion/dtls/v3.(*handshakeFSM).Run(0x40005de230, {0x182b130, 0x40005de2d0}, {0x1830100, 0x40001b8808}, 0x0?)
-	/go/pkg/mod/github.com/pion/dtls/v3@v3.0.4/handshaker.go:201 +0x378 fp=0x4000484f40 sp=0x4000484ea0 pc=0x782748
-github.com/pion/dtls/v3.(*Conn).handshake.func2()
-	/go/pkg/mod/github.com/pion/dtls/v3@v3.0.4/conn.go:1063 +0x70 fp=0x4000484fd0 sp=0x4000484f40 pc=0x7738a0
-runtime.goexit({})
-	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x4000484fd0 sp=0x4000484fd0 pc=0x8fdc4
-created by github.com/pion/dtls/v3.(*Conn).handshake in goroutine 327
-	/go/pkg/mod/github.com/pion/dtls/v3@v3.0.4/conn.go:1061 +0x364
-
-goroutine 372 gp=0x4000523dc0 m=nil [select]:
-runtime.gopark(0x4000489ea8?, 0x2?, 0x30?, 0x4f?, 0x4000489e64?)
-	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x4000489cf0 sp=0x4000489cd0 pc=0x87d18
-runtime.selectgo(0x4000489ea8, 0x4000489e60, 0x46?, 0x0, 0x40007f6300?, 0x1)
-	/usr/local/go/src/runtime/select.go:351 +0x6c4 fp=0x4000489e20 sp=0x4000489cf0 pc=0x65cc4
-github.com/pion/ice/v4.(*udpMuxedConn).ReadFrom(0x40008b20a0, {0x400020a000, 0x2000, 0x2000?})
-	/go/pkg/mod/github.com/aler9/ice/v4@v4.0.0-20250301104324-b2df7db9f75d/udp_muxed_conn.go:87 +0x158 fp=0x4000489ed0 sp=0x4000489e20 pc=0x812f68
-github.com/pion/ice/v4.(*candidateBase).recvLoop(0x40008d6000, 0x4000489fa8?)
-	/go/pkg/mod/github.com/aler9/ice/v4@v4.0.0-20250301104324-b2df7db9f75d/candidate_base.go:244 +0x19c fp=0x4000489fb0 sp=0x4000489ed0 pc=0x7f5cfc
-github.com/pion/ice/v4.(*candidateBase).start.gowrap1()
-	/go/pkg/mod/github.com/aler9/ice/v4@v4.0.0-20250301104324-b2df7db9f75d/candidate_base.go:216 +0x2c fp=0x4000489fd0 sp=0x4000489fb0 pc=0x7f5b2c
-runtime.goexit({})
-	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x4000489fd0 sp=0x4000489fd0 pc=0x8fdc4
-created by github.com/pion/ice/v4.(*candidateBase).start in goroutine 303
-	/go/pkg/mod/github.com/aler9/ice/v4@v4.0.0-20250301104324-b2df7db9f75d/candidate_base.go:216 +0x12c
-
-goroutine 359 gp=0x4000403880 m=nil [select]:
-runtime.gopark(0x4000723ef8?, 0x2?, 0x1?, 0x0?, 0x4000723edc?)
-	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x4000723d70 sp=0x4000723d50 pc=0x87d18
-runtime.selectgo(0x4000723ef8, 0x4000723ed8, 0x400012c540?, 0x0, 0x38?, 0x1)
-	/usr/local/go/src/runtime/select.go:351 +0x6c4 fp=0x4000723ea0 sp=0x4000723d70 pc=0x65cc4
-github.com/pion/transport/v3/packetio.(*Buffer).Read(0x4000252720, {0x400021c000, 0x2000, 0x2000})
-	/go/pkg/mod/github.com/pion/transport/v3@v3.0.7/packetio/buffer.go:255 +0x1a8 fp=0x4000723f20 sp=0x4000723ea0 pc=0x3e62f8
-github.com/pion/webrtc/v4/internal/mux.(*Endpoint).Read(0x400012c540?, {0x400021c000?, 0x1fd4200?, 0x100010000?})
-	/go/pkg/mod/github.com/aler9/webrtc/v4@v4.0.0-20250228091429-18796cd12b4f/internal/mux/endpoint.go:45 +0x24 fp=0x4000723f50 sp=0x4000723f20 pc=0x8191c4
-github.com/pion/srtp/v3.(*session).start.func1()
-	/go/pkg/mod/github.com/pion/srtp/v3@v3.0.6/session.go:150 +0xa4 fp=0x4000723fd0 sp=0x4000723f50 pc=0x3ea134
-runtime.goexit({})
-	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x4000723fd0 sp=0x4000723fd0 pc=0x8fdc4
-created by github.com/pion/srtp/v3.(*session).start in goroutine 327
-	/go/pkg/mod/github.com/pion/srtp/v3@v3.0.6/session.go:137 +0x20c
-
-goroutine 348 gp=0x40000f5340 m=nil [select]:
-runtime.gopark(0x40008c6f68?, 0x2?, 0x8?, 0x88?, 0x40008c6f4c?)
-	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x40008c6dd0 sp=0x40008c6db0 pc=0x87d18
-runtime.selectgo(0x40008c6f68, 0x40008c6f48, 0x233c8adc477bfae2?, 0x0, 0x45b0c1325ee21618?, 0x1)
-	/usr/local/go/src/runtime/select.go:351 +0x6c4 fp=0x40008c6f00 sp=0x40008c6dd0 pc=0x65cc4
-github.com/bluenviron/gortsplib/v4/pkg/rtcpsender.(*RTCPSender).run(0x4000251c20)
-	/go/pkg/mod/github.com/bluenviron/gortsplib/v4@v4.16.0/pkg/rtcpsender/rtcpsender.go:87 +0xbc fp=0x40008c6fb0 sp=0x40008c6f00 pc=0x3dd74c
-github.com/bluenviron/gortsplib/v4/pkg/rtcpsender.(*RTCPSender).Initialize.gowrap1()
-	/go/pkg/mod/github.com/bluenviron/gortsplib/v4@v4.16.0/pkg/rtcpsender/rtcpsender.go:71 +0x28 fp=0x40008c6fd0 sp=0x40008c6fb0 pc=0x3dd5f8
-runtime.goexit({})
-	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x40008c6fd0 sp=0x40008c6fd0 pc=0x8fdc4
-created by github.com/bluenviron/gortsplib/v4/pkg/rtcpsender.(*RTCPSender).Initialize in goroutine 342
-	/go/pkg/mod/github.com/bluenviron/gortsplib/v4@v4.16.0/pkg/rtcpsender/rtcpsender.go:71 +0x100
-
-goroutine 330 gp=0x40000f5500 m=nil [IO wait, 1 minutes]:
-runtime.gopark(0xc315?, 0x40009960f0?, 0x0?, 0x0?, 0x7d09a8c0?)
-	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x400032fb10 sp=0x400032faf0 pc=0x87d18
-runtime.netpollblock(0xbb2eb1?, 0x3?, 0x0?)
-	/usr/local/go/src/runtime/netpoll.go:575 +0x158 fp=0x400032fb50 sp=0x400032fb10 pc=0x4b028
-internal/poll.runtime_pollWait(0x7fff613b5990, 0x72)
-	/usr/local/go/src/runtime/netpoll.go:351 +0xa0 fp=0x400032fb80 sp=0x400032fb50 pc=0x86ed0
-internal/poll.(*pollDesc).wait(0x4000350200?, 0x7fff613f0aa8?, 0x0)
-	/usr/local/go/src/internal/poll/fd_poll_runtime.go:84 +0x28 fp=0x400032fbb0 sp=0x400032fb80 pc=0xce878
-internal/poll.(*pollDesc).waitRead(...)
-	/usr/local/go/src/internal/poll/fd_poll_runtime.go:89
-internal/poll.(*FD).RawRead(0x4000350200, 0x400094e9b0)
-	/usr/local/go/src/internal/poll/fd_unix.go:717 +0x12c fp=0x400032fc10 sp=0x400032fbb0 pc=0xd3ddc
-net.(*rawConn).Read(0x4000a063b8, 0xa0ae80?)
-	/usr/local/go/src/net/rawconn.go:44 +0x30 fp=0x400032fc50 sp=0x400032fc10 pc=0x23bbb0
-golang.org/x/net/internal/socket.(*Conn).recvMsg(0x40000b5020, 0x400087e4e0, 0x0)
-	/go/pkg/mod/golang.org/x/net@v0.42.0/internal/socket/rawconn_msg.go:27 +0x130 fp=0x400032fcb0 sp=0x400032fc50 pc=0x7bc9b0
-golang.org/x/net/internal/socket.(*Conn).RecvMsg(...)
-	/go/pkg/mod/golang.org/x/net@v0.42.0/internal/socket/socket.go:247
-golang.org/x/net/ipv4.(*payloadHandler).ReadFrom(0x400094e560, {0x400055aa00, 0x230c, 0x230c})
-	/go/pkg/mod/golang.org/x/net@v0.42.0/ipv4/payload_cmsg.go:31 +0x460 fp=0x400032fd60 sp=0x400032fcb0 pc=0x7c7010
-github.com/pion/mdns/v2.ipPacketConn4.ReadFrom({{0x4000543c90, 0xc}, 0x400094e550, {0x18329e8, 0x4000216c00}}, {0x400055aa00?, 0x2?, 0x400032fdd0?})
-	/go/pkg/mod/github.com/pion/mdns/v2@v2.0.7/conn.go:801 +0x48 fp=0x400032fdc0 sp=0x400032fd60 pc=0x7d6238
-github.com/pion/mdns/v2.(*ipPacketConn4).ReadFrom(0x400032fea8?, {0x400055aa00?, 0x400032fe88?, 0x71908?})
-	<autogenerated>:1 +0x70 fp=0x400032fe40 sp=0x400032fdc0 pc=0x7d9a20
-github.com/pion/mdns/v2.(*Conn).readLoop(0x4000436340, {0xbb4a49, 0x4}, {0x182a800, 0x4000423350}, 0x230c, 0x4000350180)
-	/go/pkg/mod/github.com/pion/mdns/v2@v2.0.7/conn.go:863 +0x90 fp=0x400032ff50 sp=0x400032fe40 pc=0x7d69a0
-github.com/pion/mdns/v2.(*Conn).start.func4()
-	/go/pkg/mod/github.com/pion/mdns/v2@v2.0.7/conn.go:1151 +0x8c fp=0x400032ffd0 sp=0x400032ff50 pc=0x7d8e3c
-runtime.goexit({})
-	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x400032ffd0 sp=0x400032ffd0 pc=0x8fdc4
-created by github.com/pion/mdns/v2.(*Conn).start in goroutine 328
-	/go/pkg/mod/github.com/pion/mdns/v2@v2.0.7/conn.go:1146 +0x22c
-
-goroutine 329 gp=0x40000f5880 m=nil [IO wait]:
-runtime.gopark(0x400013bb48?, 0x400000d4b8?, 0x20?, 0x3c?, 0x7fff61091cc0?)
-	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x400013bb10 sp=0x400013baf0 pc=0x87d18
-runtime.netpollblock(0xbb2eb1?, 0x3?, 0x0?)
-	/usr/local/go/src/runtime/netpoll.go:575 +0x158 fp=0x400013bb50 sp=0x400013bb10 pc=0x4b028
-internal/poll.runtime_pollWait(0x7fff613b5878, 0x72)
-	/usr/local/go/src/runtime/netpoll.go:351 +0xa0 fp=0x400013bb80 sp=0x400013bb50 pc=0x86ed0
-internal/poll.(*pollDesc).wait(0x4000350080?, 0x7fff611f0260?, 0x0)
-	/usr/local/go/src/internal/poll/fd_poll_runtime.go:84 +0x28 fp=0x400013bbb0 sp=0x400013bb80 pc=0xce878
-internal/poll.(*pollDesc).waitRead(...)
-	/usr/local/go/src/internal/poll/fd_poll_runtime.go:89
-internal/poll.(*FD).RawRead(0x4000350080, 0x40008cf900)
-	/usr/local/go/src/internal/poll/fd_unix.go:717 +0x12c fp=0x400013bc10 sp=0x400013bbb0 pc=0xd3ddc
-net.(*rawConn).Read(0x4000a063a0, 0xa0ae80?)
-	/usr/local/go/src/net/rawconn.go:44 +0x30 fp=0x400013bc50 sp=0x400013bc10 pc=0x23bbb0
-golang.org/x/net/internal/socket.(*Conn).recvMsg(0x40000b4fe0, 0x4000992fc0, 0x0)
-	/go/pkg/mod/golang.org/x/net@v0.42.0/internal/socket/rawconn_msg.go:27 +0x130 fp=0x400013bcb0 sp=0x400013bc50 pc=0x7bc9b0
-golang.org/x/net/internal/socket.(*Conn).RecvMsg(...)
-	/go/pkg/mod/golang.org/x/net@v0.42.0/internal/socket/socket.go:247
-golang.org/x/net/ipv4.(*payloadHandler).ReadFrom(0x400094e510, {0x4000558500, 0x230c, 0x230c})
-	/go/pkg/mod/golang.org/x/net@v0.42.0/ipv4/payload_cmsg.go:31 +0x460 fp=0x400013bd60 sp=0x400013bcb0 pc=0x7c7010
-github.com/pion/mdns/v2.ipPacketConn4.ReadFrom({{0x4000543c90, 0xc}, 0x400094e500, {0x18329e8, 0x4000216c00}}, {0x4000558500?, 0x40003d9601?, 0x4000428150?})
-	/go/pkg/mod/github.com/pion/mdns/v2@v2.0.7/conn.go:801 +0x48 fp=0x400013bdc0 sp=0x400013bd60 pc=0x7d6238
-github.com/pion/mdns/v2.(*ipPacketConn4).ReadFrom(0x400013bed8?, {0x4000558500?, 0x230c?, 0x400035eba0?})
-	<autogenerated>:1 +0x70 fp=0x400013be40 sp=0x400013bdc0 pc=0x7d9a20
-github.com/pion/mdns/v2.(*Conn).readLoop(0x4000436340, {0xbbd951, 0x6}, {0x182a800, 0x40004232c0}, 0x230c, 0x4000350180)
-	/go/pkg/mod/github.com/pion/mdns/v2@v2.0.7/conn.go:863 +0x90 fp=0x400013bf50 sp=0x400013be40 pc=0x7d69a0
-github.com/pion/mdns/v2.(*Conn).start.func2()
-	/go/pkg/mod/github.com/pion/mdns/v2@v2.0.7/conn.go:1131 +0x8c fp=0x400013bfd0 sp=0x400013bf50 pc=0x7d905c
-runtime.goexit({})
-	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x400013bfd0 sp=0x400013bfd0 pc=0x8fdc4
-created by github.com/pion/mdns/v2.(*Conn).start in goroutine 328
-	/go/pkg/mod/github.com/pion/mdns/v2@v2.0.7/conn.go:1126 +0x100
-
-goroutine 344 gp=0x40000f5dc0 m=nil [select, 1 minutes]:
-runtime.gopark(0x400023ef40?, 0x2?, 0x0?, 0x0?, 0x400023ef04?)
-	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x400023ed80 sp=0x400023ed60 pc=0x87d18
-runtime.selectgo(0x400023ef40, 0x400023ef00, 0x0?, 0x0, 0x0?, 0x1)
-	/usr/local/go/src/runtime/select.go:351 +0x6c4 fp=0x400023eeb0 sp=0x400023ed80 pc=0x65cc4
-github.com/pion/interceptor/pkg/twcc.(*SenderInterceptor).loop(0x400087f440, {0x1823100, 0x40000b2230})
-	/go/pkg/mod/github.com/pion/interceptor@v0.1.40/pkg/twcc/sender_interceptor.go:190 +0xa4 fp=0x400023efa0 sp=0x400023eeb0 pc=0x823ad4
-github.com/pion/interceptor/pkg/twcc.(*SenderInterceptor).BindRTCPWriter.gowrap2()
-	/go/pkg/mod/github.com/pion/interceptor@v0.1.40/pkg/twcc/sender_interceptor.go:94 +0x30 fp=0x400023efd0 sp=0x400023efa0 pc=0x8232f0
-runtime.goexit({})
-	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x400023efd0 sp=0x400023efd0 pc=0x8fdc4
-created by github.com/pion/interceptor/pkg/twcc.(*SenderInterceptor).BindRTCPWriter in goroutine 342
-	/go/pkg/mod/github.com/pion/interceptor@v0.1.40/pkg/twcc/sender_interceptor.go:94 +0x180
-
-goroutine 343 gp=0x400008ba40 m=nil [select]:
-runtime.gopark(0x4000235f48?, 0x2?, 0x2?, 0x0?, 0x4000235f18?)
-	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x4000235d80 sp=0x4000235d60 pc=0x87d18
-runtime.selectgo(0x4000235f48, 0x4000235f14, 0x200?, 0x0, 0x400011ac00?, 0x1)
-	/usr/local/go/src/runtime/select.go:351 +0x6c4 fp=0x4000235eb0 sp=0x4000235d80 pc=0x65cc4
-github.com/pion/interceptor/pkg/nack.(*GeneratorInterceptor).loop(0x400087f3e0, {0x1823100, 0x40000b2230})
-	/go/pkg/mod/github.com/pion/interceptor@v0.1.40/pkg/nack/generator_interceptor.go:154 +0x154 fp=0x4000235fa0 sp=0x4000235eb0 pc=0x81d1c4
-github.com/pion/interceptor/pkg/nack.(*GeneratorInterceptor).BindRTCPWriter.gowrap2()
-	/go/pkg/mod/github.com/pion/interceptor@v0.1.40/pkg/nack/generator_interceptor.go:83 +0x30 fp=0x4000235fd0 sp=0x4000235fa0 pc=0x81c910
-runtime.goexit({})
-	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x4000235fd0 sp=0x4000235fd0 pc=0x8fdc4
-created by github.com/pion/interceptor/pkg/nack.(*GeneratorInterceptor).BindRTCPWriter in goroutine 342
-	/go/pkg/mod/github.com/pion/interceptor@v0.1.40/pkg/nack/generator_interceptor.go:83 +0x138
-
-goroutine 342 gp=0x40000de700 m=nil [select, 1 minutes]:
-runtime.gopark(0x400013fde0?, 0x3?, 0x0?, 0x4c?, 0x400013fa92?)
-	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x400013f870 sp=0x400013f850 pc=0x87d18
-runtime.selectgo(0x400013fde0, 0x400013fa8c, 0x400013fd28?, 0x0, 0x40007f7410?, 0x1)
-	/usr/local/go/src/runtime/select.go:351 +0x6c4 fp=0x400013f9a0 sp=0x400013f870 pc=0x65cc4
-github.com/bluenviron/mediamtx/internal/servers/webrtc.(*session).runRead(0x400012e900)
-	/s/internal/servers/webrtc/session.go:355 +0x8dc fp=0x400013fe40 sp=0x400013f9a0 pc=0x87fd0c
-github.com/bluenviron/mediamtx/internal/servers/webrtc.(*session).runInner2(0x400023eec0?)
-	/s/internal/servers/webrtc/session.go:134 +0x34 fp=0x400013fe60 sp=0x400013fe40 pc=0x87e944
-github.com/bluenviron/mediamtx/internal/servers/webrtc.(*session).runInner(0x400012e900)
-	/s/internal/servers/webrtc/session.go:118 +0x78 fp=0x400013ff20 sp=0x400013fe60 pc=0x87e878
-github.com/bluenviron/mediamtx/internal/servers/webrtc.(*session).run(0x400012e900)
-	/s/internal/servers/webrtc/session.go:102 +0x50 fp=0x400013ffb0 sp=0x400013ff20 pc=0x87e6f0
+goroutine 53 gp=0x4000093880 m=nil [select, 2 minutes]:
+runtime.gopark(0x4000511de0?, 0x3?, 0x40?, 0x8?, 0x4000511a92?)
+	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x4000511870 sp=0x4000511850 pc=0x87d18
+runtime.selectgo(0x4000511de0, 0x4000511a8c, 0x4000511d28?, 0x0, 0x4000363e00?, 0x1)
+	/usr/local/go/src/runtime/select.go:351 +0x6c4 fp=0x40005119a0 sp=0x4000511870 pc=0x65cc4
+github.com/bluenviron/mediamtx/internal/servers/webrtc.(*session).runRead(0x40001a8900)
+	/s/internal/servers/webrtc/session.go:355 +0x8dc fp=0x4000511e40 sp=0x40005119a0 pc=0x87fd0c
+github.com/bluenviron/mediamtx/internal/servers/webrtc.(*session).runInner2(0x400041eec0?)
+	/s/internal/servers/webrtc/session.go:134 +0x34 fp=0x4000511e60 sp=0x4000511e40 pc=0x87e944
+github.com/bluenviron/mediamtx/internal/servers/webrtc.(*session).runInner(0x40001a8900)
+	/s/internal/servers/webrtc/session.go:118 +0x78 fp=0x4000511f20 sp=0x4000511e60 pc=0x87e878
+github.com/bluenviron/mediamtx/internal/servers/webrtc.(*session).run(0x40001a8900)
+	/s/internal/servers/webrtc/session.go:102 +0x50 fp=0x4000511fb0 sp=0x4000511f20 pc=0x87e6f0
 github.com/bluenviron/mediamtx/internal/servers/webrtc.(*session).initialize.gowrap1()
-	/s/internal/servers/webrtc/session.go:86 +0x28 fp=0x400013ffd0 sp=0x400013ffb0 pc=0x87e3e8
+	/s/internal/servers/webrtc/session.go:86 +0x28 fp=0x4000511fd0 sp=0x4000511fb0 pc=0x87e3e8
 runtime.goexit({})
-	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x400013ffd0 sp=0x400013ffd0 pc=0x8fdc4
+	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x4000511fd0 sp=0x4000511fd0 pc=0x8fdc4
 created by github.com/bluenviron/mediamtx/internal/servers/webrtc.(*session).initialize in goroutine 37
 	/s/internal/servers/webrtc/session.go:86 +0x1d8
 
-goroutine 371 gp=0x40000dec40 m=nil [chan receive, 1 minutes]:
-runtime.gopark(0x4f357e7341048604?, 0xb743cdbf042f8?, 0x93?, 0xb3?, 0x33da8cc3365768f8?)
-	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x4000486ee0 sp=0x4000486ec0 pc=0x87d18
-runtime.chanrecv(0x40001085b0, 0x0, 0x1)
-	/usr/local/go/src/runtime/chan.go:664 +0x42c fp=0x4000486f60 sp=0x4000486ee0 pc=0x2033c
-runtime.chanrecv1(0x0?, 0x8fdc8?)
-	/usr/local/go/src/runtime/chan.go:506 +0x14 fp=0x4000486f90 sp=0x4000486f60 pc=0x1fed4
-github.com/pion/ice/v4.(*UDPMuxDefault).GetConn.func1()
-	/go/pkg/mod/github.com/aler9/ice/v4@v4.0.0-20250301104324-b2df7db9f75d/udp_mux.go:170 +0x40 fp=0x4000486fd0 sp=0x4000486f90 pc=0x811850
+goroutine 54 gp=0x4000093a40 m=nil [select]:
+runtime.gopark(0x400041ef48?, 0x2?, 0x2?, 0x0?, 0x400041ef18?)
+	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x400041ed80 sp=0x400041ed60 pc=0x87d18
+runtime.selectgo(0x400041ef48, 0x400041ef14, 0x200?, 0x0, 0x400014c400?, 0x1)
+	/usr/local/go/src/runtime/select.go:351 +0x6c4 fp=0x400041eeb0 sp=0x400041ed80 pc=0x65cc4
+github.com/pion/interceptor/pkg/nack.(*GeneratorInterceptor).loop(0x400009f3e0, {0x1823100, 0x4000496be0})
+	/go/pkg/mod/github.com/pion/interceptor@v0.1.40/pkg/nack/generator_interceptor.go:154 +0x154 fp=0x400041efa0 sp=0x400041eeb0 pc=0x81d1c4
+github.com/pion/interceptor/pkg/nack.(*GeneratorInterceptor).BindRTCPWriter.gowrap2()
+	/go/pkg/mod/github.com/pion/interceptor@v0.1.40/pkg/nack/generator_interceptor.go:83 +0x30 fp=0x400041efd0 sp=0x400041efa0 pc=0x81c910
 runtime.goexit({})
-	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x4000486fd0 sp=0x4000486fd0 pc=0x8fdc4
-created by github.com/pion/ice/v4.(*UDPMuxDefault).GetConn in goroutine 352
-	/go/pkg/mod/github.com/aler9/ice/v4@v4.0.0-20250301104324-b2df7db9f75d/udp_mux.go:169 +0x240
+	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x400041efd0 sp=0x400041efd0 pc=0x8fdc4
+created by github.com/pion/interceptor/pkg/nack.(*GeneratorInterceptor).BindRTCPWriter in goroutine 53
+	/go/pkg/mod/github.com/pion/interceptor@v0.1.40/pkg/nack/generator_interceptor.go:83 +0x138
 
-goroutine 375 gp=0x40000dee00 m=nil [select]:
-runtime.gopark(0x4000233ea8?, 0x2?, 0xc0?, 0x4f?, 0x4000233e64?)
-	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x4000233cf0 sp=0x4000233cd0 pc=0x87d18
-runtime.selectgo(0x4000233ea8, 0x4000233e60, 0x46?, 0x0, 0x40007f6a80?, 0x1)
-	/usr/local/go/src/runtime/select.go:351 +0x6c4 fp=0x4000233e20 sp=0x4000233cf0 pc=0x65cc4
-github.com/pion/ice/v4.(*udpMuxedConn).ReadFrom(0x40008b20a0, {0x40008d8000, 0x2000, 0x2000?})
-	/go/pkg/mod/github.com/aler9/ice/v4@v4.0.0-20250301104324-b2df7db9f75d/udp_muxed_conn.go:87 +0x158 fp=0x4000233ed0 sp=0x4000233e20 pc=0x812f68
-github.com/pion/ice/v4.(*candidateBase).recvLoop(0x40008d61e0, 0x40001e0660?)
-	/go/pkg/mod/github.com/aler9/ice/v4@v4.0.0-20250301104324-b2df7db9f75d/candidate_base.go:244 +0x19c fp=0x4000233fb0 sp=0x4000233ed0 pc=0x7f5cfc
-github.com/pion/ice/v4.(*candidateBase).start.gowrap1()
-	/go/pkg/mod/github.com/aler9/ice/v4@v4.0.0-20250301104324-b2df7db9f75d/candidate_base.go:216 +0x2c fp=0x4000233fd0 sp=0x4000233fb0 pc=0x7f5b2c
+goroutine 55 gp=0x4000093c00 m=nil [select, 2 minutes]:
+runtime.gopark(0x400005e740?, 0x2?, 0x0?, 0x31?, 0x400005e704?)
+	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x40004ddd80 sp=0x40004ddd60 pc=0x87d18
+runtime.selectgo(0x40004ddf40, 0x400005e700, 0x4000498000?, 0x0, 0x400005e6f0?, 0x1)
+	/usr/local/go/src/runtime/select.go:351 +0x6c4 fp=0x40004ddeb0 sp=0x40004ddd80 pc=0x65cc4
+github.com/pion/interceptor/pkg/twcc.(*SenderInterceptor).loop(0x400009f440, {0x1823100, 0x4000496be0})
+	/go/pkg/mod/github.com/pion/interceptor@v0.1.40/pkg/twcc/sender_interceptor.go:190 +0xa4 fp=0x40004ddfa0 sp=0x40004ddeb0 pc=0x823ad4
+github.com/pion/interceptor/pkg/twcc.(*SenderInterceptor).BindRTCPWriter.gowrap2()
+	/go/pkg/mod/github.com/pion/interceptor@v0.1.40/pkg/twcc/sender_interceptor.go:94 +0x30 fp=0x40004ddfd0 sp=0x40004ddfa0 pc=0x8232f0
 runtime.goexit({})
-	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x4000233fd0 sp=0x4000233fd0 pc=0x8fdc4
-created by github.com/pion/ice/v4.(*candidateBase).start in goroutine 303
-	/go/pkg/mod/github.com/aler9/ice/v4@v4.0.0-20250301104324-b2df7db9f75d/candidate_base.go:216 +0x12c
+	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x40004ddfd0 sp=0x40004ddfd0 pc=0x8fdc4
+created by github.com/pion/interceptor/pkg/twcc.(*SenderInterceptor).BindRTCPWriter in goroutine 53
+	/go/pkg/mod/github.com/pion/interceptor@v0.1.40/pkg/twcc/sender_interceptor.go:94 +0x180
 
-goroutine 347 gp=0x40000df340 m=nil [select]:
-runtime.gopark(0x4000231d88?, 0x2?, 0x40?, 0x4?, 0x4000231d6c?)
-	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x4000231c00 sp=0x4000231be0 pc=0x87d18
-runtime.selectgo(0x4000231d88, 0x4000231d68, 0x100231e08?, 0x0, 0x4000231db8?, 0x1)
-	/usr/local/go/src/runtime/select.go:351 +0x6c4 fp=0x4000231d30 sp=0x4000231c00 pc=0x65cc4
-github.com/pion/transport/v3/packetio.(*Buffer).Read(0x4000631860, {0x400072ac00, 0x5dc, 0x5dc})
-	/go/pkg/mod/github.com/pion/transport/v3@v3.0.7/packetio/buffer.go:255 +0x1a8 fp=0x4000231db0 sp=0x4000231d30 pc=0x3e62f8
+goroutine 114 gp=0x4000093dc0 m=nil [select]:
+runtime.gopark(0x40004deeb8?, 0x2?, 0x0?, 0xf6?, 0x40004dee9c?)
+	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x40004ded30 sp=0x40004ded10 pc=0x87d18
+runtime.selectgo(0x40004deeb8, 0x40004dee98, 0x10181ff08?, 0x0, 0x4000518af8?, 0x1)
+	/usr/local/go/src/runtime/select.go:351 +0x6c4 fp=0x40004dee60 sp=0x40004ded30 pc=0x65cc4
+github.com/pion/transport/v3/packetio.(*Buffer).Read(0x4000495080, {0x40005d2600, 0x5dc, 0x5dc})
+	/go/pkg/mod/github.com/pion/transport/v3@v3.0.7/packetio/buffer.go:255 +0x1a8 fp=0x40004deee0 sp=0x40004dee60 pc=0x3e62f8
+github.com/pion/ice/v4.(*Conn).Read(0x4000026288, {0x40005d2600, 0x5dc, 0x5dc})
+	/go/pkg/mod/github.com/aler9/ice/v4@v4.0.0-20250301104324-b2df7db9f75d/transport.go:76 +0x7c fp=0x40004def10 sp=0x40004deee0 pc=0x81047c
+github.com/pion/webrtc/v4/internal/mux.(*Mux).readLoop(0x4000518ae0)
+	/go/pkg/mod/github.com/aler9/webrtc/v4@v4.0.0-20250228091429-18796cd12b4f/internal/mux/mux.go:122 +0x98 fp=0x40004defb0 sp=0x40004def10 pc=0x819e18
+github.com/pion/webrtc/v4/internal/mux.NewMux.gowrap1()
+	/go/pkg/mod/github.com/aler9/webrtc/v4@v4.0.0-20250228091429-18796cd12b4f/internal/mux/mux.go:58 +0x28 fp=0x40004defd0 sp=0x40004defb0 pc=0x819668
+runtime.goexit({})
+	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x40004defd0 sp=0x40004defd0 pc=0x8fdc4
+created by github.com/pion/webrtc/v4/internal/mux.NewMux in goroutine 61
+	/go/pkg/mod/github.com/aler9/webrtc/v4@v4.0.0-20250228091429-18796cd12b4f/internal/mux/mux.go:58 +0x140
+
+goroutine 57 gp=0x40004b0540 m=nil [select]:
+runtime.gopark(0x400045bf68?, 0x2?, 0xe0?, 0x1?, 0x400045bf4c?)
+	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x400045bdd0 sp=0x400045bdb0 pc=0x87d18
+runtime.selectgo(0x400045bf68, 0x400045bf48, 0x0?, 0x0, 0x0?, 0x1)
+	/usr/local/go/src/runtime/select.go:351 +0x6c4 fp=0x400045bf00 sp=0x400045bdd0 pc=0x65cc4
+github.com/bluenviron/gortsplib/v4/pkg/rtcpsender.(*RTCPSender).run(0x400022cf30)
+	/go/pkg/mod/github.com/bluenviron/gortsplib/v4@v4.16.0/pkg/rtcpsender/rtcpsender.go:87 +0xbc fp=0x400045bfb0 sp=0x400045bf00 pc=0x3dd74c
+github.com/bluenviron/gortsplib/v4/pkg/rtcpsender.(*RTCPSender).Initialize.gowrap1()
+	/go/pkg/mod/github.com/bluenviron/gortsplib/v4@v4.16.0/pkg/rtcpsender/rtcpsender.go:71 +0x28 fp=0x400045bfd0 sp=0x400045bfb0 pc=0x3dd5f8
+runtime.goexit({})
+	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x400045bfd0 sp=0x400045bfd0 pc=0x8fdc4
+created by github.com/bluenviron/gortsplib/v4/pkg/rtcpsender.(*RTCPSender).Initialize in goroutine 53
+	/go/pkg/mod/github.com/bluenviron/gortsplib/v4@v4.16.0/pkg/rtcpsender/rtcpsender.go:71 +0x100
+
+goroutine 58 gp=0x40004b0700 m=nil [select]:
+runtime.gopark(0x40004d9d88?, 0x2?, 0x0?, 0x9c?, 0x40004d9d6c?)
+	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x40004d9c00 sp=0x40004d9be0 pc=0x87d18
+runtime.selectgo(0x40004d9d88, 0x40004d9d68, 0x1004d9e08?, 0x0, 0x40004d9db8?, 0x1)
+	/usr/local/go/src/runtime/select.go:351 +0x6c4 fp=0x40004d9d30 sp=0x40004d9c00 pc=0x65cc4
+github.com/pion/transport/v3/packetio.(*Buffer).Read(0x40001bab40, {0x400039d200, 0x5dc, 0x5dc})
+	/go/pkg/mod/github.com/pion/transport/v3@v3.0.7/packetio/buffer.go:255 +0x1a8 fp=0x40004d9db0 sp=0x40004d9d30 pc=0x3e62f8
 github.com/pion/srtp/v3.(*ReadStreamSRTCP).Read(...)
 	/go/pkg/mod/github.com/pion/srtp/v3@v3.0.6/stream_srtcp.go:66
-github.com/pion/webrtc/v4.(*srtpWriterFuture).Read(0x2?, {0x400072ac00?, 0x400069008?, 0x7fff091f0440?})
-	/go/pkg/mod/github.com/aler9/webrtc/v4@v4.0.0-20250228091429-18796cd12b4f/srtp_writer_future.go:98 +0x88 fp=0x4000231e10 sp=0x4000231db0 pc=0x864378
-github.com/pion/webrtc/v4.(*RTPSender).Send.func1({0x400072ac00?, 0x40000b4b40?, 0x1?}, 0x0)
-	/go/pkg/mod/github.com/aler9/webrtc/v4@v4.0.0-20250228091429-18796cd12b4f/rtpsender.go:329 +0x3c fp=0x4000231e40 sp=0x4000231e10 pc=0x85676c
-github.com/pion/interceptor.RTCPReaderFunc.Read(0x4?, {0x400072ac00?, 0x4000231ee8?, 0x2c87b4?}, 0x20?)
-	/go/pkg/mod/github.com/pion/interceptor@v0.1.40/interceptor.go:102 +0x38 fp=0x4000231e70 sp=0x4000231e40 pc=0x752e08
-github.com/pion/interceptor/pkg/nack.(*ResponderInterceptor).BindRTCPReader.func1({0x400072ac00, 0x7fffa7e90210?, 0x5dc}, 0x600?)
-	/go/pkg/mod/github.com/pion/interceptor@v0.1.40/pkg/nack/responder_interceptor.go:74 +0x4c fp=0x4000231ef0 sp=0x4000231e70 pc=0x81e7fc
-github.com/pion/interceptor.RTCPReaderFunc.Read(0x4000231f68?, {0x400072ac00?, 0x400014c3f8?, 0x0?}, 0x1?)
-	/go/pkg/mod/github.com/pion/interceptor@v0.1.40/interceptor.go:102 +0x38 fp=0x4000231f20 sp=0x4000231ef0 pc=0x752e08
-github.com/pion/webrtc/v4.(*RTPSender).Read(0x40001aa580, {0x400072ac00, 0x5dc, 0x5dc})
-	/go/pkg/mod/github.com/aler9/webrtc/v4@v4.0.0-20250228091429-18796cd12b4f/rtpsender.go:414 +0x98 fp=0x4000231f90 sp=0x4000231f20 pc=0x856b88
+github.com/pion/webrtc/v4.(*srtpWriterFuture).Read(0x2?, {0x400039d200?, 0x4004ae008?, 0x7fff09bb2d58?})
+	/go/pkg/mod/github.com/aler9/webrtc/v4@v4.0.0-20250228091429-18796cd12b4f/srtp_writer_future.go:98 +0x88 fp=0x40004d9e10 sp=0x40004d9db0 pc=0x864378
+github.com/pion/webrtc/v4.(*RTPSender).Send.func1({0x400039d200?, 0x4000594500?, 0x1?}, 0x0)
+	/go/pkg/mod/github.com/aler9/webrtc/v4@v4.0.0-20250228091429-18796cd12b4f/rtpsender.go:329 +0x3c fp=0x40004d9e40 sp=0x40004d9e10 pc=0x85676c
+github.com/pion/interceptor.RTCPReaderFunc.Read(0x4?, {0x400039d200?, 0x40004d9ee8?, 0x2c87b4?}, 0x20?)
+	/go/pkg/mod/github.com/pion/interceptor@v0.1.40/interceptor.go:102 +0x38 fp=0x40004d9e70 sp=0x40004d9e40 pc=0x752e08
+github.com/pion/interceptor/pkg/nack.(*ResponderInterceptor).BindRTCPReader.func1({0x400039d200, 0x7fff49afcd18?, 0x5dc}, 0x600?)
+	/go/pkg/mod/github.com/pion/interceptor@v0.1.40/pkg/nack/responder_interceptor.go:74 +0x4c fp=0x40004d9ef0 sp=0x40004d9e70 pc=0x81e7fc
+github.com/pion/interceptor.RTCPReaderFunc.Read(0x40004d9f68?, {0x400039d200?, 0x0?, 0x0?}, 0x1?)
+	/go/pkg/mod/github.com/pion/interceptor@v0.1.40/interceptor.go:102 +0x38 fp=0x40004d9f20 sp=0x40004d9ef0 pc=0x752e08
+github.com/pion/webrtc/v4.(*RTPSender).Read(0x400035a080, {0x400039d200, 0x5dc, 0x5dc})
+	/go/pkg/mod/github.com/aler9/webrtc/v4@v4.0.0-20250228091429-18796cd12b4f/rtpsender.go:414 +0x98 fp=0x40004d9f90 sp=0x40004d9f20 pc=0x856b88
 github.com/bluenviron/mediamtx/internal/protocols/webrtc.(*OutgoingTrack).setup.func2()
-	/s/internal/protocols/webrtc/outgoing_track.go:76 +0x54 fp=0x4000231fd0 sp=0x4000231f90 pc=0x8732c4
+	/s/internal/protocols/webrtc/outgoing_track.go:76 +0x54 fp=0x40004d9fd0 sp=0x40004d9f90 pc=0x8732c4
 runtime.goexit({})
-	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x4000231fd0 sp=0x4000231fd0 pc=0x8fdc4
-created by github.com/bluenviron/mediamtx/internal/protocols/webrtc.(*OutgoingTrack).setup in goroutine 342
+	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x40004d9fd0 sp=0x40004d9fd0 pc=0x8fdc4
+created by github.com/bluenviron/mediamtx/internal/protocols/webrtc.(*OutgoingTrack).setup in goroutine 53
 	/s/internal/protocols/webrtc/outgoing_track.go:73 +0x2dc
 
-goroutine 402 gp=0x40000df6c0 m=nil [sync.Cond.Wait]:
-runtime.gopark(0x4000237ec8?, 0x86fd4c?, 0x10?, 0xc2?, 0x40007f4750?)
-	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x4000237e80 sp=0x4000237e60 pc=0x87d18
+goroutine 59 gp=0x40004b08c0 m=nil [select]:
+runtime.gopark(0x400005f768?, 0x2?, 0x2?, 0x0?, 0x400005f74c?)
+	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x400005f5d0 sp=0x400005f5b0 pc=0x87d18
+runtime.selectgo(0x400005f768, 0x400005f748, 0x400005f738?, 0x0, 0x40c250?, 0x1)
+	/usr/local/go/src/runtime/select.go:351 +0x6c4 fp=0x400005f700 sp=0x400005f5d0 pc=0x65cc4
+github.com/bluenviron/gortsplib/v4/pkg/rtcpsender.(*RTCPSender).run(0x400022d0e0)
+	/go/pkg/mod/github.com/bluenviron/gortsplib/v4@v4.16.0/pkg/rtcpsender/rtcpsender.go:87 +0xbc fp=0x400005f7b0 sp=0x400005f700 pc=0x3dd74c
+github.com/bluenviron/gortsplib/v4/pkg/rtcpsender.(*RTCPSender).Initialize.gowrap1()
+	/go/pkg/mod/github.com/bluenviron/gortsplib/v4@v4.16.0/pkg/rtcpsender/rtcpsender.go:71 +0x28 fp=0x400005f7d0 sp=0x400005f7b0 pc=0x3dd5f8
+runtime.goexit({})
+	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x400005f7d0 sp=0x400005f7d0 pc=0x8fdc4
+created by github.com/bluenviron/gortsplib/v4/pkg/rtcpsender.(*RTCPSender).Initialize in goroutine 53
+	/go/pkg/mod/github.com/bluenviron/gortsplib/v4@v4.16.0/pkg/rtcpsender/rtcpsender.go:71 +0x100
+
+goroutine 60 gp=0x40004b0a80 m=nil [select, 2 minutes]:
+runtime.gopark(0x4000458d28?, 0x2?, 0x60?, 0x38?, 0x4000458d0c?)
+	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x4000458ba0 sp=0x4000458b80 pc=0x87d18
+runtime.selectgo(0x4000458d28, 0x4000458d08, 0x800000000?, 0x0, 0x7fff908085c0?, 0x1)
+	/usr/local/go/src/runtime/select.go:351 +0x6c4 fp=0x4000458cd0 sp=0x4000458ba0 pc=0x65cc4
+github.com/pion/transport/v3/packetio.(*Buffer).Read(0x40001baae0, {0x400039d800, 0x5dc, 0x5dc})
+	/go/pkg/mod/github.com/pion/transport/v3@v3.0.7/packetio/buffer.go:255 +0x1a8 fp=0x4000458d50 sp=0x4000458cd0 pc=0x3e62f8
+github.com/pion/srtp/v3.(*ReadStreamSRTCP).Read(...)
+	/go/pkg/mod/github.com/pion/srtp/v3@v3.0.6/stream_srtcp.go:66
+github.com/pion/webrtc/v4.(*srtpWriterFuture).Read(0x40005a4040?, {0x400039d800?, 0x4000090008?, 0x1?})
+	/go/pkg/mod/github.com/aler9/webrtc/v4@v4.0.0-20250228091429-18796cd12b4f/srtp_writer_future.go:98 +0x88 fp=0x4000458db0 sp=0x4000458d50 pc=0x864378
+github.com/pion/webrtc/v4.(*srtpWriterFuture).Read(0x40005a4040, {0x400039d800, 0x5dc, 0x5dc})
+	/go/pkg/mod/github.com/aler9/webrtc/v4@v4.0.0-20250228091429-18796cd12b4f/srtp_writer_future.go:105 +0x128 fp=0x4000458e10 sp=0x4000458db0 pc=0x864418
+github.com/pion/webrtc/v4.(*RTPSender).Send.func1({0x400039d800?, 0x418db4?, 0x1?}, 0x0)
+	/go/pkg/mod/github.com/aler9/webrtc/v4@v4.0.0-20250228091429-18796cd12b4f/rtpsender.go:329 +0x3c fp=0x4000458e40 sp=0x4000458e10 pc=0x85676c
+github.com/pion/interceptor.RTCPReaderFunc.Read(0x1?, {0x400039d800?, 0x400005eeb8?, 0x418ddc?}, 0x4000494e20?)
+	/go/pkg/mod/github.com/pion/interceptor@v0.1.40/interceptor.go:102 +0x38 fp=0x4000458e70 sp=0x4000458e40 pc=0x752e08
+github.com/pion/interceptor/pkg/nack.(*ResponderInterceptor).BindRTCPReader.func1({0x400039d800, 0x7fff49afcd18?, 0x5dc}, 0x600?)
+	/go/pkg/mod/github.com/pion/interceptor@v0.1.40/pkg/nack/responder_interceptor.go:74 +0x4c fp=0x4000458ef0 sp=0x4000458e70 pc=0x81e7fc
+github.com/pion/interceptor.RTCPReaderFunc.Read(0x400005ef68?, {0x400039d800?, 0x400035a680?, 0x0?}, 0x400005ef68?)
+	/go/pkg/mod/github.com/pion/interceptor@v0.1.40/interceptor.go:102 +0x38 fp=0x4000458f20 sp=0x4000458ef0 pc=0x752e08
+github.com/pion/webrtc/v4.(*RTPSender).Read(0x400035a100, {0x400039d800, 0x5dc, 0x5dc})
+	/go/pkg/mod/github.com/aler9/webrtc/v4@v4.0.0-20250228091429-18796cd12b4f/rtpsender.go:414 +0x98 fp=0x4000458f90 sp=0x4000458f20 pc=0x856b88
+github.com/bluenviron/mediamtx/internal/protocols/webrtc.(*OutgoingTrack).setup.func2()
+	/s/internal/protocols/webrtc/outgoing_track.go:76 +0x54 fp=0x4000458fd0 sp=0x4000458f90 pc=0x8732c4
+runtime.goexit({})
+	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x4000458fd0 sp=0x4000458fd0 pc=0x8fdc4
+created by github.com/bluenviron/mediamtx/internal/protocols/webrtc.(*OutgoingTrack).setup in goroutine 53
+	/s/internal/protocols/webrtc/outgoing_track.go:73 +0x2dc
+
+goroutine 62 gp=0x40004b0c40 m=nil [chan receive, 2 minutes]:
+runtime.gopark(0x4000494ba0?, 0x7fff49d85378?, 0xb8?, 0xde?, 0x1fd40?)
+	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x400041de70 sp=0x400041de50 pc=0x87d18
+runtime.chanrecv(0x4000420fc0, 0x0, 0x1)
+	/usr/local/go/src/runtime/chan.go:664 +0x42c fp=0x400041def0 sp=0x400041de70 pc=0x2033c
+runtime.chanrecv1(0x4000420ee0?, 0x0?)
+	/usr/local/go/src/runtime/chan.go:506 +0x14 fp=0x400041df20 sp=0x400041def0 pc=0x1fed4
+github.com/pion/mdns/v2.(*Conn).start(0x40004a0820, 0x4000420ee0, 0x230c, 0x40003a3b80)
+	/go/pkg/mod/github.com/pion/mdns/v2@v2.0.7/conn.go:1169 +0x320 fp=0x400041dfa0 sp=0x400041df20 pc=0x7d8c40
+github.com/pion/mdns/v2.Server.gowrap1()
+	/go/pkg/mod/github.com/pion/mdns/v2@v2.0.7/conn.go:347 +0x34 fp=0x400041dfd0 sp=0x400041dfa0 pc=0x7d2b14
+runtime.goexit({})
+	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x400041dfd0 sp=0x400041dfd0 pc=0x8fdc4
+created by github.com/pion/mdns/v2.Server in goroutine 53
+	/go/pkg/mod/github.com/pion/mdns/v2@v2.0.7/conn.go:347 +0x18ec
+
+goroutine 63 gp=0x40004b0e00 m=nil [runnable]:
+runtime.gopark(0x7fff90808a78?, 0x40005dd4d0?, 0x8?, 0xb8?, 0x0?)
+	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x40005b3b10 sp=0x40005b3af0 pc=0x87d18
+runtime.netpollblock(0xbb2eb1?, 0x3?, 0x0?)
+	/usr/local/go/src/runtime/netpoll.go:575 +0x158 fp=0x40005b3b50 sp=0x40005b3b10 pc=0x4b028
+internal/poll.runtime_pollWait(0x7fff49d79aa8, 0x72)
+	/usr/local/go/src/runtime/netpoll.go:351 +0xa0 fp=0x40005b3b80 sp=0x40005b3b50 pc=0x86ed0
+internal/poll.(*pollDesc).wait(0x40003a3a80?, 0x7fff49b78e80?, 0x0)
+	/usr/local/go/src/internal/poll/fd_poll_runtime.go:84 +0x28 fp=0x40005b3bb0 sp=0x40005b3b80 pc=0xce878
+internal/poll.(*pollDesc).waitRead(...)
+	/usr/local/go/src/internal/poll/fd_poll_runtime.go:89
+internal/poll.(*FD).RawRead(0x40003a3a80, 0x400077bcc0)
+	/usr/local/go/src/internal/poll/fd_unix.go:717 +0x12c fp=0x40005b3c10 sp=0x40005b3bb0 pc=0xd3ddc
+net.(*rawConn).Read(0x4000066af0, 0xa0ae80?)
+	/usr/local/go/src/net/rawconn.go:44 +0x30 fp=0x40005b3c50 sp=0x40005b3c10 pc=0x23bbb0
+golang.org/x/net/internal/socket.(*Conn).recvMsg(0x4000569be0, 0x4000828540, 0x0)
+	/go/pkg/mod/golang.org/x/net@v0.42.0/internal/socket/rawconn_msg.go:27 +0x130 fp=0x40005b3cb0 sp=0x40005b3c50 pc=0x7bc9b0
+golang.org/x/net/internal/socket.(*Conn).RecvMsg(...)
+	/go/pkg/mod/golang.org/x/net@v0.42.0/internal/socket/socket.go:247
+golang.org/x/net/ipv4.(*payloadHandler).ReadFrom(0x40003a0560, {0x4000014a00, 0x230c, 0x230c})
+	/go/pkg/mod/golang.org/x/net@v0.42.0/ipv4/payload_cmsg.go:31 +0x460 fp=0x40005b3d60 sp=0x40005b3cb0 pc=0x7c7010
+github.com/pion/mdns/v2.ipPacketConn4.ReadFrom({{0x40003e5220, 0xc}, 0x40003a0550, {0x18329e8, 0x400037db00}}, {0x4000014a00?, 0x1?, 0x4000066160?})
+	/go/pkg/mod/github.com/pion/mdns/v2@v2.0.7/conn.go:801 +0x48 fp=0x40005b3dc0 sp=0x40005b3d60 pc=0x7d6238
+github.com/pion/mdns/v2.(*ipPacketConn4).ReadFrom(0x40005b3ed8?, {0x4000014a00?, 0x230c?, 0x40007eb740?})
+	<autogenerated>:1 +0x70 fp=0x40005b3e40 sp=0x40005b3dc0 pc=0x7d9a20
+github.com/pion/mdns/v2.(*Conn).readLoop(0x40004a0820, {0xbbd951, 0x6}, {0x182a800, 0x4000205140}, 0x230c, 0x40003a3b80)
+	/go/pkg/mod/github.com/pion/mdns/v2@v2.0.7/conn.go:863 +0x90 fp=0x40005b3f50 sp=0x40005b3e40 pc=0x7d69a0
+github.com/pion/mdns/v2.(*Conn).start.func2()
+	/go/pkg/mod/github.com/pion/mdns/v2@v2.0.7/conn.go:1131 +0x8c fp=0x40005b3fd0 sp=0x40005b3f50 pc=0x7d905c
+runtime.goexit({})
+	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x40005b3fd0 sp=0x40005b3fd0 pc=0x8fdc4
+created by github.com/pion/mdns/v2.(*Conn).start in goroutine 62
+	/go/pkg/mod/github.com/pion/mdns/v2@v2.0.7/conn.go:1126 +0x100
+
+goroutine 64 gp=0x40004b0fc0 m=nil [IO wait, 2 minutes]:
+runtime.gopark(0x0?, 0x4000490210?, 0x0?, 0x0?, 0x0?)
+	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x40004abb10 sp=0x40004abaf0 pc=0x87d18
+runtime.netpollblock(0xbb2eb1?, 0x3?, 0x0?)
+	/usr/local/go/src/runtime/netpoll.go:575 +0x158 fp=0x40004abb50 sp=0x40004abb10 pc=0x4b028
+internal/poll.runtime_pollWait(0x7fff49d79990, 0x72)
+	/usr/local/go/src/runtime/netpoll.go:351 +0xa0 fp=0x40004abb80 sp=0x40004abb50 pc=0x86ed0
+internal/poll.(*pollDesc).wait(0x11?, 0x7fff49bb2858?, 0x0)
+	/usr/local/go/src/internal/poll/fd_poll_runtime.go:84 +0x28 fp=0x40004abbb0 sp=0x40004abb80 pc=0xce878
+internal/poll.(*pollDesc).waitRead(...)
+	/usr/local/go/src/internal/poll/fd_poll_runtime.go:89
+internal/poll.(*FD).RawRead(0x40003a3c00, 0x40003a0a00)
+	/usr/local/go/src/internal/poll/fd_unix.go:717 +0x12c fp=0x40004abc10 sp=0x40004abbb0 pc=0xd3ddc
+net.(*rawConn).Read(0x4000066b08, 0xa0ae80?)
+	/usr/local/go/src/net/rawconn.go:44 +0x30 fp=0x40004abc50 sp=0x40004abc10 pc=0x23bbb0
+golang.org/x/net/internal/socket.(*Conn).recvMsg(0x4000569c20, 0x4000495380, 0x0)
+	/go/pkg/mod/golang.org/x/net@v0.42.0/internal/socket/rawconn_msg.go:27 +0x130 fp=0x40004abcb0 sp=0x40004abc50 pc=0x7bc9b0
+golang.org/x/net/internal/socket.(*Conn).RecvMsg(...)
+	/go/pkg/mod/golang.org/x/net@v0.42.0/internal/socket/socket.go:247
+golang.org/x/net/ipv4.(*payloadHandler).ReadFrom(0x40003a05b0, {0x4000019400, 0x230c, 0x230c})
+	/go/pkg/mod/golang.org/x/net@v0.42.0/ipv4/payload_cmsg.go:31 +0x460 fp=0x40004abd60 sp=0x40004abcb0 pc=0x7c7010
+github.com/pion/mdns/v2.ipPacketConn4.ReadFrom({{0x40003e5220, 0xc}, 0x40003a05a0, {0x18329e8, 0x400037db00}}, {0x4000019400?, 0x1?, 0x0?})
+	/go/pkg/mod/github.com/pion/mdns/v2@v2.0.7/conn.go:801 +0x48 fp=0x40004abdc0 sp=0x40004abd60 pc=0x7d6238
+github.com/pion/mdns/v2.(*ipPacketConn4).ReadFrom(0x400041d658?, {0x4000019400?, 0x400041d6a8?, 0x1f54c?})
+	<autogenerated>:1 +0x70 fp=0x40004abe40 sp=0x40004abdc0 pc=0x7d9a20
+github.com/pion/mdns/v2.(*Conn).readLoop(0x40004a0820, {0xbb4a49, 0x4}, {0x182a800, 0x40002051d0}, 0x230c, 0x40003a3b80)
+	/go/pkg/mod/github.com/pion/mdns/v2@v2.0.7/conn.go:863 +0x90 fp=0x40004abf50 sp=0x40004abe40 pc=0x7d69a0
+github.com/pion/mdns/v2.(*Conn).start.func4()
+	/go/pkg/mod/github.com/pion/mdns/v2@v2.0.7/conn.go:1151 +0x8c fp=0x40004abfd0 sp=0x40004abf50 pc=0x7d8e3c
+runtime.goexit({})
+	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x40004abfd0 sp=0x40004abfd0 pc=0x8fdc4
+created by github.com/pion/mdns/v2.(*Conn).start in goroutine 62
+	/go/pkg/mod/github.com/pion/mdns/v2@v2.0.7/conn.go:1146 +0x22c
+
+goroutine 81 gp=0x40004b1180 m=nil [IO wait, 2 minutes]:
+runtime.gopark(0x0?, 0x40004901e0?, 0x0?, 0x0?, 0x1f8017f0180?)
+	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x40004dfac0 sp=0x40004dfaa0 pc=0x87d18
+runtime.netpollblock(0xbb2eb1?, 0x3?, 0x0?)
+	/usr/local/go/src/runtime/netpoll.go:575 +0x158 fp=0x40004dfb00 sp=0x40004dfac0 pc=0x4b028
+internal/poll.runtime_pollWait(0x7fff49d79878, 0x72)
+	/usr/local/go/src/runtime/netpoll.go:351 +0xa0 fp=0x40004dfb30 sp=0x40004dfb00 pc=0x86ed0
+internal/poll.(*pollDesc).wait(0x40003a3c80?, 0x7fff49bb2858?, 0x0)
+	/usr/local/go/src/internal/poll/fd_poll_runtime.go:84 +0x28 fp=0x40004dfb60 sp=0x40004dfb30 pc=0xce878
+internal/poll.(*pollDesc).waitRead(...)
+	/usr/local/go/src/internal/poll/fd_poll_runtime.go:89
+internal/poll.(*FD).RawRead(0x40003a3c80, 0x40003a0960)
+	/usr/local/go/src/internal/poll/fd_unix.go:717 +0x12c fp=0x40004dfbc0 sp=0x40004dfb60 pc=0xd3ddc
+net.(*rawConn).Read(0x4000066b18, 0xa0ae80?)
+	/usr/local/go/src/net/rawconn.go:44 +0x30 fp=0x40004dfc00 sp=0x40004dfbc0 pc=0x23bbb0
+golang.org/x/net/internal/socket.(*Conn).recvMsg(0x4000569c40, 0x40004952c0, 0x0)
+	/go/pkg/mod/golang.org/x/net@v0.42.0/internal/socket/rawconn_msg.go:27 +0x130 fp=0x40004dfc60 sp=0x40004dfc00 pc=0x7bc9b0
+golang.org/x/net/internal/socket.(*Conn).RecvMsg(...)
+	/go/pkg/mod/golang.org/x/net@v0.42.0/internal/socket/socket.go:247
+golang.org/x/net/ipv6.(*payloadHandler).ReadFrom(0x40003a0650, {0x4000010000, 0x230c, 0x230c})
+	/go/pkg/mod/golang.org/x/net@v0.42.0/ipv6/payload_cmsg.go:31 +0x338 fp=0x40004dfd60 sp=0x40004dfc60 pc=0x7ce208
+github.com/pion/mdns/v2.ipPacketConn6.ReadFrom({{0x40003e5220, 0xc}, 0x40003a0640, {0x18329e8, 0x400037db00}}, {0x4000010000?, 0x400041ce01?, 0x99b60?})
+	/go/pkg/mod/github.com/pion/mdns/v2@v2.0.7/conn.go:833 +0x48 fp=0x40004dfdc0 sp=0x40004dfd60 pc=0x7d65c8
+github.com/pion/mdns/v2.(*ipPacketConn6).ReadFrom(0x400041ce58?, {0x4000010000?, 0x400041cea8?, 0x1f54c?})
+	<autogenerated>:1 +0x70 fp=0x40004dfe40 sp=0x40004dfdc0 pc=0x7d9c60
+github.com/pion/mdns/v2.(*Conn).readLoop(0x40004a0820, {0xbb4a45, 0x4}, {0x182a830, 0x4000205260}, 0x230c, 0x40003a3b80)
+	/go/pkg/mod/github.com/pion/mdns/v2@v2.0.7/conn.go:863 +0x90 fp=0x40004dff50 sp=0x40004dfe40 pc=0x7d69a0
+github.com/pion/mdns/v2.(*Conn).start.func5()
+	/go/pkg/mod/github.com/pion/mdns/v2@v2.0.7/conn.go:1161 +0x8c fp=0x40004dffd0 sp=0x40004dff50 pc=0x7d8d2c
+runtime.goexit({})
+	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x40004dffd0 sp=0x40004dffd0 pc=0x8fdc4
+created by github.com/pion/mdns/v2.(*Conn).start in goroutine 62
+	/go/pkg/mod/github.com/pion/mdns/v2@v2.0.7/conn.go:1156 +0x2c0
+
+goroutine 82 gp=0x40004b1340 m=nil [select]:
+runtime.gopark(0x40004dbf50?, 0x2?, 0x8?, 0xbe?, 0x40004dbf4c?)
+	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x40004dbdd0 sp=0x40004dbdb0 pc=0x87d18
+runtime.selectgo(0x40004dbf50, 0x40004dbf48, 0x0?, 0x0, 0x4000420f50?, 0x1)
+	/usr/local/go/src/runtime/select.go:351 +0x6c4 fp=0x40004dbf00 sp=0x40004dbdd0 pc=0x65cc4
+github.com/pion/ice/v4/internal/taskloop.(*Loop).runLoop(0x40002053e0, 0x400041d7b0?)
+	/go/pkg/mod/github.com/aler9/ice/v4@v4.0.0-20250301104324-b2df7db9f75d/internal/taskloop/taskloop.go:55 +0xbc fp=0x40004dbfb0 sp=0x40004dbf00 pc=0x7b549c
+github.com/pion/ice/v4/internal/taskloop.New.gowrap1()
+	/go/pkg/mod/github.com/aler9/ice/v4@v4.0.0-20250301104324-b2df7db9f75d/internal/taskloop/taskloop.go:42 +0x2c fp=0x40004dbfd0 sp=0x40004dbfb0 pc=0x7b53ac
+runtime.goexit({})
+	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x40004dbfd0 sp=0x40004dbfd0 pc=0x8fdc4
+created by github.com/pion/ice/v4/internal/taskloop.New in goroutine 53
+	/go/pkg/mod/github.com/aler9/ice/v4@v4.0.0-20250301104324-b2df7db9f75d/internal/taskloop/taskloop.go:42 +0xfc
+
+goroutine 84 gp=0x40004b1880 m=nil [select]:
+runtime.gopark(0x400041c768?, 0x3?, 0x38?, 0xc6?, 0x400041c73a?)
+	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x400041c5c0 sp=0x400041c5a0 pc=0x87d18
+runtime.selectgo(0x400041c768, 0x400041c734, 0x40002053e0?, 0x0, 0x0?, 0x1)
+	/usr/local/go/src/runtime/select.go:351 +0x6c4 fp=0x400041c6f0 sp=0x400041c5c0 pc=0x65cc4
+github.com/pion/ice/v4.(*Agent).connectivityChecks(0x400056e608)
+	/go/pkg/mod/github.com/aler9/ice/v4@v4.0.0-20250301104324-b2df7db9f75d/agent.go:436 +0x164 fp=0x400041c7b0 sp=0x400041c6f0 pc=0x7ecd84
+github.com/pion/ice/v4.(*Agent).startConnectivityChecks.func1.gowrap1()
+	/go/pkg/mod/github.com/aler9/ice/v4@v4.0.0-20250301104324-b2df7db9f75d/agent.go:371 +0x28 fp=0x400041c7d0 sp=0x400041c7b0 pc=0x7ecb48
+runtime.goexit({})
+	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x400041c7d0 sp=0x400041c7d0 pc=0x8fdc4
+created by github.com/pion/ice/v4.(*Agent).startConnectivityChecks.func1 in goroutine 82
+	/go/pkg/mod/github.com/aler9/ice/v4@v4.0.0-20250301104324-b2df7db9f75d/agent.go:371 +0x238
+
+goroutine 85 gp=0x40006121c0 m=nil [chan receive, 2 minutes]:
+runtime.gopark(0x4000474f28?, 0x993e8?, 0x1?, 0x0?, 0x0?)
+	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x4000474ee0 sp=0x4000474ec0 pc=0x87d18
+runtime.chanrecv(0x40004209a0, 0x0, 0x1)
+	/usr/local/go/src/runtime/chan.go:664 +0x42c fp=0x4000474f60 sp=0x4000474ee0 pc=0x2033c
+runtime.chanrecv1(0x0?, 0x8fdc8?)
+	/usr/local/go/src/runtime/chan.go:506 +0x14 fp=0x4000474f90 sp=0x4000474f60 pc=0x1fed4
+github.com/pion/ice/v4.(*UDPMuxDefault).GetConn.func1()
+	/go/pkg/mod/github.com/aler9/ice/v4@v4.0.0-20250301104324-b2df7db9f75d/udp_mux.go:170 +0x40 fp=0x4000474fd0 sp=0x4000474f90 pc=0x811850
+runtime.goexit({})
+	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x4000474fd0 sp=0x4000474fd0 pc=0x8fdc4
+created by github.com/pion/ice/v4.(*UDPMuxDefault).GetConn in goroutine 99
+	/go/pkg/mod/github.com/aler9/ice/v4@v4.0.0-20250301104324-b2df7db9f75d/udp_mux.go:169 +0x240
+
+goroutine 86 gp=0x4000612380 m=nil [select]:
+runtime.gopark(0x40005b4ea8?, 0x2?, 0xc0?, 0x3d?, 0x40005b4e64?)
+	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x40005b4cf0 sp=0x40005b4cd0 pc=0x87d18
+runtime.selectgo(0x40005b4ea8, 0x40005b4e60, 0x46?, 0x0, 0x40003632c0?, 0x1)
+	/usr/local/go/src/runtime/select.go:351 +0x6c4 fp=0x40005b4e20 sp=0x40005b4cf0 pc=0x65cc4
+github.com/pion/ice/v4.(*udpMuxedConn).ReadFrom(0x400023e050, {0x400001e000, 0x2000, 0x2000?})
+	/go/pkg/mod/github.com/aler9/ice/v4@v4.0.0-20250301104324-b2df7db9f75d/udp_muxed_conn.go:87 +0x158 fp=0x40005b4ed0 sp=0x40005b4e20 pc=0x812f68
+github.com/pion/ice/v4.(*candidateBase).recvLoop(0x40005a6000, 0x400041d7b0?)
+	/go/pkg/mod/github.com/aler9/ice/v4@v4.0.0-20250301104324-b2df7db9f75d/candidate_base.go:244 +0x19c fp=0x40005b4fb0 sp=0x40005b4ed0 pc=0x7f5cfc
+github.com/pion/ice/v4.(*candidateBase).start.gowrap1()
+	/go/pkg/mod/github.com/aler9/ice/v4@v4.0.0-20250301104324-b2df7db9f75d/candidate_base.go:216 +0x2c fp=0x40005b4fd0 sp=0x40005b4fb0 pc=0x7f5b2c
+runtime.goexit({})
+	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x40005b4fd0 sp=0x40005b4fd0 pc=0x8fdc4
+created by github.com/pion/ice/v4.(*candidateBase).start in goroutine 82
+	/go/pkg/mod/github.com/aler9/ice/v4@v4.0.0-20250301104324-b2df7db9f75d/candidate_base.go:216 +0x12c
+
+goroutine 66 gp=0x4000612540 m=nil [select, 2 minutes]:
+runtime.gopark(0x40004d8f70?, 0x2?, 0x68?, 0x8d?, 0x40004d8ea4?)
+	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x40004d8d30 sp=0x40004d8d10 pc=0x87d18
+runtime.selectgo(0x40004d8f70, 0x40004d8ea0, 0x7e?, 0x0, 0x4000484220?, 0x1)
+	/usr/local/go/src/runtime/select.go:351 +0x6c4 fp=0x40004d8e60 sp=0x40004d8d30 pc=0x65cc4
+github.com/bluenviron/mediamtx/internal/servers/webrtc.(*session).readRemoteCandidates(0x40001a8900, 0x40003e2280)
+	/s/internal/servers/webrtc/session.go:376 +0xa8 fp=0x40004d8fb0 sp=0x40004d8e60 pc=0x8801e8
+github.com/bluenviron/mediamtx/internal/servers/webrtc.(*session).runRead.gowrap3()
+	/s/internal/servers/webrtc/session.go:327 +0x2c fp=0x40004d8fd0 sp=0x40004d8fb0 pc=0x88003c
+runtime.goexit({})
+	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x40004d8fd0 sp=0x40004d8fd0 pc=0x8fdc4
+created by github.com/bluenviron/mediamtx/internal/servers/webrtc.(*session).runRead in goroutine 53
+	/s/internal/servers/webrtc/session.go:327 +0x57c
+
+goroutine 88 gp=0x4000612700 m=nil [select]:
+runtime.gopark(0x4000149ea8?, 0x2?, 0xc0?, 0x3d?, 0x4000149e64?)
+	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x4000149cf0 sp=0x4000149cd0 pc=0x87d18
+runtime.selectgo(0x4000149ea8, 0x4000149e60, 0x46?, 0x0, 0x4000362d50?, 0x1)
+	/usr/local/go/src/runtime/select.go:351 +0x6c4 fp=0x4000149e20 sp=0x4000149cf0 pc=0x65cc4
+github.com/pion/ice/v4.(*udpMuxedConn).ReadFrom(0x400023e050, {0x40005be000, 0x2000, 0x2000?})
+	/go/pkg/mod/github.com/aler9/ice/v4@v4.0.0-20250301104324-b2df7db9f75d/udp_muxed_conn.go:87 +0x158 fp=0x4000149ed0 sp=0x4000149e20 pc=0x812f68
+github.com/pion/ice/v4.(*candidateBase).recvLoop(0x40005a60f0, 0x0?)
+	/go/pkg/mod/github.com/aler9/ice/v4@v4.0.0-20250301104324-b2df7db9f75d/candidate_base.go:244 +0x19c fp=0x4000149fb0 sp=0x4000149ed0 pc=0x7f5cfc
+github.com/pion/ice/v4.(*candidateBase).start.gowrap1()
+	/go/pkg/mod/github.com/aler9/ice/v4@v4.0.0-20250301104324-b2df7db9f75d/candidate_base.go:216 +0x2c fp=0x4000149fd0 sp=0x4000149fb0 pc=0x7f5b2c
+runtime.goexit({})
+	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x4000149fd0 sp=0x4000149fd0 pc=0x8fdc4
+created by github.com/pion/ice/v4.(*candidateBase).start in goroutine 82
+	/go/pkg/mod/github.com/aler9/ice/v4@v4.0.0-20250301104324-b2df7db9f75d/candidate_base.go:216 +0x12c
+
+goroutine 89 gp=0x40006128c0 m=nil [select]:
+runtime.gopark(0x40005b8ea8?, 0x2?, 0xc0?, 0x3d?, 0x40005b8e64?)
+	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x40005b8cf0 sp=0x40005b8cd0 pc=0x87d18
+runtime.selectgo(0x40005b8ea8, 0x40005b8e60, 0x46?, 0x0, 0x40003eed80?, 0x1)
+	/usr/local/go/src/runtime/select.go:351 +0x6c4 fp=0x40005b8e20 sp=0x40005b8cf0 pc=0x65cc4
+github.com/pion/ice/v4.(*udpMuxedConn).ReadFrom(0x400023e050, {0x40005bc000, 0x2000, 0x2000?})
+	/go/pkg/mod/github.com/aler9/ice/v4@v4.0.0-20250301104324-b2df7db9f75d/udp_muxed_conn.go:87 +0x158 fp=0x40005b8ed0 sp=0x40005b8e20 pc=0x812f68
+github.com/pion/ice/v4.(*candidateBase).recvLoop(0x40005a61e0, 0x400041cfb0?)
+	/go/pkg/mod/github.com/aler9/ice/v4@v4.0.0-20250301104324-b2df7db9f75d/candidate_base.go:244 +0x19c fp=0x40005b8fb0 sp=0x40005b8ed0 pc=0x7f5cfc
+github.com/pion/ice/v4.(*candidateBase).start.gowrap1()
+	/go/pkg/mod/github.com/aler9/ice/v4@v4.0.0-20250301104324-b2df7db9f75d/candidate_base.go:216 +0x2c fp=0x40005b8fd0 sp=0x40005b8fb0 pc=0x7f5b2c
+runtime.goexit({})
+	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x40005b8fd0 sp=0x40005b8fd0 pc=0x8fdc4
+created by github.com/pion/ice/v4.(*candidateBase).start in goroutine 82
+	/go/pkg/mod/github.com/aler9/ice/v4@v4.0.0-20250301104324-b2df7db9f75d/candidate_base.go:216 +0x12c
+
+goroutine 113 gp=0x40004b1c00 m=nil [select]:
+runtime.gopark(0x400021bb68?, 0x4?, 0x0?, 0x0?, 0x400021b9d8?)
+	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x400021b840 sp=0x400021b820 pc=0x87d18
+runtime.selectgo(0x400021bb68, 0x400021b9d0, 0x2b?, 0x0, 0x4?, 0x1)
+	/usr/local/go/src/runtime/select.go:351 +0x6c4 fp=0x400021b970 sp=0x400021b840 pc=0x65cc4
+github.com/pion/mdns/v2.(*Conn).QueryAddr(_, {_, _}, {_, _})
+	/go/pkg/mod/github.com/pion/mdns/v2@v2.0.7/conn.go:445 +0x314 fp=0x400021bd10 sp=0x400021b970 pc=0x7d3554
+github.com/pion/ice/v4.(*Agent).resolveAndAddMulticastCandidate(0x400056e608, 0x40001ac2d0)
+	/go/pkg/mod/github.com/aler9/ice/v4@v4.0.0-20250301104324-b2df7db9f75d/agent.go:663 +0x4c fp=0x400021bfb0 sp=0x400021bd10 pc=0x7ee38c
+github.com/pion/ice/v4.(*Agent).AddRemoteCandidate.gowrap1()
+	/go/pkg/mod/github.com/aler9/ice/v4@v4.0.0-20250301104324-b2df7db9f75d/agent.go:639 +0x2c fp=0x400021bfd0 sp=0x400021bfb0 pc=0x7ee30c
+runtime.goexit({})
+	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x400021bfd0 sp=0x400021bfd0 pc=0x8fdc4
+created by github.com/pion/ice/v4.(*Agent).AddRemoteCandidate in goroutine 66
+	/go/pkg/mod/github.com/aler9/ice/v4@v4.0.0-20250301104324-b2df7db9f75d/agent.go:639 +0x198
+
+goroutine 122 gp=0x40004b1dc0 m=nil [select, 2 minutes]:
+runtime.gopark(0x40005bbef8?, 0x2?, 0xc?, 0x0?, 0x40005bbedc?)
+	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x40005bbd70 sp=0x40005bbd50 pc=0x87d18
+runtime.selectgo(0x40005bbef8, 0x40005bbed8, 0x20000101003a11e8?, 0x0, 0x7fff908085c0?, 0x1)
+	/usr/local/go/src/runtime/select.go:351 +0x6c4 fp=0x40005bbea0 sp=0x40005bbd70 pc=0x65cc4
+github.com/pion/transport/v3/packetio.(*Buffer).Read(0x4000518ba0, {0x4000226000, 0x2000, 0x2000})
+	/go/pkg/mod/github.com/pion/transport/v3@v3.0.7/packetio/buffer.go:255 +0x1a8 fp=0x40005bbf20 sp=0x40005bbea0 pc=0x3e62f8
+github.com/pion/webrtc/v4/internal/mux.(*Endpoint).Read(0x0?, {0x4000226000?, 0x0?, 0x1000000010000?})
+	/go/pkg/mod/github.com/aler9/webrtc/v4@v4.0.0-20250228091429-18796cd12b4f/internal/mux/endpoint.go:45 +0x24 fp=0x40005bbf50 sp=0x40005bbf20 pc=0x8191c4
+github.com/pion/srtp/v3.(*session).start.func1()
+	/go/pkg/mod/github.com/pion/srtp/v3@v3.0.6/session.go:150 +0xa4 fp=0x40005bbfd0 sp=0x40005bbf50 pc=0x3ea134
+runtime.goexit({})
+	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x40005bbfd0 sp=0x40005bbfd0 pc=0x8fdc4
+created by github.com/pion/srtp/v3.(*session).start in goroutine 61
+	/go/pkg/mod/github.com/pion/srtp/v3@v3.0.6/session.go:137 +0x20c
+
+goroutine 94 gp=0x40001e6000 m=nil [select, 2 minutes]:
+runtime.gopark(0x4000144f88?, 0x2?, 0x2?, 0x0?, 0x4000144f74?)
+	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x4000144e00 sp=0x4000144de0 pc=0x87d18
+runtime.selectgo(0x4000144f88, 0x4000144f70, 0xa?, 0x0, 0xa?, 0x1)
+	/usr/local/go/src/runtime/select.go:351 +0x6c4 fp=0x4000144f30 sp=0x4000144e00 pc=0x65cc4
+github.com/pion/transport/v3/netctx.(*packetConn).ReadFromContext.func1()
+	/go/pkg/mod/github.com/pion/transport/v3@v3.0.7/netctx/packetconn.go:76 +0xa0 fp=0x4000144fd0 sp=0x4000144f30 pc=0x76abb0
+runtime.goexit({})
+	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x4000144fd0 sp=0x4000144fd0 pc=0x8fdc4
+created by github.com/pion/transport/v3/netctx.(*packetConn).ReadFromContext in goroutine 119
+	/go/pkg/mod/github.com/pion/transport/v3@v3.0.7/netctx/packetconn.go:74 +0x1b0
+
+goroutine 118 gp=0x40001e6700 m=nil [select, 2 minutes]:
+runtime.gopark(0x4000237e78?, 0x2?, 0x8?, 0x88?, 0x4000237e5c?)
+	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x4000146cf0 sp=0x4000146cd0 pc=0x87d18
+runtime.selectgo(0x4000146e78, 0x4000237e58, 0x40001e8290?, 0x0, 0x4000455dc0?, 0x1)
+	/usr/local/go/src/runtime/select.go:351 +0x6c4 fp=0x4000146e20 sp=0x4000146cf0 pc=0x65cc4
+github.com/pion/dtls/v3.(*handshakeFSM).finish(0x40003a1130, {0x182b130, 0x40003a11d0}, {0x1830100?, 0x40001c0808?})
+	/go/pkg/mod/github.com/pion/dtls/v3@v3.0.4/handshaker.go:338 +0x8c fp=0x4000146ea0 sp=0x4000146e20 pc=0x78352c
+github.com/pion/dtls/v3.(*handshakeFSM).Run(0x40003a1130, {0x182b130, 0x40003a11d0}, {0x1830100, 0x40001c0808}, 0x0?)
+	/go/pkg/mod/github.com/pion/dtls/v3@v3.0.4/handshaker.go:201 +0x378 fp=0x4000146f40 sp=0x4000146ea0 pc=0x782748
+github.com/pion/dtls/v3.(*Conn).handshake.func2()
+	/go/pkg/mod/github.com/pion/dtls/v3@v3.0.4/conn.go:1063 +0x70 fp=0x4000146fd0 sp=0x4000146f40 pc=0x7738a0
+runtime.goexit({})
+	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x4000146fd0 sp=0x4000146fd0 pc=0x8fdc4
+created by github.com/pion/dtls/v3.(*Conn).handshake in goroutine 61
+	/go/pkg/mod/github.com/pion/dtls/v3@v3.0.4/conn.go:1061 +0x364
+
+goroutine 119 gp=0x40001e68c0 m=nil [select, 2 minutes]:
+runtime.gopark(0x4000459bc8?, 0x2?, 0x38?, 0x9a?, 0x4000459bac?)
+	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x4000459a40 sp=0x4000459a20 pc=0x87d18
+runtime.selectgo(0x4000459bc8, 0x4000459ba8, 0x690808108?, 0x0, 0x7fff90808108?, 0x1)
+	/usr/local/go/src/runtime/select.go:351 +0x6c4 fp=0x4000459b70 sp=0x4000459a40 pc=0x65cc4
+github.com/pion/transport/v3/packetio.(*Buffer).Read(0x4000518b40, {0x40001ea000, 0x2000, 0x2000})
+	/go/pkg/mod/github.com/pion/transport/v3@v3.0.7/packetio/buffer.go:255 +0x1a8 fp=0x4000459bf0 sp=0x4000459b70 pc=0x3e62f8
+github.com/pion/webrtc/v4/internal/mux.(*Endpoint).Read(...)
+	/go/pkg/mod/github.com/aler9/webrtc/v4@v4.0.0-20250228091429-18796cd12b4f/internal/mux/endpoint.go:45
+github.com/pion/webrtc/v4/internal/mux.(*Endpoint).ReadFrom(0x40004ae008?, {0x40001ea000?, 0x0?, 0x4000050008?})
+	/go/pkg/mod/github.com/aler9/webrtc/v4@v4.0.0-20250228091429-18796cd12b4f/internal/mux/endpoint.go:51 +0x28 fp=0x4000459c20 sp=0x4000459bf0 pc=0x819218
+github.com/pion/transport/v3/netctx.(*packetConn).ReadFromContext(0x400027ebc0, {0x182b130, 0x40003a1180}, {0x40001ea000, 0x2000, 0x2000})
+	/go/pkg/mod/github.com/pion/transport/v3@v3.0.7/netctx/packetconn.go:91 +0x1d4 fp=0x4000459d00 sp=0x4000459c20 pc=0x76a904
+github.com/pion/dtls/v3.(*Conn).readAndBuffer(0x40001c0808, {0x182b130, 0x40003a1180})
+	/go/pkg/mod/github.com/pion/dtls/v3@v3.0.4/conn.go:718 +0xb4 fp=0x4000459e40 sp=0x4000459d00 pc=0x770974
+github.com/pion/dtls/v3.(*Conn).handshake.func3()
+	/go/pkg/mod/github.com/pion/dtls/v3@v3.0.4/conn.go:1084 +0xa8 fp=0x4000459fd0 sp=0x4000459e40 pc=0x7732a8
+runtime.goexit({})
+	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x4000459fd0 sp=0x4000459fd0 pc=0x8fdc4
+created by github.com/pion/dtls/v3.(*Conn).handshake in goroutine 61
+	/go/pkg/mod/github.com/pion/dtls/v3@v3.0.4/conn.go:1071 +0x3ec
+
+goroutine 123 gp=0x40001e6a80 m=nil [select]:
+runtime.gopark(0x40005baef8?, 0x2?, 0x1?, 0x0?, 0x40005baedc?)
+	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x40005bad70 sp=0x40005bad50 pc=0x87d18
+runtime.selectgo(0x40005baef8, 0x40005baed8, 0x4000134840?, 0x0, 0x38?, 0x1)
+	/usr/local/go/src/runtime/select.go:351 +0x6c4 fp=0x40005baea0 sp=0x40005bad70 pc=0x65cc4
+github.com/pion/transport/v3/packetio.(*Buffer).Read(0x4000518c00, {0x400022a000, 0x2000, 0x2000})
+	/go/pkg/mod/github.com/pion/transport/v3@v3.0.7/packetio/buffer.go:255 +0x1a8 fp=0x40005baf20 sp=0x40005baea0 pc=0x3e62f8
+github.com/pion/webrtc/v4/internal/mux.(*Endpoint).Read(0x4000134840?, {0x400022a000?, 0x40001c0808?, 0x100000001?})
+	/go/pkg/mod/github.com/aler9/webrtc/v4@v4.0.0-20250228091429-18796cd12b4f/internal/mux/endpoint.go:45 +0x24 fp=0x40005baf50 sp=0x40005baf20 pc=0x8191c4
+github.com/pion/srtp/v3.(*session).start.func1()
+	/go/pkg/mod/github.com/pion/srtp/v3@v3.0.6/session.go:150 +0xa4 fp=0x40005bafd0 sp=0x40005baf50 pc=0x3ea134
+runtime.goexit({})
+	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x40005bafd0 sp=0x40005bafd0 pc=0x8fdc4
+created by github.com/pion/srtp/v3.(*session).start in goroutine 61
+	/go/pkg/mod/github.com/pion/srtp/v3@v3.0.6/session.go:137 +0x20c
+
+goroutine 132 gp=0x40001e6c40 m=nil [select]:
+runtime.gopark(0x400014af68?, 0x2?, 0x8?, 0x88?, 0x400014af4c?)
+	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x400014add0 sp=0x400014adb0 pc=0x87d18
+runtime.selectgo(0x400014af68, 0x400014af48, 0x40003e2280?, 0x0, 0x400003f900?, 0x1)
+	/usr/local/go/src/runtime/select.go:351 +0x6c4 fp=0x400014af00 sp=0x400014add0 pc=0x65cc4
+github.com/bluenviron/mediamtx/internal/counterdumper.(*CounterDumper).run(0x40003fcf60)
+	/s/internal/counterdumper/counterdumper.go:55 +0xc0 fp=0x400014afb0 sp=0x400014af00 pc=0x6d8160
+github.com/bluenviron/mediamtx/internal/counterdumper.(*CounterDumper).Start.gowrap1()
+	/s/internal/counterdumper/counterdumper.go:29 +0x28 fp=0x400014afd0 sp=0x400014afb0 pc=0x6d7f98
+runtime.goexit({})
+	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x400014afd0 sp=0x400014afd0 pc=0x8fdc4
+created by github.com/bluenviron/mediamtx/internal/counterdumper.(*CounterDumper).Start in goroutine 53
+	/s/internal/counterdumper/counterdumper.go:29 +0x108
+
+goroutine 125 gp=0x40001e6e00 m=nil [chan receive, 2 minutes]:
+runtime.gopark(0x0?, 0x0?, 0x0?, 0x0?, 0x0?)
+	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x4000478e00 sp=0x4000478de0 pc=0x87d18
+runtime.chanrecv(0x40001e8930, 0x4000478ed8, 0x1)
+	/usr/local/go/src/runtime/chan.go:664 +0x42c fp=0x4000478e80 sp=0x4000478e00 pc=0x2033c
+runtime.chanrecv2(0x4000478ee8?, 0x848adc?)
+	/usr/local/go/src/runtime/chan.go:511 +0x14 fp=0x4000478eb0 sp=0x4000478e80 pc=0x1fef4
+github.com/pion/srtp/v3.(*SessionSRTP).AcceptStream(0x0?)
+	/go/pkg/mod/github.com/pion/srtp/v3@v3.0.6/session_srtp.go:99 +0x28 fp=0x4000478ef0 sp=0x4000478eb0 pc=0x3eb888
+github.com/pion/webrtc/v4.(*PeerConnection).undeclaredRTPMediaProcessor(0x40001ca788)
+	/go/pkg/mod/github.com/aler9/webrtc/v4@v4.0.0-20250228091429-18796cd12b4f/peerconnection.go:1827 +0x144 fp=0x4000478fb0 sp=0x4000478ef0 pc=0x848bf4
+github.com/pion/webrtc/v4.(*PeerConnection).undeclaredMediaProcessor.gowrap1()
+	/go/pkg/mod/github.com/aler9/webrtc/v4@v4.0.0-20250228091429-18796cd12b4f/peerconnection.go:1806 +0x28 fp=0x4000478fd0 sp=0x4000478fb0 pc=0x848a78
+runtime.goexit({})
+	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x4000478fd0 sp=0x4000478fd0 pc=0x8fdc4
+created by github.com/pion/webrtc/v4.(*PeerConnection).undeclaredMediaProcessor in goroutine 61
+	/go/pkg/mod/github.com/aler9/webrtc/v4@v4.0.0-20250228091429-18796cd12b4f/peerconnection.go:1806 +0x5c
+
+goroutine 126 gp=0x40001e6fc0 m=nil [chan receive, 2 minutes]:
+runtime.gopark(0x1?, 0x0?, 0x2?, 0x0?, 0x3?)
+	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x40004795f0 sp=0x40004795d0 pc=0x87d18
+runtime.chanrecv(0x40001e8e00, 0x40004796c8, 0x1)
+	/usr/local/go/src/runtime/chan.go:664 +0x42c fp=0x4000479670 sp=0x40004795f0 pc=0x2033c
+runtime.chanrecv2(0x40004796b8?, 0x668c8?)
+	/usr/local/go/src/runtime/chan.go:511 +0x14 fp=0x40004796a0 sp=0x4000479670 pc=0x1fef4
+github.com/pion/srtp/v3.(*SessionSRTCP).AcceptStream(0x4000479728?)
+	/go/pkg/mod/github.com/pion/srtp/v3@v3.0.6/session_srtcp.go:98 +0x28 fp=0x40004796e0 sp=0x40004796a0 pc=0x3eaa18
+github.com/pion/webrtc/v4.(*PeerConnection).undeclaredRTCPMediaProcessor(0x40001ca788)
+	/go/pkg/mod/github.com/aler9/webrtc/v4@v4.0.0-20250228091429-18796cd12b4f/peerconnection.go:1892 +0xec fp=0x40004797b0 sp=0x40004796e0 pc=0x8494ac
+github.com/pion/webrtc/v4.(*PeerConnection).undeclaredMediaProcessor.gowrap2()
+	/go/pkg/mod/github.com/aler9/webrtc/v4@v4.0.0-20250228091429-18796cd12b4f/peerconnection.go:1807 +0x28 fp=0x40004797d0 sp=0x40004797b0 pc=0x848a18
+runtime.goexit({})
+	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x40004797d0 sp=0x40004797d0 pc=0x8fdc4
+created by github.com/pion/webrtc/v4.(*PeerConnection).undeclaredMediaProcessor in goroutine 61
+	/go/pkg/mod/github.com/aler9/webrtc/v4@v4.0.0-20250228091429-18796cd12b4f/peerconnection.go:1807 +0x9c
+
+goroutine 133 gp=0x40001e7180 m=nil [sync.Cond.Wait]:
+runtime.gopark(0x400014bec8?, 0x86fd4c?, 0x60?, 0xe1?, 0x4000791680?)
+	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x400014be80 sp=0x400014be60 pc=0x87d18
 runtime.goparkunlock(...)
 	/usr/local/go/src/runtime/proc.go:441
-sync.runtime_notifyListWait(0x40000a4c50, 0xba8)
-	/usr/local/go/src/runtime/sema.go:597 +0x150 fp=0x4000237ed0 sp=0x4000237e80 pc=0x89980
-sync.(*Cond).Wait(0x40000a4c40)
-	/usr/local/go/src/sync/cond.go:71 +0xc4 fp=0x4000237f10 sp=0x4000237ed0 pc=0x99234
-github.com/bluenviron/gortsplib/v4/pkg/ringbuffer.(*RingBuffer).Pull(0x400094f860)
-	/go/pkg/mod/github.com/bluenviron/gortsplib/v4@v4.16.0/pkg/ringbuffer/ringbuffer.go:102 +0xd8 fp=0x4000237f50 sp=0x4000237f10 pc=0x1bb978
-github.com/bluenviron/mediamtx/internal/stream.(*streamReader).runInner(0x40000a4c00)
-	/s/internal/stream/stream_reader.go:69 +0x2c fp=0x4000237f90 sp=0x4000237f50 pc=0x6e320c
+sync.runtime_notifyListWait(0x40002208d0, 0x1ffa)
+	/usr/local/go/src/runtime/sema.go:597 +0x150 fp=0x400014bed0 sp=0x400014be80 pc=0x89980
+sync.(*Cond).Wait(0x40002208c0)
+	/usr/local/go/src/sync/cond.go:71 +0xc4 fp=0x400014bf10 sp=0x400014bed0 pc=0x99234
+github.com/bluenviron/gortsplib/v4/pkg/ringbuffer.(*RingBuffer).Pull(0x400023e820)
+	/go/pkg/mod/github.com/bluenviron/gortsplib/v4@v4.16.0/pkg/ringbuffer/ringbuffer.go:102 +0xd8 fp=0x400014bf50 sp=0x400014bf10 pc=0x1bb978
+github.com/bluenviron/mediamtx/internal/stream.(*streamReader).runInner(0x4000220840)
+	/s/internal/stream/stream_reader.go:69 +0x2c fp=0x400014bf90 sp=0x400014bf50 pc=0x6e320c
 github.com/bluenviron/mediamtx/internal/stream.(*streamReader).run(...)
 	/s/internal/stream/stream_reader.go:63
 github.com/bluenviron/mediamtx/internal/stream.(*streamReader).start.gowrap1()
-	/s/internal/stream/stream_reader.go:46 +0x2c fp=0x4000237fd0 sp=0x4000237f90 pc=0x6e2fec
+	/s/internal/stream/stream_reader.go:46 +0x2c fp=0x400014bfd0 sp=0x400014bf90 pc=0x6e2fec
 runtime.goexit({})
-	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x4000237fd0 sp=0x4000237fd0 pc=0x8fdc4
-created by github.com/bluenviron/mediamtx/internal/stream.(*streamReader).start in goroutine 342
+	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x400014bfd0 sp=0x400014bfd0 pc=0x8fdc4
+created by github.com/bluenviron/mediamtx/internal/stream.(*streamReader).start in goroutine 53
 	/s/internal/stream/stream_reader.go:46 +0xe0
-
-goroutine 358 gp=0x40000df880 m=nil [select, 1 minutes]:
-runtime.gopark(0x4000332ef8?, 0x2?, 0x62?, 0x0?, 0x4000332edc?)
-	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x4000332d70 sp=0x4000332d50 pc=0x87d18
-runtime.selectgo(0x4000332ef8, 0x4000332ed8, 0x2000010100332ee8?, 0x0, 0x7fffa7e84a78?, 0x1)
-	/usr/local/go/src/runtime/select.go:351 +0x6c4 fp=0x4000332ea0 sp=0x4000332d70 pc=0x65cc4
-github.com/pion/transport/v3/packetio.(*Buffer).Read(0x40002526c0, {0x400021a000, 0x2000, 0x2000})
-	/go/pkg/mod/github.com/pion/transport/v3@v3.0.7/packetio/buffer.go:255 +0x1a8 fp=0x4000332f20 sp=0x4000332ea0 pc=0x3e62f8
-github.com/pion/webrtc/v4/internal/mux.(*Endpoint).Read(0x400097c900?, {0x400021a000?, 0x4000332fa8?, 0x100010000?})
-	/go/pkg/mod/github.com/aler9/webrtc/v4@v4.0.0-20250228091429-18796cd12b4f/internal/mux/endpoint.go:45 +0x24 fp=0x4000332f50 sp=0x4000332f20 pc=0x8191c4
-github.com/pion/srtp/v3.(*session).start.func1()
-	/go/pkg/mod/github.com/pion/srtp/v3@v3.0.6/session.go:150 +0xa4 fp=0x4000332fd0 sp=0x4000332f50 pc=0x3ea134
-runtime.goexit({})
-	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x4000332fd0 sp=0x4000332fd0 pc=0x8fdc4
-created by github.com/pion/srtp/v3.(*session).start in goroutine 327
-	/go/pkg/mod/github.com/pion/srtp/v3@v3.0.6/session.go:137 +0x20c
-
-goroutine 346 gp=0x40000dfa40 m=nil [select]:
-runtime.gopark(0x40008c5f68?, 0x2?, 0x80?, 0x1?, 0x40008c5f4c?)
-	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x40008c5dd0 sp=0x40008c5db0 pc=0x87d18
-runtime.selectgo(0x40008c5f68, 0x40008c5f48, 0x1820008?, 0x0, 0x2000?, 0x1)
-	/usr/local/go/src/runtime/select.go:351 +0x6c4 fp=0x40008c5f00 sp=0x40008c5dd0 pc=0x65cc4
-github.com/bluenviron/gortsplib/v4/pkg/rtcpsender.(*RTCPSender).run(0x4000251a70)
-	/go/pkg/mod/github.com/bluenviron/gortsplib/v4@v4.16.0/pkg/rtcpsender/rtcpsender.go:87 +0xbc fp=0x40008c5fb0 sp=0x40008c5f00 pc=0x3dd74c
-github.com/bluenviron/gortsplib/v4/pkg/rtcpsender.(*RTCPSender).Initialize.gowrap1()
-	/go/pkg/mod/github.com/bluenviron/gortsplib/v4@v4.16.0/pkg/rtcpsender/rtcpsender.go:71 +0x28 fp=0x40008c5fd0 sp=0x40008c5fb0 pc=0x3dd5f8
-runtime.goexit({})
-	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x40008c5fd0 sp=0x40008c5fd0 pc=0x8fdc4
-created by github.com/bluenviron/gortsplib/v4/pkg/rtcpsender.(*RTCPSender).Initialize in goroutine 342
-	/go/pkg/mod/github.com/bluenviron/gortsplib/v4@v4.16.0/pkg/rtcpsender/rtcpsender.go:71 +0x100
-
-goroutine 394 gp=0x4000304380 m=nil [select, 1 minutes]:
-runtime.gopark(0x400032dbc8?, 0x2?, 0x38?, 0xda?, 0x400032dbac?)
-	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x400032da40 sp=0x400032da20 pc=0x87d18
-runtime.selectgo(0x400032dbc8, 0x400032dba8, 0x6a7e84a78?, 0x0, 0x7fffa7e84a78?, 0x1)
-	/usr/local/go/src/runtime/select.go:351 +0x6c4 fp=0x400032db70 sp=0x400032da40 pc=0x65cc4
-github.com/pion/transport/v3/packetio.(*Buffer).Read(0x4000252300, {0x40000b6000, 0x2000, 0x2000})
-	/go/pkg/mod/github.com/pion/transport/v3@v3.0.7/packetio/buffer.go:255 +0x1a8 fp=0x400032dbf0 sp=0x400032db70 pc=0x3e62f8
-github.com/pion/webrtc/v4/internal/mux.(*Endpoint).Read(...)
-	/go/pkg/mod/github.com/aler9/webrtc/v4@v4.0.0-20250228091429-18796cd12b4f/internal/mux/endpoint.go:45
-github.com/pion/webrtc/v4/internal/mux.(*Endpoint).ReadFrom(0x4000069008?, {0x40000b6000?, 0x0?, 0x4000054a08?})
-	/go/pkg/mod/github.com/aler9/webrtc/v4@v4.0.0-20250228091429-18796cd12b4f/internal/mux/endpoint.go:51 +0x28 fp=0x400032dc20 sp=0x400032dbf0 pc=0x819218
-github.com/pion/transport/v3/netctx.(*packetConn).ReadFromContext(0x40001e2040, {0x182b130, 0x40005de280}, {0x40000b6000, 0x2000, 0x2000})
-	/go/pkg/mod/github.com/pion/transport/v3@v3.0.7/netctx/packetconn.go:91 +0x1d4 fp=0x400032dd00 sp=0x400032dc20 pc=0x76a904
-github.com/pion/dtls/v3.(*Conn).readAndBuffer(0x40001b8808, {0x182b130, 0x40005de280})
-	/go/pkg/mod/github.com/pion/dtls/v3@v3.0.4/conn.go:718 +0xb4 fp=0x400032de40 sp=0x400032dd00 pc=0x770974
-github.com/pion/dtls/v3.(*Conn).handshake.func3()
-	/go/pkg/mod/github.com/pion/dtls/v3@v3.0.4/conn.go:1084 +0xa8 fp=0x400032dfd0 sp=0x400032de40 pc=0x7732a8
-runtime.goexit({})
-	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x400032dfd0 sp=0x400032dfd0 pc=0x8fdc4
-created by github.com/pion/dtls/v3.(*Conn).handshake in goroutine 327
-	/go/pkg/mod/github.com/pion/dtls/v3@v3.0.4/conn.go:1071 +0x3ec
-
-goroutine 385 gp=0x40003048c0 m=nil [select, 1 minutes]:
-runtime.gopark(0x400048bf70?, 0x2?, 0x68?, 0xbd?, 0x400048bea4?)
-	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x400048bd30 sp=0x400048bd10 pc=0x87d18
-runtime.selectgo(0x400048bf70, 0x400048bea0, 0x7e?, 0x0, 0x4000546260?, 0x1)
-	/usr/local/go/src/runtime/select.go:351 +0x6c4 fp=0x400048be60 sp=0x400048bd30 pc=0x65cc4
-github.com/bluenviron/mediamtx/internal/servers/webrtc.(*session).readRemoteCandidates(0x400012e900, 0x4000352140)
-	/s/internal/servers/webrtc/session.go:376 +0xa8 fp=0x400048bfb0 sp=0x400048be60 pc=0x8801e8
-github.com/bluenviron/mediamtx/internal/servers/webrtc.(*session).runRead.gowrap3()
-	/s/internal/servers/webrtc/session.go:327 +0x2c fp=0x400048bfd0 sp=0x400048bfb0 pc=0x88003c
-runtime.goexit({})
-	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x400048bfd0 sp=0x400048bfd0 pc=0x8fdc4
-created by github.com/bluenviron/mediamtx/internal/servers/webrtc.(*session).runRead in goroutine 342
-	/s/internal/servers/webrtc/session.go:327 +0x57c
-
-goroutine 374 gp=0x4000304a80 m=nil [select]:
-runtime.gopark(0x40001d7ea8?, 0x2?, 0xc0?, 0x4f?, 0x40001d7e64?)
-	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x40001d7cf0 sp=0x40001d7cd0 pc=0x87d18
-runtime.selectgo(0x40001d7ea8, 0x40001d7e60, 0x32?, 0x0, 0x40007f6360?, 0x1)
-	/usr/local/go/src/runtime/select.go:351 +0x6c4 fp=0x40001d7e20 sp=0x40001d7cf0 pc=0x65cc4
-github.com/pion/ice/v4.(*udpMuxedConn).ReadFrom(0x40008b20a0, {0x40002da000, 0x2000, 0x2000?})
-	/go/pkg/mod/github.com/aler9/ice/v4@v4.0.0-20250301104324-b2df7db9f75d/udp_muxed_conn.go:87 +0x158 fp=0x40001d7ed0 sp=0x40001d7e20 pc=0x812f68
-github.com/pion/ice/v4.(*candidateBase).recvLoop(0x40008d60f0, 0x40001d7f68?)
-	/go/pkg/mod/github.com/aler9/ice/v4@v4.0.0-20250301104324-b2df7db9f75d/candidate_base.go:244 +0x19c fp=0x40001d7fb0 sp=0x40001d7ed0 pc=0x7f5cfc
-github.com/pion/ice/v4.(*candidateBase).start.gowrap1()
-	/go/pkg/mod/github.com/aler9/ice/v4@v4.0.0-20250301104324-b2df7db9f75d/candidate_base.go:216 +0x2c fp=0x40001d7fd0 sp=0x40001d7fb0 pc=0x7f5b2c
-runtime.goexit({})
-	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x40001d7fd0 sp=0x40001d7fd0 pc=0x8fdc4
-created by github.com/pion/ice/v4.(*candidateBase).start in goroutine 303
-	/go/pkg/mod/github.com/aler9/ice/v4@v4.0.0-20250301104324-b2df7db9f75d/candidate_base.go:216 +0x12c
-
-goroutine 303 gp=0x4000304540 m=nil [select]:
-runtime.gopark(0x400043ef50?, 0x2?, 0x8?, 0xee?, 0x400043ef4c?)
-	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x400043edd0 sp=0x400043edb0 pc=0x87d18
-runtime.selectgo(0x400043ef50, 0x400043ef48, 0x0?, 0x0, 0x4000428c40?, 0x1)
-	/usr/local/go/src/runtime/select.go:351 +0x6c4 fp=0x400043ef00 sp=0x400043edd0 pc=0x65cc4
-github.com/pion/ice/v4/internal/taskloop.(*Loop).runLoop(0x40001123c0, 0x4000497fb0?)
-	/go/pkg/mod/github.com/aler9/ice/v4@v4.0.0-20250301104324-b2df7db9f75d/internal/taskloop/taskloop.go:55 +0xbc fp=0x400043efb0 sp=0x400043ef00 pc=0x7b549c
-github.com/pion/ice/v4/internal/taskloop.New.gowrap1()
-	/go/pkg/mod/github.com/aler9/ice/v4@v4.0.0-20250301104324-b2df7db9f75d/internal/taskloop/taskloop.go:42 +0x2c fp=0x400043efd0 sp=0x400043efb0 pc=0x7b53ac
-runtime.goexit({})
-	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x400043efd0 sp=0x400043efd0 pc=0x8fdc4
-created by github.com/pion/ice/v4/internal/taskloop.New in goroutine 342
-	/go/pkg/mod/github.com/aler9/ice/v4@v4.0.0-20250301104324-b2df7db9f75d/internal/taskloop/taskloop.go:42 +0xfc
-
-goroutine 353 gp=0x4000304e00 m=nil [select]:
-runtime.gopark(0x4000065768?, 0x3?, 0x38?, 0x56?, 0x400006573a?)
-	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x40000655c0 sp=0x40000655a0 pc=0x87d18
-runtime.selectgo(0x4000065768, 0x4000065734, 0x40001123c0?, 0x0, 0x40001c4580?, 0x1)
-	/usr/local/go/src/runtime/select.go:351 +0x6c4 fp=0x40000656f0 sp=0x40000655c0 pc=0x65cc4
-github.com/pion/ice/v4.(*Agent).connectivityChecks(0x4000aee308)
-	/go/pkg/mod/github.com/aler9/ice/v4@v4.0.0-20250301104324-b2df7db9f75d/agent.go:436 +0x164 fp=0x40000657b0 sp=0x40000656f0 pc=0x7ecd84
-github.com/pion/ice/v4.(*Agent).startConnectivityChecks.func1.gowrap1()
-	/go/pkg/mod/github.com/aler9/ice/v4@v4.0.0-20250301104324-b2df7db9f75d/agent.go:371 +0x28 fp=0x40000657d0 sp=0x40000657b0 pc=0x7ecb48
-runtime.goexit({})
-	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x40000657d0 sp=0x40000657d0 pc=0x8fdc4
-created by github.com/pion/ice/v4.(*Agent).startConnectivityChecks.func1 in goroutine 303
-	/go/pkg/mod/github.com/aler9/ice/v4@v4.0.0-20250301104324-b2df7db9f75d/agent.go:371 +0x238
-
-goroutine 389 gp=0x4000304fc0 m=nil [select]:
-runtime.gopark(0x4000333eb8?, 0x2?, 0x78?, 0x3d?, 0x4000333e9c?)
-	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x4000333d30 sp=0x4000333d10 pc=0x87d18
-runtime.selectgo(0x4000333eb8, 0x4000333e98, 0x6000101009eca60?, 0x0, 0x40002522b8?, 0x1)
-	/usr/local/go/src/runtime/select.go:351 +0x6c4 fp=0x4000333e60 sp=0x4000333d30 pc=0x65cc4
-github.com/pion/transport/v3/packetio.(*Buffer).Read(0x400087e1e0, {0x40000b0000, 0x5dc, 0x5dc})
-	/go/pkg/mod/github.com/pion/transport/v3@v3.0.7/packetio/buffer.go:255 +0x1a8 fp=0x4000333ee0 sp=0x4000333e60 pc=0x3e62f8
-github.com/pion/ice/v4.(*Conn).Read(0x40009960d8, {0x40000b0000, 0x5dc, 0x5dc})
-	/go/pkg/mod/github.com/aler9/ice/v4@v4.0.0-20250301104324-b2df7db9f75d/transport.go:76 +0x7c fp=0x4000333f10 sp=0x4000333ee0 pc=0x81047c
-github.com/pion/webrtc/v4/internal/mux.(*Mux).readLoop(0x40002522a0)
-	/go/pkg/mod/github.com/aler9/webrtc/v4@v4.0.0-20250228091429-18796cd12b4f/internal/mux/mux.go:122 +0x98 fp=0x4000333fb0 sp=0x4000333f10 pc=0x819e18
-github.com/pion/webrtc/v4/internal/mux.NewMux.gowrap1()
-	/go/pkg/mod/github.com/aler9/webrtc/v4@v4.0.0-20250228091429-18796cd12b4f/internal/mux/mux.go:58 +0x28 fp=0x4000333fd0 sp=0x4000333fb0 pc=0x819668
-runtime.goexit({})
-	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x4000333fd0 sp=0x4000333fd0 pc=0x8fdc4
-created by github.com/pion/webrtc/v4/internal/mux.NewMux in goroutine 327
-	/go/pkg/mod/github.com/aler9/webrtc/v4@v4.0.0-20250228091429-18796cd12b4f/internal/mux/mux.go:58 +0x140
-
-goroutine 401 gp=0x4000305340 m=nil [select]:
-runtime.gopark(0x4000488f68?, 0x2?, 0x8?, 0x90?, 0x4000488f4c?)
-	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x4000488dd0 sp=0x4000488db0 pc=0x87d18
-runtime.selectgo(0x4000488f68, 0x4000488f48, 0x4000352140?, 0x0, 0x400037aac0?, 0x1)
-	/usr/local/go/src/runtime/select.go:351 +0x6c4 fp=0x4000488f00 sp=0x4000488dd0 pc=0x65cc4
-github.com/bluenviron/mediamtx/internal/counterdumper.(*CounterDumper).run(0x40000b46c0)
-	/s/internal/counterdumper/counterdumper.go:55 +0xc0 fp=0x4000488fb0 sp=0x4000488f00 pc=0x6d8160
-github.com/bluenviron/mediamtx/internal/counterdumper.(*CounterDumper).Start.gowrap1()
-	/s/internal/counterdumper/counterdumper.go:29 +0x28 fp=0x4000488fd0 sp=0x4000488fb0 pc=0x6d7f98
-runtime.goexit({})
-	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x4000488fd0 sp=0x4000488fd0 pc=0x8fdc4
-created by github.com/bluenviron/mediamtx/internal/counterdumper.(*CounterDumper).Start in goroutine 342
-	/s/internal/counterdumper/counterdumper.go:29 +0x108
-
-goroutine 361 gp=0x4000305500 m=nil [chan receive, 1 minutes]:
-runtime.gopark(0x400005e688?, 0x1fed4?, 0x78?, 0xe6?, 0x1fa10?)
-	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x400005e600 sp=0x400005e5e0 pc=0x87d18
-runtime.chanrecv(0x4000a1db20, 0x400005e6d8, 0x1)
-	/usr/local/go/src/runtime/chan.go:664 +0x42c fp=0x400005e680 sp=0x400005e600 pc=0x2033c
-runtime.chanrecv2(0x400005e6e8?, 0x848adc?)
-	/usr/local/go/src/runtime/chan.go:511 +0x14 fp=0x400005e6b0 sp=0x400005e680 pc=0x1fef4
-github.com/pion/srtp/v3.(*SessionSRTP).AcceptStream(0x400005e798?)
-	/go/pkg/mod/github.com/pion/srtp/v3@v3.0.6/session_srtp.go:99 +0x28 fp=0x400005e6f0 sp=0x400005e6b0 pc=0x3eb888
-github.com/pion/webrtc/v4.(*PeerConnection).undeclaredRTPMediaProcessor(0x40001c2a08)
-	/go/pkg/mod/github.com/aler9/webrtc/v4@v4.0.0-20250228091429-18796cd12b4f/peerconnection.go:1827 +0x144 fp=0x400005e7b0 sp=0x400005e6f0 pc=0x848bf4
-github.com/pion/webrtc/v4.(*PeerConnection).undeclaredMediaProcessor.gowrap1()
-	/go/pkg/mod/github.com/aler9/webrtc/v4@v4.0.0-20250228091429-18796cd12b4f/peerconnection.go:1806 +0x28 fp=0x400005e7d0 sp=0x400005e7b0 pc=0x848a78
-runtime.goexit({})
-	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x400005e7d0 sp=0x400005e7d0 pc=0x8fdc4
-created by github.com/pion/webrtc/v4.(*PeerConnection).undeclaredMediaProcessor in goroutine 327
-	/go/pkg/mod/github.com/aler9/webrtc/v4@v4.0.0-20250228091429-18796cd12b4f/peerconnection.go:1806 +0x5c
-
-goroutine 362 gp=0x40003056c0 m=nil [chan receive, 1 minutes]:
-runtime.gopark(0x1?, 0x40001399d0?, 0x38?, 0x5e?, 0x40004fbbf0?)
-	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x4000065df0 sp=0x4000065dd0 pc=0x87d18
-runtime.chanrecv(0x40004985b0, 0x4000065ec8, 0x1)
-	/usr/local/go/src/runtime/chan.go:664 +0x42c fp=0x4000065e70 sp=0x4000065df0 pc=0x2033c
-runtime.chanrecv2(0x4000065f18?, 0x1f038?)
-	/usr/local/go/src/runtime/chan.go:511 +0x14 fp=0x4000065ea0 sp=0x4000065e70 pc=0x1fef4
-github.com/pion/srtp/v3.(*SessionSRTCP).AcceptStream(0x0?)
-	/go/pkg/mod/github.com/pion/srtp/v3@v3.0.6/session_srtcp.go:98 +0x28 fp=0x4000065ee0 sp=0x4000065ea0 pc=0x3eaa18
-github.com/pion/webrtc/v4.(*PeerConnection).undeclaredRTCPMediaProcessor(0x40001c2a08)
-	/go/pkg/mod/github.com/aler9/webrtc/v4@v4.0.0-20250228091429-18796cd12b4f/peerconnection.go:1892 +0xec fp=0x4000065fb0 sp=0x4000065ee0 pc=0x8494ac
-github.com/pion/webrtc/v4.(*PeerConnection).undeclaredMediaProcessor.gowrap2()
-	/go/pkg/mod/github.com/aler9/webrtc/v4@v4.0.0-20250228091429-18796cd12b4f/peerconnection.go:1807 +0x28 fp=0x4000065fd0 sp=0x4000065fb0 pc=0x848a18
-runtime.goexit({})
-	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x4000065fd0 sp=0x4000065fd0 pc=0x8fdc4
-created by github.com/pion/webrtc/v4.(*PeerConnection).undeclaredMediaProcessor in goroutine 327
-	/go/pkg/mod/github.com/aler9/webrtc/v4@v4.0.0-20250228091429-18796cd12b4f/peerconnection.go:1807 +0x9c
-
-goroutine 364 gp=0x4000305880 m=nil [select, 1 minutes]:
-runtime.gopark(0x400089bf88?, 0x2?, 0x98?, 0xbe?, 0x400089bf74?)
-	/usr/local/go/src/runtime/proc.go:435 +0xc8 fp=0x400089be00 sp=0x400089bde0 pc=0x87d18
-runtime.selectgo(0x400089bf88, 0x400089bf70, 0x40005de230?, 0x0, 0x40005de2d0?, 0x1)
-	/usr/local/go/src/runtime/select.go:351 +0x6c4 fp=0x400089bf30 sp=0x400089be00 pc=0x65cc4
-github.com/pion/transport/v3/netctx.(*packetConn).ReadFromContext.func1()
-	/go/pkg/mod/github.com/pion/transport/v3@v3.0.7/netctx/packetconn.go:76 +0xa0 fp=0x400089bfd0 sp=0x400089bf30 pc=0x76abb0
-runtime.goexit({})
-	/usr/local/go/src/runtime/asm_arm64.s:1223 +0x4 fp=0x400089bfd0 sp=0x400089bfd0 pc=0x8fdc4
-created by github.com/pion/transport/v3/netctx.(*packetConn).ReadFromContext in goroutine 394
-	/go/pkg/mod/github.com/pion/transport/v3@v3.0.7/netctx/packetconn.go:74 +0x1b0
 
 r0      0x1ff4f40
 r1      0x80
@@ -1402,31 +1432,31 @@ r2      0x0
 r3      0x0
 r4      0x0
 r5      0x0
-r6      0x4
+r6      0x6
 r7      0x0
 r8      0x62
-r9      0x4000493f8c
+r9      0x400041bf8c
 r10     0x2
 r11     0x2
-r12     0x4000493f8c
+r12     0x400041bf8c
 r13     0x0
 r14     0x1
 r15     0x0
-r16     0x7fffd71f7740
-r17     0x4000493d10
+r16     0x7fffe0e93a90
+r17     0x400041bd10
 r18     0x0
-r19     0x400003a030
-r20     0x4000493e10
-r21     0x7fffd7207330
+r19     0x400003c000
+r20     0x400041be10
+r21     0x7fffe0ea3680
 r22     0x4000004000
 r23     0x0
 r24     0x2e7
-r25     0x4000055ec8
+r25     0x4000051e18
 r26     0x16f9f80
 r27     0x1fc7000
 r28     0x1ff3880
-r29     0x7fffd72071b8
+r29     0x7fffe0ea3508
 lr      0x4bdfc
-sp      0x7fffd72071c0
+sp      0x7fffe0ea3510
 pc      0x9124c
 fault   0x0
