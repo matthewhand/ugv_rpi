@@ -1,1 +1,2 @@
+controllers/models/sherpa-onnx-vits-zh-ll/model.onnx filter=lfs diff=lfs merge=lfs -text
 controllers/models/**/*.onnx filter=lfs diff=lfs merge=lfs -text
