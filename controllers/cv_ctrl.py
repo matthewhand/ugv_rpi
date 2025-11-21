@@ -568,8 +568,7 @@ class OpencvFuncs():
         return distance
 
     def cv_detect_faces(self, img):
-        gray_img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        faces = self.face_detector.detect(gray_img)
+        faces = self.face_detector.detect(img)
         overlay_buffer = np.zeros_like(img)
 
         height, width = img.shape[:2]
