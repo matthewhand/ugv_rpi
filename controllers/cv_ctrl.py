@@ -11,6 +11,7 @@ from collections import deque
 import textwrap
 import re
 from PIL import Image, ImageDraw, ImageFont
+from .UltraFaceNcnn import UltraFaceNcnn
 
 # config file.
 curpath = os.path.realpath(__file__)
@@ -151,7 +152,7 @@ class OpencvFuncs():
         self.avg = None
 
         # face detection & tracking
-        self.faceCascade = cv2.CascadeClassifier(thisPath + '/models/haarcascade_frontalface_default.xml')
+        self.face_detector = UltraFaceNcnn(thisPath + '/models/ultraface-ncnn/RFB-320.param',thisPath + '/models/ultraface-ncnn/RFB-320.bin', input_size=(320,240), threshold=0.7, nms_threshold=0.3)
         self.min_radius = f['cv']['min_radius']
         self.track_faces_iterate = f['cv']['track_faces_iterate']
 
@@ -568,12 +569,7 @@ class OpencvFuncs():
 
     def cv_detect_faces(self, img):
         gray_img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        faces = self.faceCascade.detectMultiScale(
-                gray_img,     
-                scaleFactor=1.2,
-                minNeighbors=5,     
-                minSize=(20, 20)
-            )
+        faces = self.face_detector.detect(gray_img)
         overlay_buffer = np.zeros_like(img)
 
         height, width = img.shape[:2]
@@ -588,12 +584,12 @@ class OpencvFuncs():
                     self.base_ctrl.head_light_status = 255
                     self.base_ctrl.lights_ctrl(self.base_ctrl.base_light_status, self.base_ctrl.head_light_status)
 
-            for (x,y,w,h) in faces:
-                cv2.rectangle(overlay_buffer,(x,y),(x+w,y+h),(64,128,255),1)
-                face_area = w * h
+            for face in faces:
+                cv2.rectangle(overlay_buffer,(int(face.x1),int(face.y1)),(int(face.x2),int(face.y2)),(64,128,255),1)
+                face_area = (face.x2-face.x1) * (face.y2-face.y1)
                 if face_area > max_area:
                     max_area = face_area
-                    max_face_center = (x + w // 2, y + h // 2)
+                    max_face_center = (face.x1 + face.x2 // 2, face.y1 + face.y2 // 2)
 
             if not self.cv_movtion_lock:
                 self.gimbal_track(center_x, center_y, max_face_center[0], max_face_center[1], self.track_faces_iterate)
