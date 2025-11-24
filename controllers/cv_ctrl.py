@@ -229,43 +229,58 @@ class OpencvFuncs():
 
         # osd settings
         self.add_osd = f['base_config']['add_osd']
-
         # camera type detection
+        self.init_camera(f)
+
+    def init_camera(self, f):
         self.usb_camera_connected = self.usb_camera_detection()
         self.csi_camera_connected = False
         self.oak_camera_connected = False
 
-        # usb camera init
         if self.usb_camera_connected:
-            self.camera = cv2.VideoCapture(0)
-            self.camera.set(cv2.CAP_PROP_FRAME_WIDTH, f['video']['default_res_w'])
-            self.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, f['video']['default_res_h'])
-
-        # csi camera init
-        if not self.usb_camera_connected:
-            print("init csi camera.")
             try:
-                # libraries for csi camera
+                self.camera = cv2.VideoCapture(0)
+                self.camera.set(cv2.CAP_PROP_FRAME_WIDTH,  f['video']['default_res_w'])
+                self.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, f['video']['default_res_h'])
+                print("USB camera initialized.")
+                return True
+            except:
+                self.usb_camera_connected = False
+
+        if not self.usb_camera_connected:
+            print("Trying to init CSI camera...")
+            try:
                 from picamera2 import Picamera2
                 from picamera2.encoders import H264Encoder, Encoder
                 from picamera2.outputs import FfmpegOutput    
 
                 self.encoder = H264Encoder(1000000)
                 self.picam2 = Picamera2()
-                self.picam2.configure(self.picam2.create_video_configuration(main={"format": 'XRGB8888', "size": (f['video']['default_res_w'], f['video']['default_res_h'])}))
+                self.picam2.configure(
+                    self.picam2.create_video_configuration(
+                        main={
+                            "format": 'XRGB8888',
+                            "size": (f['video']['default_res_w'], f['video']['default_res_h'])
+                        }
+                    )
+                )
                 self.picam2.start()
                 self.csi_camera_connected = True
-            except:
+                print("CSI camera initialized.")
+                return True
+
+            except Exception as e:
+                print(f"CSI camera init failed: {e}")
                 self.csi_camera_connected = False
 
-        #oak camera init 
         if not self.usb_camera_connected and not self.csi_camera_connected:
+            print("Trying to init OAK camera...")
             try:
-                # libraries for oak camera
                 import depthai as dai
-                self.pipeline = dai.Pipeline()
 
+                self.pipeline = dai.Pipeline()
                 self.camRgb = self.pipeline.createColorCamera()
+
                 self.camRgb.setBoardSocket(dai.CameraBoardSocket.RGB)
                 self.camRgb.setInterleaved(False)
                 self.camRgb.setResolution(dai.ColorCameraProperties.SensorResolution.THE_1080_P)
@@ -273,19 +288,22 @@ class OpencvFuncs():
                 self.camRgb.setPreviewKeepAspectRatio(False)
 
                 self.xout = self.pipeline.createXLinkOut()
-                # self.xout.setStreamName("video")
-                # self.camRgb.video.link(self.xout.input)
                 self.xout.setStreamName("preview")
                 self.camRgb.preview.link(self.xout.input)
-                
+
                 self.device = dai.Device(self.pipeline)
-                # self.output_queue = self.device.getOutputQueue(name="video", maxSize=8, blocking=False)
                 self.output_queue = self.device.getOutputQueue(name="preview", maxSize=8, blocking=False)
 
                 self.oak_camera_connected = True
+                print("OAK camera initialized.")
+                return True
+
             except Exception as e:
-                print(f"[cv_ctrl.frame_process] error: {e}")
+                print(f"OAK camera init failed: {e}")
                 self.oak_camera_connected = False
+
+        print("No available camera found.")
+        return False
 
     def frame_process(self):
         while True:
@@ -300,7 +318,6 @@ class OpencvFuncs():
                     input_frame = self.picam2.capture_array()
                 elif self.oak_camera_connected:
                     input_frame = self.output_queue.get().getCvFrame()
-                    # input_frame = cv2.resize(input_frame, (640, 480))
                 else:
                     input_frame = 255 * np.ones((480, 640, 3), dtype=np.uint8)
                     cv2.putText(input_frame, f"camera read failed... \nusb - csi - oak", 
@@ -409,6 +426,7 @@ class OpencvFuncs():
             # encode frame
             try:
                 self.ffmpeg_process.stdin.write(input_frame.tobytes())
+                self.ffmpeg_process.stdin.flush()
             except:
                 pass
 

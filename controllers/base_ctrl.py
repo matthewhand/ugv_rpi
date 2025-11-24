@@ -31,12 +31,12 @@ class ReadLine:
 		except:
 			self.sensor_data_ser = None
 		self.sensor_data_max_len = 51
-#
-#		try:
-#			self.lidar_ser = serial.Serial(glob.glob('/dev/ttyACM*')[0], 230400, timeout=1)
-#			print("/dev/ttyACM* connected succeed")
-#		except:
-#			self.lidar_ser = None
+
+		try:
+			self.lidar_ser = serial.Serial(glob.glob('/dev/ttyACM*')[0], 230400, timeout=1)
+			print("/dev/ttyACM* connected succeed")
+		except:
+			self.lidar_ser = None
 		self.ANGLE_PER_FRAME = 12
 		self.HEADER = 0x54
 		self.lidar_angles = []
@@ -140,7 +140,6 @@ class ReadLine:
 		except Exception as e:
 			print(f"[base_ctrl.lidar_data_recv] error: {e}")
 			self.lidar_ser = serial.Serial(glob.glob('/dev/ttyACM*')[0], 230400, timeout=1)
-
 
 class BaseController:
 
