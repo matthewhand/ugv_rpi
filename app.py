@@ -536,7 +536,6 @@ def cmd_on_boot():
         'base -c {"T":300,"mode":0,"mac":"EF:EF:EF:EF:EF:EF"}',  # the base won't be ctrl by esp-now broadcast cmd, but it can still recv broadcast megs.
         'send -a -b'    # add broadcast mac addr to peer
     ]
-    # print('base -c {{"T":4,"cmd":{}}}'.format(f['base_config']['module_type']))
     for i in range(0, len(cmd_list)):
         cmdline_ctrl(cmd_list[i])
         cvf.info_update(cmd_list[i], (0,255,255), 0.36)

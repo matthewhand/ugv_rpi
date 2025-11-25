@@ -1,20 +1,10 @@
-2025/11/24 11:17:32 INF MediaMTX v1.13.1
-2025/11/24 11:17:32 INF configuration loaded from /home/ws/ugv_rpi/controllers/Mediamtx/mediamtx.yml
-2025/11/24 11:17:32 INF [RTSP] listener opened on :8554 (TCP), :8000 (UDP/RTP), :8001 (UDP/RTCP)
-2025/11/24 11:17:32 INF [RTMP] listener opened on :1935
-2025/11/24 11:17:32 INF [HLS] listener opened on :8880
-2025/11/24 11:17:32 INF [WebRTC] listener opened on :8889 (HTTP), :8189 (ICE/UDP)
-2025/11/24 11:17:32 INF [SRT] listener opened on :8890 (UDP)
-2025/11/24 11:17:37 INF [RTSP] [conn [::1]:46128] opened
-2025/11/24 11:17:37 INF [RTSP] [session 49e6a5f5] created by [::1]:46128
-2025/11/24 11:17:37 INF [RTSP] [session 49e6a5f5] is publishing to path 'cam', 1 track (H264)
-2025/11/24 11:17:39 INF [WebRTC] [session baf28ee3] created by 192.168.9.125:63699
-2025/11/24 11:17:39 INF [WebRTC] [session baf28ee3] peer connection established, local candidate: host/udp/127.0.0.1/8189, remote candidate: prflx/udp/192.168.9.125/62951
-2025/11/24 11:17:39 INF [WebRTC] [session baf28ee3] is reading from path 'cam', 1 track (H264)
-2025/11/24 11:17:51 INF [WebRTC] [session f0880d8f] created by 192.168.9.125:63699
-2025/11/24 11:17:51 INF [WebRTC] [session f0880d8f] peer connection established, local candidate: host/udp/127.0.0.1/8189, remote candidate: prflx/udp/192.168.9.125/54776
-2025/11/24 11:17:51 INF [WebRTC] [session f0880d8f] is reading from path 'cam', 1 track (H264)
-2025/11/24 11:17:59 INF [WebRTC] [session baf28ee3] closed: peer connection closed
-2025/11/24 11:17:59 INF [WebRTC] [session 8928a43d] created by 192.168.9.125:63699
-2025/11/24 11:17:59 INF [WebRTC] [session 8928a43d] peer connection established, local candidate: host/udp/127.0.0.1/8189, remote candidate: prflx/udp/192.168.9.125/49334
-2025/11/24 11:17:59 INF [WebRTC] [session 8928a43d] is reading from path 'cam', 1 track (H264)
+2025/11/25 10:42:33 INF MediaMTX v1.13.1
+2025/11/25 10:42:33 INF configuration loaded from /home/ws/ugv_rpi/controllers/Mediamtx/mediamtx.yml
+2025/11/25 10:42:33 INF [RTSP] listener opened on :8554 (TCP), :8000 (UDP/RTP), :8001 (UDP/RTCP)
+2025/11/25 10:42:33 INF [RTMP] listener opened on :1935
+2025/11/25 10:42:33 INF [HLS] listener opened on :8880
+2025/11/25 10:42:33 INF [WebRTC] listener opened on :8889 (HTTP), :8189 (ICE/UDP)
+2025/11/25 10:42:33 INF [SRT] listener opened on :8890 (UDP)
+2025/11/25 10:42:42 INF [RTSP] [conn [::1]:52838] opened
+2025/11/25 10:42:42 INF [RTSP] [session 92e1490b] created by [::1]:52838
+2025/11/25 10:42:42 INF [RTSP] [session 92e1490b] is publishing to path 'cam', 1 track (H264)

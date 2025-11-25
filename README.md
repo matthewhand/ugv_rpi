@@ -47,7 +47,7 @@ You can use this tutorial to install this program on a pure Raspberry Pi OS.
 
 You can clone this repository from Waveshare's GitHub to your local machine.
 
-    git clone https://github.com/waveshareteam/ugv_rpi.git
+    git clone -b refactor/debian12-2025.10.01-py3.11 https://github.com/waveshareteam/ugv_rpi.git
 
 ### Grant execution permission to the mediamtx 
     cd ugv_rpi/
