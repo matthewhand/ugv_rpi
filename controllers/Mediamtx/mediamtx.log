@@ -1,10 +1,19 @@
-2025/11/25 10:42:33 INF MediaMTX v1.13.1
-2025/11/25 10:42:33 INF configuration loaded from /home/ws/ugv_rpi/controllers/Mediamtx/mediamtx.yml
-2025/11/25 10:42:33 INF [RTSP] listener opened on :8554 (TCP), :8000 (UDP/RTP), :8001 (UDP/RTCP)
-2025/11/25 10:42:33 INF [RTMP] listener opened on :1935
-2025/11/25 10:42:33 INF [HLS] listener opened on :8880
-2025/11/25 10:42:33 INF [WebRTC] listener opened on :8889 (HTTP), :8189 (ICE/UDP)
-2025/11/25 10:42:33 INF [SRT] listener opened on :8890 (UDP)
-2025/11/25 10:42:42 INF [RTSP] [conn [::1]:52838] opened
-2025/11/25 10:42:42 INF [RTSP] [session 92e1490b] created by [::1]:52838
-2025/11/25 10:42:42 INF [RTSP] [session 92e1490b] is publishing to path 'cam', 1 track (H264)
+2025/11/25 14:00:17 INF MediaMTX v1.13.1
+2025/11/25 14:00:17 INF configuration loaded from /home/ws/ugv_rpi/controllers/Mediamtx/mediamtx.yml
+2025/11/25 14:00:17 INF [RTSP] listener opened on :8554 (TCP), :8000 (UDP/RTP), :8001 (UDP/RTCP)
+2025/11/25 14:00:17 INF [RTMP] listener opened on :1935
+2025/11/25 14:00:17 INF [HLS] listener opened on :8880
+2025/11/25 14:00:17 INF [WebRTC] listener opened on :8889 (HTTP), :8189 (ICE/UDP)
+2025/11/25 14:00:17 INF [SRT] listener opened on :8890 (UDP)
+2025/11/25 14:00:18 INF [WebRTC] [session b57fde35] created by 192.168.9.125:63237
+2025/11/25 14:00:18 INF [WebRTC] [session b57fde35] closed: no stream is available on path 'cam'
+2025/11/25 14:00:20 INF [WebRTC] [session 014cdc55] created by 192.168.9.125:63237
+2025/11/25 14:00:20 INF [WebRTC] [session 014cdc55] closed: no stream is available on path 'cam'
+2025/11/25 14:00:23 INF [WebRTC] [session 779f98ed] created by 192.168.9.125:63237
+2025/11/25 14:00:23 INF [WebRTC] [session 779f98ed] closed: no stream is available on path 'cam'
+2025/11/25 14:00:25 INF [RTSP] [conn [::1]:52008] opened
+2025/11/25 14:00:25 INF [RTSP] [session abf1a67e] created by [::1]:52008
+2025/11/25 14:00:25 INF [RTSP] [session abf1a67e] is publishing to path 'cam', 1 track (H264)
+2025/11/25 14:00:26 INF [WebRTC] [session e1053052] created by 192.168.9.125:63237
+2025/11/25 14:00:26 INF [WebRTC] [session e1053052] peer connection established, local candidate: host/udp/127.0.0.1/8189, remote candidate: prflx/udp/192.168.9.125/54469
+2025/11/25 14:00:26 INF [WebRTC] [session e1053052] is reading from path 'cam', 1 track (H264)

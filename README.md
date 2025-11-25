@@ -53,7 +53,7 @@ You can clone this repository from Waveshare's GitHub to your local machine.
     cd ugv_rpi/
     sudo chmod +x /home/ws/ugv_rpi/controllers/Mediamtx/mediamtx
 ### Grant execution permission to the installation script
-    cd scripts/
+    cd ugv_rpi/scripts/
     sudo chmod +x setup.sh
     sudo chmod +x autorun.sh
 ### Install app (it'll take a while before finish)
@@ -61,7 +61,7 @@ You can clone this repository from Waveshare's GitHub to your local machine.
 ### Autorun setup
     ./autorun.sh
 ### AccessPopup installation
-    cd AccessPopup
+    cd ugv_rpi/AccessPopup
     sudo chmod +x installconfig.sh
     sudo ./installconfig.sh
     *Input 1: Install AccessPopup
