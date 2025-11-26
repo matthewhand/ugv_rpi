@@ -1,4 +1,5 @@
 import cv2
+import signal
 import imutils
 import mediapipe as mp
 import imageio
