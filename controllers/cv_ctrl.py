@@ -311,7 +311,7 @@ class OpencvFuncs():
             try:
                 if self.usb_camera_connected:
                     success, input_frame = self.camera.read()
-                    if not success:
+                    if not success or input_frame is None:
                         self.camera.release()
                         time.sleep(1)
                         self.camera = cv2.VideoCapture(0)
