@@ -1,6 +1,10 @@
-![GitHub top language](https://img.shields.io/github/languages/top/effectsmachine/ugv_rpi) ![GitHub language count](https://img.shields.io/github/languages/count/effectsmachine/ugv_rpi)
-![GitHub code size in bytes](https://img.shields.io/github/languages/code-size/effectsmachine/ugv_rpi)
-![GitHub repo size](https://img.shields.io/github/repo-size/effectsmachine/ugv_rpi) ![GitHub](https://img.shields.io/github/license/effectsmachine/ugv_rpi) ![GitHub last commit](https://img.shields.io/github/last-commit/effectsmachine/ugv_rpi)
+![GitHub top language](https://img.shields.io/github/languages/top/waveshareteam/ugv_rpi)
+![GitHub language count](https://img.shields.io/github/languages/count/waveshareteam/ugv_rpi)
+![GitHub code size in bytes](https://img.shields.io/github/languages/code-size/waveshareteam/ugv_rpi)
+![GitHub repo size](https://img.shields.io/github/repo-size/waveshareteam/ugv_rpi)
+![GitHub](https://img.shields.io/github/license/waveshareteam/ugv_rpi)
+![GitHub last commit (branch)](https://img.shields.io/github/last-commit/waveshareteam/ugv_rpi/refactor%2Fdebian12-2025.10.01-py3.11)
+
 
 # Waveshare UGV Robots
 This is a Raspberry Pi example for the [Waveshare](https://www.waveshare.com/) UGV robots: **WAVE ROVER**, **UGV Rover**, **UGV Beast**, **RaspRover**, **UGV01**, **UGV02**.  
@@ -105,7 +109,7 @@ Now you can restart the main program app.py.
 
 # License
 ugv_rpi for the Raspberry Pi: an open source robotics platform for the Raspberry Pi.
-Copyright (C) 2024 [Waveshare](https://www.waveshare.com/)
+Copyright (C) 2025 [Waveshare](https://www.waveshare.com/)
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
