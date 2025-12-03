@@ -607,7 +607,7 @@ class OpencvFuncs():
                 face_area = (face.x2-face.x1) * (face.y2-face.y1)
                 if face_area > max_area:
                     max_area = face_area
-                    max_face_center = (face.x1 + face.x2 // 2, face.y1 + face.y2 // 2)
+                    max_face_center = ((face.x1 + face.x2) / 2, (face.y1 + face.y2) /2)
 
             if not self.cv_movtion_lock:
                 self.gimbal_track(center_x, center_y, max_face_center[0], max_face_center[1], self.track_faces_iterate)
