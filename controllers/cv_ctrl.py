@@ -13,6 +13,9 @@ import textwrap
 import re
 from PIL import Image, ImageDraw, ImageFont
 from .UltraFaceNcnn import UltraFaceNcnn
+import signal
+from enum import Enum
+from math import isnan
 
 # config file.
 curpath = os.path.realpath(__file__)
@@ -54,50 +57,105 @@ def is_raspberry_pi5():
                 else:
                     return False
 
+frame_width = f['video']['default_res_w']
+frame_height = f['video']['default_res_h']
+
 if is_raspberry_pi5():
    ffmpeg_command = [
-    'ffmpeg',
-    '-y',
-   '-loglevel', 'quiet',    
-    '-f', 'rawvideo',         
-    '-vcodec', 'rawvideo',
-    '-pix_fmt', 'bgr24',       
-    '-s', '640x480',           
-    '-r', '30',                
-    '-i', '-',                 
-    '-c:v', 'libx264',         
-    '-b:v', '300k',
-    '-crf', '28',             
-    '-pix_fmt', 'yuv420p',
-    '-preset', 'ultrafast',
-    '-tune', 'zerolatency',
-    '-f', 'rtsp',              
-    'rtsp://localhost:8554/cam'
-]
+        'ffmpeg',
+        '-y',
+        '-loglevel', 'quiet',    
+        '-f', 'rawvideo',         
+        '-vcodec', 'rawvideo',
+        '-pix_fmt', 'bgr24',       
+        '-s', f'{frame_width}x{frame_height}',           
+        '-r', '30',                
+        '-i', '-',                 
+        '-c:v', 'libx264',         
+        '-b:v', '300k',
+        '-crf', '28',             
+        '-pix_fmt', 'yuv420p',
+        '-preset', 'ultrafast',
+        '-tune', 'zerolatency',
+        '-f', 'rtsp',              
+        'rtsp://localhost:8554/cam'
+    ]
 else:
    ffmpeg_command = [
-    'ffmpeg',
-    '-y',
-    '-loglevel', 'quiet',    
-    '-f', 'rawvideo',         
-    '-vcodec', 'rawvideo',
-    '-pix_fmt', 'bgr24',       
-    '-s', '640x480',           
-    '-r', '30',                
-    '-i', '-',
-    '-vf', 'format=yuv420p',                  
-    '-c:v', 'h264_v4l2m2m',         
-    '-b:v', '800k',
-    '-pix_fmt', 'yuv420p',
-    '-fflags', 'nobuffer',    
-    '-f', 'rtsp',              
-    'rtsp://localhost:8554/cam'
-]
+        'ffmpeg',
+        '-y',
+        '-loglevel', 'quiet',    
+        '-f', 'rawvideo',         
+        '-vcodec', 'rawvideo',
+        '-pix_fmt', 'bgr24',       
+        '-s', f'{frame_width}x{frame_height}',           
+        '-r', '30',                
+        '-i', '-',
+        '-vf', 'format=yuv420p',                  
+        '-c:v', 'h264_v4l2m2m',         
+        '-b:v', '800k',
+        '-pix_fmt', 'yuv420p',
+        '-fflags', 'nobuffer',    
+        '-f', 'rtsp',              
+        'rtsp://localhost:8554/cam'
+    ]
+
+class TrackState(Enum):
+    FOLLOW = 0
+    SEARCH_SPIN = 1
+    RECOVER = 2
+
+def angle_diff(a, b):
+    return (a - b + math.pi) % (2 * math.pi) - math.pi
+
+def robust_mean_remove_outliers(arr, mz_thresh=3.5, is_angle=False):
+    if arr.size == 0:
+        return 0.0
+    med = np.median(arr)
+    mad = np.median(np.abs(arr - med))
+    if mad == 0:
+        return float(np.mean(arr))
+    mod_z = 0.6745 * (arr - med) / mad
+    filtered = arr[np.abs(mod_z) <= mz_thresh]
+    return float(np.mean(filtered)) if filtered.size > 0 else float(np.mean(arr))
+
+class PID:
+    def __init__(self, kp, ki, kd, output_limits, tolerance):
+        self.kp = kp
+        self.ki = ki
+        self.kd = kd
+        self.integral = 0.0
+        self.prev_error = 0.0
+        self.prev_time = None
+        self.output_limits = output_limits
+        self.tolerance = tolerance  
+
+    def compute(self, setpoint, measurement):
+        error = setpoint - measurement
+        
+        if abs(error) <= self.tolerance:
+            self.integral = 0.0
+            self.prev_error = 0.0
+            self.prev_time = time.time()
+            return 0.0
+
+        now = time.time()
+        dt = 0.0 if self.prev_time is None else now - self.prev_time
+
+        self.integral += error * dt
+        derivative = 0.0 if dt == 0 else (error - self.prev_error) / dt
+
+        output = self.kp * error + self.ki * self.integral + self.kd * derivative
+        output = max(self.output_limits[0], min(self.output_limits[1], output))
+
+        self.prev_error = error
+        self.prev_time = now
+        return output
 
 font_path = "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc"
 
 def draw_chinese_text(img, text, position, font_size, color):
-    img = cv2.resize(img, (640, 480))
+    img = cv2.resize(img, (frame_width, frame_height))
     img_pil = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
     draw = ImageDraw.Draw(img_pil)
     font = ImageFont.truetype(font_path, font_size)
@@ -107,7 +165,6 @@ def draw_chinese_text(img, text, position, font_size, color):
 
 def contains_chinese(text):
     return bool(re.search('[\u4e00-\u9fff]', text))
-
 
 class OpencvFuncs():
     """docstring for OpencvFuncs"""
@@ -129,21 +186,13 @@ class OpencvFuncs():
         self.writer = None
         self.overlay = None
         self.scale_rate = 1
-        self.video_quality = f['video']['default_quality']
 
         # cv ctrl info
         self.cv_light_mode = 0
-        self.pan_angle = 0
-        self.tilt_angle = 0
         self.video_fps = 0
         self.fps_start_time = time.time()
         self.fps_count = 0
         self.cv_movtion_lock = True
-        self.aimed_error = f['cv']['aimed_error']
-        self.track_spd_rate = f['cv']['track_spd_rate']
-        self.track_acc_rate = f['cv']['track_acc_rate']
-        self.CMD_GIMBAL = f['cmd_config']['cmd_gimbal_ctrl']
-        self.sampling_rad = f['cv']['sampling_rad']
 
         # reaction
         self.last_frame_capture_time = datetime.datetime.now()
@@ -154,23 +203,37 @@ class OpencvFuncs():
 
         # face detection & tracking
         self.face_detector = UltraFaceNcnn(thisPath + '/models/ultraface-ncnn/RFB-320.param',thisPath + '/models/ultraface-ncnn/RFB-320.bin', input_size=(320,240), threshold=0.7, nms_threshold=0.3)
-        self.min_radius = f['cv']['min_radius']
-        self.track_faces_iterate = f['cv']['track_faces_iterate']
 
         # color detection
-        self.points = deque(maxlen=32)
-        self.color_list = {
-                        'red':  [np.array([  0,200, 170]), np.array([ 10, 255, 255])],
-                        'green':[np.array([ 50, 130, 130]), np.array([ 78, 255, 255])],
-                        'blue': [np.array([ 90,160, 150]), np.array([105, 255, 255])]
-                        }
-        if f['cv']['default_color'] in self.color_list:
-            self.color_lower = self.color_list[f['cv']['default_color']][0]
-            self.color_upper = self.color_list[f['cv']['default_color']][1]
-        else:
-            self.color_lower = np.array(f['cv']['color_lower'])
-            self.color_upper = np.array(f['cv']['color_upper'])
-        self.track_color_iterate = f['cv']['track_color_iterate']
+        self.track_base = f['cv']['track_base']
+        color_name = f['cv']['default_color']
+
+        self.color_list = f['cv']['color_list']
+        self.color_lower = np.array(self.color_list[color_name]['lower'], dtype=np.uint8)
+        self.color_upper = np.array(self.color_list[color_name]['upper'], dtype=np.uint8)
+
+        self.ball_diameter = 0.038
+        self.target_distance = 0.2
+        self.target_yaw = 0.0
+
+        self.x_distance_pid = PID(kp=1.25, ki=0.0, kd=0.05, output_limits=(-0.3, 0.3), tolerance=0.05)
+        self.angle_pid = PID(kp=2.0, ki=0.00, kd=0.0, output_limits=(-1.5708, 1.5708), tolerance=0.1)
+
+        self.distance_buffer = deque(maxlen=10)
+        self.color_ball_yaw_buffer = deque(maxlen=10)
+        self.cam_k = np.array([
+                        [289.11451,   0.     , 347.23664],
+                        [  0.     , 289.75319, 235.67429],
+                        [  0.     ,   0.     ,   1.     ]
+                    ], dtype=np.float64)
+
+        self.pt_x = 0.0  
+        self.pt_y = 0.0 
+        self.pt_x_pid = PID(kp=0.9, ki=0.0, kd=0.1, output_limits=(-math.pi/4, math.pi/4), tolerance=0.02)
+        self.pt_y_pid = PID(kp=0.7, ki=0.0, kd=0.05, output_limits=(-math.pi/4, math.pi/4), tolerance=0.02)
+
+        self.pan_angle = 0
+        self.tilt_angle = 0
 
         # cv_dnn_objects
         self.net = cv2.dnn.readNetFromCaffe(thisPath + '/models/deploy.prototxt', thisPath + '/models/mobilenet_iter_73000.caffemodel')
@@ -190,15 +253,34 @@ class OpencvFuncs():
         self.gs_pic_last_time = time.time()
 
         # findline autodrive
-        self.sampling_line_1 = 0.6
-        self.sampling_line_2 = 0.9
-        self.slope_impact = 1.5
-        self.base_impact = 0.005
-        self.speed_impact = 0.5
-        self.line_track_speed = 0.3
-        self.slope_on_speed = 0.1
-        self.line_lower = np.array([25, 150, 70])
-        self.line_upper = np.array([42, 255, 255])
+        self.state = TrackState.FOLLOW
+
+        self.yaw = None
+        self.kp = 3.0
+        self.kd = 0.05
+        self.last_error = 0.0
+        self.line_track_speed = 0.2
+        self.yaw_buffer = deque(maxlen=10)
+        
+        self.line_lower = np.array(f['cv']['line_lower'], dtype=np.uint8)
+        self.line_upper = np.array(f['cv']['line_upper'], dtype=np.uint8)
+
+        self.roi = [
+            (250, 300, 40, 600, 0.1),
+            (300, 400, 40, 600, 0.3),
+            (400, frame_height, 40, 600, 0.6),
+        ]
+
+        # --- SEARCH_SPIN ---
+        self.search_start_time = 0.0
+        self.scan_dir = -1                          
+        self.scan_yaw_base = 0.5           
+        self.scan_yaw_max = 3.1416
+        self.max_scan_time = 10.0            
+        
+        # --- RECOVER ---
+        self.recover_start_time = 0.0
+        self.recover_time = 0.4              
 
         # mediapipe detect faces
         self.mp_face_detection = mp.solutions.face_detection
@@ -220,7 +302,7 @@ class OpencvFuncs():
         self.show_info_flag = True
         self.info_update_time = time.time()
         self.info_deque = deque(maxlen=10)
-        self.info_scale = 270 / 480
+        self.info_scale = 9/16
         self.info_bg_color = (0, 0, 0)
         self.info_show_time = 10
         self.recv_line_max = 26
@@ -240,9 +322,14 @@ class OpencvFuncs():
 
         if self.usb_camera_connected:
             try:
-                self.camera = cv2.VideoCapture(0)
+                # self.camera = cv2.VideoCapture(0)
+                self.camera = cv2.VideoCapture(0, cv2.CAP_V4L2)
                 self.camera.set(cv2.CAP_PROP_FRAME_WIDTH,  f['video']['default_res_w'])
                 self.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, f['video']['default_res_h'])
+                self.camera.set(
+                    cv2.CAP_PROP_FOURCC,
+                    cv2.VideoWriter_fourcc(*'MJPG')
+                )
                 print("USB camera initialized.")
                 return True
             except:
@@ -285,7 +372,7 @@ class OpencvFuncs():
                 self.camRgb.setBoardSocket(dai.CameraBoardSocket.RGB)
                 self.camRgb.setInterleaved(False)
                 self.camRgb.setResolution(dai.ColorCameraProperties.SensorResolution.THE_1080_P)
-                self.camRgb.setPreviewSize(640, 480)
+                self.camRgb.setPreviewSize(frame_width, frame_height)
                 self.camRgb.setPreviewKeepAspectRatio(False)
 
                 self.xout = self.pipeline.createXLinkOut()
@@ -320,15 +407,15 @@ class OpencvFuncs():
                 elif self.oak_camera_connected:
                     input_frame = self.output_queue.get().getCvFrame()
                 else:
-                    input_frame = 255 * np.ones((480, 640, 3), dtype=np.uint8)
+                    input_frame = 255 * np.ones((frame_height, frame_width, 3), dtype=np.uint8)
                     cv2.putText(input_frame, f"camera read failed... \nusb - csi - oak", 
-                                (round(0.05*640), round(0.1*640 + 5 * 13)), 
+                                (round(0.05*frame_width), round(0.1*frame_width + 5 * 13)), 
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.369, (0, 0, 0), 1)
             except Exception as e:
                 print(f"[cv_ctrl.frame_process] error: {e}")
-                input_frame = 255 * np.ones((480, 640, 3), dtype=np.uint8)
+                input_frame = 255 * np.ones((frame_height, frame_width, 3), dtype=np.uint8)
                 cv2.putText(input_frame, f"camera read failed... \n{e}", 
-                            (round(0.05*640), round(0.1*640 + 5 * 13)), 
+                            (round(0.05*frame_width), round(0.1*frame_width + 5 * 13)), 
                             cv2.FONT_HERSHEY_SIMPLEX, 0.369, (0, 0, 0), 1)
         
             # opencv funcs
@@ -346,8 +433,8 @@ class OpencvFuncs():
                 if time.time() - self.info_update_time > self.info_show_time:
                     self.show_info_flag = False
                 self.overlay = input_frame.copy()
-                cv2.rectangle(self.overlay,  (round((self.info_scale-0.005)*640), round((0.33)*480)), 
-                                        (round(0.98*640), round((0.78)*480)), 
+                cv2.rectangle(self.overlay,  (round((self.info_scale-0.005)*frame_width), round((0.33)*frame_height)), 
+                                        (round(0.98*frame_width), round((0.78)*frame_height)), 
                                         self.info_bg_color, -1)
                 cv2.addWeighted(self.overlay, 0.5, input_frame, 0.5, 0, input_frame)
 
@@ -357,8 +444,8 @@ class OpencvFuncs():
                     text = str(self.info_deque[i]['text'])
                     size = self.info_deque[i]['size']
                     color = self.info_deque[i]['color'] 
-                    base_x = round(self.info_scale * 640)
-                    base_y = round(self.info_scale * 640 - i * 20)
+                    base_x = round(self.info_scale * frame_width)
+                    base_y = round(self.info_scale * frame_width - i * 20)
                     if contains_chinese(text):
                         input_frame = draw_chinese_text(input_frame, text, 
                                     (base_x, base_y - 10), 
@@ -371,7 +458,7 @@ class OpencvFuncs():
             if self.show_base_info_flag:
                 for i in range(0, len(self.recv_deque)):
                     cv2.putText(input_frame, str(self.recv_deque[i]), 
-                            (round(0.05*640), round(0.1*640 + i * 13)), 
+                            (round(0.05*frame_width), round(0.1*frame_width + i * 13)), 
                             cv2.FONT_HERSHEY_SIMPLEX, 0.369, (255, 255, 255), 1)
 
             # render osd
@@ -439,9 +526,6 @@ class OpencvFuncs():
                 self.fps_count = 0
                 self.fps_start_time = time.time()
                 
-
-
-
     def usb_camera_detection(self):
         lsusb_output = subprocess.check_output(["lsusb"]).decode("utf-8")
         if "Camera" in lsusb_output:
@@ -450,7 +534,6 @@ class OpencvFuncs():
         else:
             print("USB Camera not connected")
             return False
-
 
     def osd_render(self, osd_frame):
         if not self.add_osd:
@@ -496,14 +579,6 @@ class OpencvFuncs():
         else:
             self.scale_rate = input_rate
 
-    def set_video_quality(self, input_quality):
-        if input_quality < 1:
-            self.video_quality = 1
-        elif input_quality > 100:
-            self.video_quality = 100
-        else:
-            self.video_quality = int(input_quality)
-
     def set_cv_mode(self, input_mode):
         self.cv_mode = input_mode
         if self.cv_mode == f['code']['cv_none']:
@@ -513,8 +588,6 @@ class OpencvFuncs():
         self.detection_reaction_mode = input_reaction
         if self.detection_reaction_mode == f['code']['re_none']:
             self.set_video_record_flag = False
-
-
 
     def cv_detect_movition(self, img):
         timestamp = datetime.datetime.now()
@@ -564,27 +637,11 @@ class OpencvFuncs():
 
         self.overlay = overlay_buffer
 
-    def gimbal_track(self, fx, fy, gx, gy, iterate):
-        global gimbal_x, gimbal_y
-        distance = math.sqrt((fx - gx) ** 2 + (gy - fy) ** 2)
-        self.pan_angle += (gx - fx) * iterate
-        self.tilt_angle += (fy - gy) * iterate
-        if self.pan_angle > 180:
-            self.pan_angle = 180
-        elif self.pan_angle < -180:
-            self.pan_angle = -180
-        if self.tilt_angle > 90:
-            self.tilt_angle = 90
-        elif self.tilt_angle < -30:
-            self.tilt_angle = -30
-        gimbal_spd = int(distance * self.track_spd_rate)
-        gimbal_acc = int(distance * self.track_acc_rate)
-        if gimbal_acc < 1:
-            gimbal_acc = 1
-        if gimbal_spd < 1:
-            gimbal_spd = 1
-        self.base_ctrl.base_json_ctrl({"T":self.CMD_GIMBAL,"X":self.pan_angle,"Y":self.tilt_angle,"SPD":gimbal_spd,"ACC":gimbal_acc})
-        return distance
+    def set_track_base(self, track_base):
+        if track_base in ['ugv', 'pt']:
+            self.track_base = track_base
+        else:
+            self.track_base = 'ugv'
 
     def cv_detect_faces(self, img):
         faces = self.face_detector.detect(img)
@@ -610,8 +667,24 @@ class OpencvFuncs():
                     max_face_center = ((face.x1 + face.x2) / 2, (face.y1 + face.y2) /2)
 
             if not self.cv_movtion_lock:
-                self.gimbal_track(center_x, center_y, max_face_center[0], max_face_center[1], self.track_faces_iterate)
+                error_x = 0.1*(max_face_center[0] - center_x) / center_x
+                error_y = 0.1*(max_face_center[1] - center_y) / center_y
 
+                delta_x = self.pt_x_pid.compute(0.0, error_x)
+                delta_y = self.pt_y_pid.compute(0.0, error_y)
+
+                self.pt_x += delta_x
+                self.pt_y += delta_y
+
+                self.pt_x = max(-3.14, min(3.14, self.pt_x))
+                self.pt_y = max(-0.523, min(1.57, self.pt_y))
+
+                self.pan_angle = -(180 * self.pt_x) / 3.14
+                self.tilt_angle = (180 * self.pt_y) / 3.14
+
+                self.base_ctrl.base_json_ctrl({"T": f['cmd_config']['cmd_gimbal_ctrl'],"X": self.pan_angle,"Y": self.tilt_angle,"SPD": 0,"ACC":128})
+                cv2.putText(overlay_buffer, f'X: {self.pan_angle:.2f}  Y: {self.tilt_angle:.2f}',(center_x+50, center_y+80), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+                
             if(datetime.datetime.now() - self.last_frame_capture_time).seconds >= 3:
                 if self.detection_reaction_mode == f['code']['re_none']:
                     pass
@@ -632,12 +705,6 @@ class OpencvFuncs():
 
         cv2.putText(overlay_buffer, 'NUMBER: {}'.format(len(faces)), (center_x+50, center_y+40), 
                                                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-        cv2.putText(overlay_buffer, 'ITERATE: {}'.format(self.track_faces_iterate), (center_x+50, center_y+60), 
-                                                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-        cv2.putText(overlay_buffer, ' SPD_R: {}'.format(self.track_spd_rate), (center_x+50, center_y+80), 
-                                                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-        cv2.putText(overlay_buffer, ' ACC_R: {}'.format(self.track_acc_rate), (center_x+50, center_y+100), 
-                                                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
         self.overlay = overlay_buffer
 
     def cv_detect_objects(self, img):
@@ -667,86 +734,72 @@ class OpencvFuncs():
         self.overlay = overlay_buffer
 
     def cv_detect_color(self, img):
-        global head_light_pwm
-        blurred = cv2.GaussianBlur(img, (11, 11), 0)
-        hsv = cv2.cvtColor(blurred, cv2.COLOR_BGR2HSV)
-
-        mask = cv2.inRange(hsv, self.color_lower, self.color_upper)
-        mask = cv2.erode(mask, None, iterations=5)
-        mask = cv2.dilate(mask, None, iterations=5)
-
-        cnts = cv2.findContours(mask.copy(), cv2.RETR_EXTERNAL,
-            cv2.CHAIN_APPROX_SIMPLE)
-        cnts = imutils.grab_contours(cnts)
-        center = None
-
+        cx, cy, w = None, None, None
+        input_speed_x = 0
+        input_turning = 0
+        img_h, img_w = img.shape[:2]
         overlay_buffer = np.zeros_like(img)
+        center_x, center_y = img_w // 2, img_h // 2
+        lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
+        mask = cv2.inRange(lab, self.color_lower, self.color_upper)
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
-        height, width = img.shape[:2]
-        center_x, center_y = width // 2, height // 2
+        if contours:
+            c = max(contours, key=cv2.contourArea)
+            area = cv2.contourArea(c)
+            if area > 100:  
+                ((x, y), radius) = cv2.minEnclosingCircle(c)
+                circularity = area / (math.pi * radius * radius)
+                if 0.5 < circularity < 1.3:  
+                    cx, cy, w = int(x), int(y), int(radius*2)
 
-        mask = np.zeros((height, width), dtype=np.uint8)
-        cv2.circle(mask, (center_x, center_y), self.sampling_rad, (255), thickness=-1)
+                    cv2.circle(overlay_buffer, (cx, cy), int(radius), (0, 255, 0), 2)
+                    cv2.circle(overlay_buffer, (cx, cy), 3, (255, 0, 0), -1)
+                    # print(f'Tracking ball at ({cx}, {cy}), area={area:.1f}, circularity={circularity:.2f}')
 
-        masked_hsv = cv2.bitwise_and(hsv, hsv, mask=mask)
-        masked_hsv_pixels = masked_hsv[mask == 255]
-        lower_hsv = np.min(masked_hsv_pixels, axis=0)
-        upper_hsv = np.max(masked_hsv_pixels, axis=0)
+        if cx is not None:
+            if self.track_base =='ugv':
+                distance_m = (self.ball_diameter * self.cam_k[0,0]) / w
+                self.distance_buffer.append(distance_m)
+                distance_avg = robust_mean_remove_outliers(np.array(self.distance_buffer))
 
-        cv2.putText(overlay_buffer, ' UPPER: {}'.format(upper_hsv), (center_x+50, center_y+40), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-        cv2.putText(overlay_buffer, ' LOWER: {}'.format(lower_hsv), (center_x+50, center_y+60), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+                error_x = cx - img_w/2
+                current_yaw = np.arctan2(error_x, self.cam_k[0,0])
+                self.color_ball_yaw_buffer.append(current_yaw)
+                yaw_avg = robust_mean_remove_outliers(np.array(self.color_ball_yaw_buffer), is_angle=True)
 
+                input_speed_x = -self.x_distance_pid.compute(self.target_distance, distance_avg)
+                yaw_ctrl = self.angle_pid.compute(self.target_yaw, yaw_avg)
+                yaw_err = abs(yaw_avg)
+                distance_err = abs(distance_avg - self.target_distance)
+                input_turning = yaw_ctrl
+
+            if self.track_base =='pt':
+                error_x = 0.1*(cx - center_x) / center_x
+                error_y = 0.1*(cy - center_y) / center_y
+
+                delta_x = self.pt_x_pid.compute(0.0, error_x)
+                delta_y = self.pt_y_pid.compute(0.0, error_y)
+
+                self.pt_x += delta_x
+                self.pt_y += delta_y
+
+                self.pt_x = max(-3.14, min(3.14, self.pt_x))
+                self.pt_y = max(-0.523, min(1.57, self.pt_y))
+
+                self.pan_angle = -(180 * self.pt_x) / 3.14
+                self.tilt_angle = (180 * self.pt_y) / 3.14
+
+        if not self.cv_movtion_lock:
+            if self.track_base =='ugv':
+                self.base_ctrl.base_json_ctrl({"T": f['cmd_config']['cmd_ros_movition_ctrl'],"X": input_speed_x,"Z": input_turning})
+                cv2.putText(overlay_buffer, f'X: {input_speed_x:.2f}  Z: {input_turning:.2f}',(center_x+50, center_y+80), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+            if self.track_base =='pt':
+                self.base_ctrl.base_json_ctrl({"T": f['cmd_config']['cmd_gimbal_ctrl'],"X": self.pan_angle,"Y": self.tilt_angle,"SPD": 0,"ACC":128})
+                cv2.putText(overlay_buffer, f'X: {self.pan_angle:.2f}  Y: {self.tilt_angle:.2f}',(center_x+50, center_y+80), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+                
         cv2.putText(overlay_buffer, ' UPPER: {}'.format(self.color_upper), (center_x+50, center_y+100), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 128, 128), 1)
         cv2.putText(overlay_buffer, ' LOWER: {}'.format(self.color_lower), (center_x+50, center_y+120), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 128, 128), 1)
-        cv2.putText(overlay_buffer, 'ITERATE: {}'.format(self.track_color_iterate), (center_x+50, center_y+140), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-        cv2.putText(overlay_buffer, ' SPD_R: {}'.format(self.track_spd_rate), (center_x+50, center_y+160), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-        cv2.putText(overlay_buffer, ' ACC_R: {}'.format(self.track_acc_rate), (center_x+50, center_y+180), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-        
-        cv2.circle(overlay_buffer, (center_x, center_y), self.sampling_rad, (64, 255, 64), 1)
-
-        # only proceed if at least one contour was found
-        if len(cnts) > 0:
-            # find the largest contour in the mask, then use
-            # it to compute the minimum enclosing circle and
-            # centroid
-            c = max(cnts, key=cv2.contourArea)
-            ((x, y), radius) = cv2.minEnclosingCircle(c)
-            M = cv2.moments(c)
-            center = (int(M["m10"] / M["m00"]), int(M["m01"] / M["m00"]))
-
-            # only proceed if the radius meets a minimum size
-            if radius > self.min_radius:
-                if not self.cv_movtion_lock:
-                    distance = self.gimbal_track(center_x, center_y, center[0], center[1], self.track_color_iterate)
-                    if distance < self.aimed_error:
-                        head_light_pwm = 10
-                        self.base_ctrl.lights_ctrl(self.base_ctrl.base_light_status, head_light_pwm)
-                    else:
-                        head_light_pwm = 0
-                        self.base_ctrl.lights_ctrl(self.base_ctrl.base_light_status, head_light_pwm)
-                    cv2.putText(overlay_buffer, 'DIF: {}'.format(distance), (center_x+50, center_y+20), 
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-
-                # draw the circle and centroid on the frame,
-                # then update the list of tracked points
-                cv2.circle(overlay_buffer, (int(x), int(y)), int(radius),
-                    (128, 255, 255), 1)
-                cv2.circle(overlay_buffer, center, 3, (128, 255, 255), -1)
-                cv2.line(overlay_buffer, center, (center_x, center_y), (0, 0, 255), 1)
-                cv2.putText(overlay_buffer, 'RAD: {}'.format(radius), (center_x+50, center_y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-
-                self.points.appendleft(center)
-            else:
-                head_light_pwm = 0
-                self.base_ctrl.lights_ctrl(self.base_ctrl.base_light_status, head_light_pwm)
-                self.points.appendleft(None)
-
-            for i in range(1, len(self.points)):
-                if self.points[i-1] is None or self.points[i] is None:
-                    continue
-                cv2.line(overlay_buffer, self.points[i - 1], self.points[i], (255, 255, 128), 1)
-
-        self.overlay = np.zeros_like(img)
         self.overlay = overlay_buffer
 
     def calculate_distance(self, lm1, lm2):
@@ -784,20 +837,45 @@ class OpencvFuncs():
 
         if results.multi_hand_landmarks:
             for handLms in results.multi_hand_landmarks:
+                xs = []
+                ys = []
                 # draw joints
                 for id, lm in enumerate(handLms.landmark):
-                    h, w, c = imgRGB.shape
-                    cx, cy = int(lm.x * w), int(lm.y * h)
+                    cx = int(lm.x * width)
+                    cy = int(lm.y * height)
+                    xs.append(cx)
+                    ys.append(cy)
                     cv2.circle(overlay_buffer, (cx, cy), 5, (255, 0, 0), -1)
 
                 # draw lines
                 self.mpDraw.draw_landmarks(overlay_buffer, handLms, self.mpHands.HAND_CONNECTIONS)
 
                 target_pos = handLms.landmark[self.mpHands.HandLandmark.INDEX_FINGER_TIP]
+
+                min_x, max_x = int(min(xs)), int(max(xs))
+                min_y, max_y = int(min(ys)), int(max(ys))
+
+                track_cx = int((min_x + max_x) / 2)
+                track_cy = int((min_y + max_y) / 2)
+
+                cv2.rectangle(overlay_buffer, (min_x, min_y), (max_x, max_y), (0, 255, 0), 2)
+                cv2.circle(overlay_buffer, (track_cx,track_cy), 8, (0, 0, 255), -1)
+
                 # print(f"x:{target_pos.x} y:{target_pos.y}")
                 if not self.cv_movtion_lock:
-                    distance = self.gimbal_track(center_x, center_y, width*target_pos.x, height*target_pos.y, self.track_faces_iterate)
+                    error_x = 0.1*(track_cx - center_x) / center_x
+                    error_y = 0.1*(track_cy - center_y) / center_y
 
+                    delta_x = self.pt_x_pid.compute(0.0, error_x)
+                    delta_y = self.pt_y_pid.compute(0.0, error_y)
+
+                    self.pt_x += delta_x
+                    self.pt_y += delta_y
+                    self.pt_x = max(-3.14, min(3.14, self.pt_x))
+                    self.pt_y = max(-0.523, min(1.57, self.pt_y))
+                    self.base_ctrl.base_json_ctrl({"T": f['cmd_config']['cmd_gimbal_ctrl'],"X": self.pan_angle,"Y": self.tilt_angle,"SPD": 0,"ACC":128})
+                    cv2.putText(overlay_buffer, f'X: {self.pan_angle:.2f}  Y: {self.tilt_angle:.2f}',(center_x+50, center_y+80), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+                
                 # check hand gs
                 pinky_finger_gs = self.calculate_angle(
                                             handLms.landmark[self.mpHands.HandLandmark.WRIST],
@@ -818,7 +896,7 @@ class OpencvFuncs():
                                             handLms.landmark[self.mpHands.HandLandmark.MIDDLE_FINGER_TIP])
 
                 # LED Ctrl
-                if middle_finger_gs > 20 and pinky_finger_gs > 90:
+                if self.cv_movtion_lock and middle_finger_gs > 20 and pinky_finger_gs > 90:
                     cv2.putText(overlay_buffer, ' GS: LED Ctrl', (center_x+50, center_y+100), 
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 128, 128), 1)
                     tips_distance = self.calculate_distance(handLms.landmark[self.mpHands.HandLandmark.INDEX_FINGER_TIP],
@@ -837,7 +915,7 @@ class OpencvFuncs():
                     #     print(e)
 
                 # Take Pic
-                elif middle_finger_gs < 10 and pinky_finger_gs > 90 and index_finger_gs < 10:
+                elif self.cv_movtion_lock and middle_finger_gs < 10 and pinky_finger_gs > 90 and index_finger_gs < 10:
                     cv2.putText(overlay_buffer, ' GS: Take Pic', (center_x+50, center_y+100), 
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 128, 128), 1)
                     if time.time() - self.gs_pic_last_time > self.gs_pic_interval:
@@ -848,131 +926,115 @@ class OpencvFuncs():
                         self.gs_pic_last_time = time.time()
 
                 # Not Found
-                else:
+                elif self.cv_movtion_lock:
                     cv2.putText(overlay_buffer, ' GS: Not Defined', (center_x+50, center_y+100), 
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 128, 128), 1)
                     self.base_ctrl.lights_ctrl(0, 0)
 
-        cv2.putText(overlay_buffer, 'ITERATE: {}'.format(self.track_faces_iterate), (center_x+50, center_y+140), 
-            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-        cv2.putText(overlay_buffer, ' SPD_R: {}'.format(self.track_spd_rate), (center_x+50, center_y+160), 
-            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-        cv2.putText(overlay_buffer, ' ACC_R: {}'.format(self.track_acc_rate), (center_x+50, center_y+180), 
-            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-
         self.overlay = overlay_buffer
 
     def cv_auto_drive(self, img):
-        hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+        h, w = img.shape[:2]
+        cx = w // 2
 
-        # get a sampling
-        height, width = img.shape[:2]
-        center_x, center_y = width // 2, height // 2
-        mask_sampling = np.zeros((height, width), dtype=np.uint8)
-        cv2.circle(mask_sampling, (center_x, center_y), int(self.sampling_rad/4), (255), thickness=-1)
-        masked_hsv = cv2.bitwise_and(hsv, hsv, mask=mask_sampling)
-        masked_hsv_pixels = masked_hsv[mask_sampling == 255]
-        lower_hsv = np.min(masked_hsv_pixels, axis=0)
-        upper_hsv = np.max(masked_hsv_pixels, axis=0)
+        lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
 
-        # select the line color & get the mask
-        # img = cv2.GaussianBlur(img, (11, 11), 0)
-        line_mask = cv2.inRange(hsv, self.line_lower, self.line_upper)
-        line_mask = cv2.erode(line_mask, None, iterations=2)
-        line_mask = cv2.dilate(line_mask, None, iterations=2)
+        weight_sum = 0
+        cx_sum = 0
+        has_line = False
 
-        sampling_h1 = int(height * self.sampling_line_1)
-        sampling_h2 = int(height * self.sampling_line_2)
+        input_speed = 0.0
+        input_turning = 0.0
 
-        get_sampling_1 = line_mask[sampling_h1]
-        get_sampling_2 = line_mask[sampling_h2]
+        for (y1, y2, x1, x2, wt) in self.roi:
+            crop = lab[y1:y2, x1:x2]
+            mask = cv2.inRange(crop, self.line_lower, self.line_upper)
+            cnts, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            if not cnts:
+                continue
 
-        sampling_width_1 = np.sum(get_sampling_1 == 255)
-        sampling_width_2 = np.sum(get_sampling_2 == 255)
+            c = max(cnts, key=cv2.contourArea)
+            if cv2.contourArea(c) < 50:
+                continue
 
-        if sampling_width_1:
-            sam_1 = True
-        else:
-            sam_1 = False
-        if sampling_width_2:
-            sam_2 = True
-        else:
-            sam_2 = False
+            (x, y), _, _ = cv2.minAreaRect(c)
+            x += x1
+            cx_sum += x * wt
+            weight_sum += wt
+            has_line = True
 
-        line_index_1 = np.where(get_sampling_1 == 255)
-        line_index_2 = np.where(get_sampling_2 == 255)
+        if self.state == TrackState.FOLLOW:
+            if not has_line or weight_sum == 0:
+                self.state = TrackState.SEARCH_SPIN
+                self.search_start_time = time.time()
+                self.scan_dir = 1 if self.last_error > 0 else -1
+                # print(f"Lost line → SEARCH_SPIN ({'RIGHT' if self.scan_dir > 0 else 'LEFT'})")
+                return
 
-        if sam_1:
-            sampling_1_left  = line_index_1[0][0]
-            sampling_1_right = line_index_1[0][sampling_width_1 - 1]
-            sampling_1_center= int((sampling_1_left + sampling_1_right) / 2)
-        if sam_2:
-            sampling_2_left  = line_index_2[0][0]
-            sampling_2_right = line_index_2[0][sampling_width_2 - 1]
-            sampling_2_center= int((sampling_2_left + sampling_2_right) / 2)
+            x = cx_sum / weight_sum
+            err = (x - cx) / cx
 
-        line_slope = 0
-        input_speed = 0
-        input_turning = 0
-        if sam_1 and sam_2:
-            line_slope = (sampling_1_center - sampling_2_center) / abs(sampling_h1 - sampling_h2)
-            impact_by_slope = self.slope_on_speed * abs(line_slope)
-            # if impact_by_slope > input_speed:
-            #     impact_by_slope = input_speed
-            input_speed = self.line_track_speed - impact_by_slope
-            # print(f'im_by_slope:{impact_by_slope}   input_speed:{input_speed}')
-            input_turning = -(line_slope * self.slope_impact + (sampling_2_center - center_x) * self.base_impact) #+ (speed_impact * input_speed)
-        elif not sam_1 and sam_2:
-            input_speed = 0
-            input_turning = (sampling_2_center - center_x) * self.base_impact
-        elif sam_1 and not sam_2:
-            input_speed = (self.line_track_speed / 3)
-            input_turning = 0
-        else:
-            input_speed = - (self.line_track_speed / 3)
-            input_turning = 0
+            self.yaw_buffer.append(err)
+            err_f = robust_mean_remove_outliers(np.array(self.yaw_buffer))
 
-        # input_turning = - line_slope * slope_impact
-        # try:
-        #     input_turning = -(sampling_2_center - center_x) * base_impact
-        # except:
-        #     pass
+            d = err_f - self.last_error
+            self.last_error = err_f
+
+            z = self.kp * err_f + self.kd * d
+
+            input_speed = self.line_track_speed
+            input_turning = -z
+
+        elif self.state == TrackState.SEARCH_SPIN:
+            if has_line:
+                self.state = TrackState.RECOVER
+                self.recover_start_time = time.time()
+                self.last_error = 0.0
+                self.yaw_buffer.clear()
+                # print("Line found → RECOVER")
+                return
+
+            dt = time.time() - self.search_start_time
+            yaw = max(self.scan_yaw_max * (1 - dt / self.max_scan_time), self.scan_yaw_base)
+            input_speed = 0.0
+            input_turning = self.scan_dir * yaw
+
+        elif self.state == TrackState.RECOVER:
+            dt = time.time() - self.recover_start_time
+
+            if not has_line:
+                self.state = TrackState.SEARCH_SPIN
+                self.search_start_time = time.time()
+                self.scan_dir = 1 if self.last_error > 0 else -1
+                # print("Recover lost → SEARCH_SPIN")
+                return
+
+            if dt > self.recover_time:
+                self.state = TrackState.FOLLOW
+                self.last_error = 0.0
+                # print("Recover done → FOLLOW")
+                return
+
+            x = cx_sum / weight_sum
+            err = (x - cx) / cx
+            z = 0.5 * self.kp * err
+
+            input_speed = 0.0
+            input_turning = -z
+
         if not self.cv_movtion_lock:
-            self.base_ctrl.base_json_ctrl({"T":13,"X":input_speed,"Z":input_turning})
+            self.base_ctrl.base_json_ctrl({
+                "T": f['cmd_config']['cmd_ros_movition_ctrl'],
+                "X": input_speed,
+                "Z": input_turning,
+            })
 
-        overlay_buffer = np.zeros_like(img)
-        overlay_buffer = cv2.cvtColor(line_mask, cv2.COLOR_GRAY2BGR)
-
-        cv2.putText(overlay_buffer, 'Line Following', (100, 70), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
-        cv2.circle(overlay_buffer, (center_x, center_y), int(self.sampling_rad/4), (64, 255, 64), 1)
-
-        cv2.putText(overlay_buffer, ' SAM_H1: {}'.format(self.sampling_line_1), (center_x-150, sampling_h1-10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 128, 128), 1)
-        cv2.putText(overlay_buffer, ' SAM_H2: {}'.format(self.sampling_line_2), (center_x-150, sampling_h2-10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 128, 128), 1)
-
-        cv2.putText(overlay_buffer, f'X: {input_speed:.2f}, Z: {input_turning:.2f}', (center_x+50, center_y+0), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-
-        cv2.putText(overlay_buffer, ' UPPER: {}'.format(upper_hsv), (center_x+50, center_y+40), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-        cv2.putText(overlay_buffer, ' LOWER: {}'.format(lower_hsv), (center_x+50, center_y+60), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-
-        cv2.putText(overlay_buffer, ' UPPER: {}'.format(self.line_upper), (center_x+50, center_y+100), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 128, 128), 1)
-        cv2.putText(overlay_buffer, ' LOWER: {}'.format(self.line_lower), (center_x+50, center_y+120), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 128, 128), 1)
-        cv2.putText(overlay_buffer, f' SLOPE: {line_slope:.2f}', (center_x+50, center_y+140), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 128, 128), 1)
-        cv2.putText(overlay_buffer, f' SAM_1 SAM_2 SLOPE_IM BASE_IM SPD_IM LT_SPD SLOPE_SPD', (center_x-250, center_y-70), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 128, 128), 1)
-        cv2.putText(overlay_buffer, f' {self.sampling_line_1:.2f}   {self.sampling_line_2:.2f}   {self.slope_impact:.2f}      {self.base_impact:.4f}  {self.speed_impact:.2f}    {self.line_track_speed:.2f}    {self.slope_on_speed:.2f}', (center_x-250, center_y-50), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 128, 128), 1)
-
-        cv2.line(overlay_buffer, (0, sampling_h1), (width, sampling_h1), (255, 0, 0), 2)
-        cv2.line(overlay_buffer, (0, sampling_h2), (width, sampling_h2), (255, 0, 0), 2)
-
-        if sam_1:
-            cv2.line(overlay_buffer, (sampling_1_left, sampling_h1+20), (sampling_1_left, sampling_h1-20), (0, 255, 0), 2)
-            cv2.line(overlay_buffer, (sampling_1_right, sampling_h1+20), (sampling_1_right, sampling_h1-20), (0, 255, 0), 2)
-        if sam_2:
-            cv2.line(overlay_buffer, (sampling_2_left, sampling_h2+20), (sampling_2_left, sampling_h2-20), (0, 255, 0), 2)
-            cv2.line(overlay_buffer, (sampling_2_right, sampling_h2+20), (sampling_2_right, sampling_h2-20), (0, 255, 0), 2)
-        if sam_1 and sam_2:
-            cv2.line(overlay_buffer, (sampling_1_center, sampling_h1), (sampling_2_center, sampling_h2), (255, 0, 0), 2)
-
-        self.overlay = overlay_buffer
+        overlay = np.zeros_like(img)
+        cv2.putText(overlay, f'State: {self.state.name}', (80, 60),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+        cv2.putText(overlay, f'X: {input_speed:.2f}  Z: {input_turning:.2f}',
+                    (80, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+        self.overlay = overlay
 
     def mediaPipe_faces(self, img):
         image = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
@@ -995,8 +1057,6 @@ class OpencvFuncs():
             self.mpDraw.draw_landmarks(overlay_buffer, results.pose_landmarks, self.mp_pose.POSE_CONNECTIONS)
         self.overlay = overlay_buffer
 
-
-
     def info_update(self, megs, color, size):
         if megs == -1:
             self.info_update_time = time.time()
@@ -1016,7 +1076,7 @@ class OpencvFuncs():
             self.show_base_info_flag = True
         else:
             self.show_base_info_flag = False
-        print(self.show_base_info_flag)
+        # print(self.show_base_info_flag)
 
     def format_json_numbers(self, obj):
         if isinstance(obj, dict):
@@ -1043,15 +1103,12 @@ class OpencvFuncs():
         except Exception as e:
             print(f"[cv_ctrl.update_base_data] error: {e}")
 
-
-
-
     def cv_process(self, frame):
         cv_mode_list = {
             f['code']['cv_moti']: self.cv_detect_movition,
             f['code']['cv_face']: self.cv_detect_faces,
             f['code']['cv_objs']: self.cv_detect_objects,
-            f['code']['cv_clor']: self.cv_detect_color,
+            f['code']['cv_color']: self.cv_detect_color,
             f['code']['mp_hand']: self.mp_detect_hand,
             f['code']['cv_auto']: self.cv_auto_drive,
             f['code']['mp_face']: self.mediaPipe_faces,
@@ -1094,47 +1151,26 @@ class OpencvFuncs():
     def set_movtion_lock(self, input_cmd):
         if input_cmd == f['code']['mc_unlo']:
             self.cv_movtion_lock = False
-            self.pan_angle = 0
-            self.tilt_angle = 0
         else:
             self.cv_movtion_lock = True
-
-
-
 
     def change_target_color(self, lc, uc):
         self.color_lower = np.array([lc[0], lc[1], lc[2]])
         self.color_upper = np.array([uc[0], uc[1], uc[2]])
 
     def selet_target_color(self, color_name):
-        if color_name in self.color_list:
-            self.color_lower = self.color_list[color_name][0]
-            self.color_upper = self.color_list[color_name][1]
+        color = self.color_list.get(color_name)
+
+        if color:
+            self.color_lower = np.array(color['lower'], dtype=np.uint8)
+            self.color_upper = np.array(color['upper'], dtype=np.uint8)
+            print(f"[CV] Switch target color -> {color_name}")
+        else:
+            print(f"[CV] Color '{color_name}' not found in config")
 
     def change_line_color(self, lc, uc):
         self.line_lower = np.array([lc[0], lc[1], lc[2]])
         self.line_upper = np.array([uc[0], uc[1], uc[2]])
-
-    def set_line_track_args(self, sam_pos_1, sam_pos_2, slope_im, base_im, spd_im, lt_spd, slope_spd):
-        self.sampling_line_1 = sam_pos_1
-        if sam_pos_2 < sam_pos_1:
-            sam_pos_2 = sam_pos_1 + 0.1
-        self.sampling_line_2 = sam_pos_2
-        self.slope_impact = slope_im
-        self.base_impact = base_im
-        self.speed_impact = spd_im
-        self.line_track_speed = lt_spd
-        self.slope_on_speed = slope_spd
-
-    def set_pt_track_args(self, args_1, args_2):
-        if args_1 == '-c' or args_1 == '--color_iterate':
-            self.track_color_iterate = float(args_2)
-        elif args_1 == '-f' or args_1 == '--faces_iterate':
-            self.track_faces_iterate = float(args_2)
-        elif args_1 == '-s' or args_1 == '--speed':
-            self.track_spd_rate = float(args_2)
-        elif args_1 == '-a' or args_1 == '--acc':
-            self.track_acc_rate = float(args_2)
 
     def timelapse(self, input_speed, input_time, input_interval, input_loop_times):
         self.mission_flag = True
@@ -1157,5 +1193,4 @@ class OpencvFuncs():
 
     def mission_stop(self):
         self.mission_flag = False
-
-      
+   

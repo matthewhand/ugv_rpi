@@ -21,7 +21,7 @@ const config = {
   cv_moti: null,
   cv_face: null,
   cv_objs: null,
-  cv_clor: null,
+  cv_color: null,
   mp_hand: null,
   cv_auto: null,
   mp_face: null,

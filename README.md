@@ -58,14 +58,17 @@ You can clone this repository from Waveshare's GitHub to your local machine.
     git lfs pull
 ### Grant execution permission to the mediamtx 
     cd ugv_rpi/
-    sudo chmod +x /home/ws/ugv_rpi/controllers/Mediamtx/mediamtx
+    sudo chmod +x controllers/Mediamtx/mediamtx
 ### Grant execution permission to the installation script
     cd ugv_rpi/scripts/
     sudo chmod +x setup.sh
     sudo chmod +x autorun.sh
+    sudo chmod +x start_jupyter.sh
 ### Install app (it'll take a while before finish)
+    cd ugv_rpi/scripts/
     sudo ./setup.sh
 ### Autorun setup
+    cd ugv_rpi/scripts/
     ./autorun.sh
 ### AccessPopup installation
     cd ugv_rpi/AccessPopup
@@ -109,7 +112,7 @@ Now you can restart the main program app.py.
 
 # License
 ugv_rpi for the Raspberry Pi: an open source robotics platform for the Raspberry Pi.
-Copyright (C) 2025 [Waveshare](https://www.waveshare.com/)
+Copyright (C) 2026 [Waveshare](https://www.waveshare.com/)
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by

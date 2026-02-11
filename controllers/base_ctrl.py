@@ -204,6 +204,7 @@ class BaseController:
 			if now_time - last_send_time < min_interval:
 				time.sleep(min_interval - (now_time - last_send_time))
 			self.ser.write((json.dumps(data) + '\n').encode("utf-8"))
+			# print(data)
 			last_send_time = time.time()
 
 	def base_json_ctrl(self, input_json):

@@ -19,6 +19,23 @@ import re
 
 import pyaudio
 
+import subprocess
+
+def set_default_sink(sink_device_name,source_device_name):
+    try:
+        command = ['pactl', 'set-default-sink', sink_device_name]
+        subprocess.run(command, check=True)
+        print(f"Default sink set to '{sink_device_name}' successfully.")
+        command = ['pactl', 'set-default-source', source_device_name]
+        subprocess.run(command, check=True)
+        print(f"Default source set to '{source_device_name}' successfully.")		
+    except subprocess.CalledProcessError as e:
+        print(f"Error: {e}")
+
+sink_device_name = "alsa_output.usb-Solid_State_System_Co._Ltd._USB_PnP_Audio_Device_000000000000-00.analog-stereo"
+source_device_name = "alsa_input.usb-Solid_State_System_Co._Ltd._USB_PnP_Audio_Device_000000000000-00.analog-stereo"
+set_default_sink(sink_device_name,source_device_name)
+
 curpath = os.path.realpath(__file__)
 thisPath = os.path.dirname(curpath)
 with open(thisPath + '/../config.yaml', 'r') as yaml_file:
@@ -34,15 +51,22 @@ RATE = 16000
 audio_queue = queue.Queue()
 
 def audio_capture_thread():
-    p = pyaudio.PyAudio()
-    stream = p.open(format=FORMAT, channels=CHANNELS, rate=RATE,
-                    input=True, frames_per_buffer=CHUNK)
-    while True:
-        try:
-            data = stream.read(CHUNK, exception_on_overflow=False)
-            audio_queue.put(data)
-        except Exception as e:
-            print(f"[Audio Capture Error]: {e}")
+	p = pyaudio.PyAudio()
+	stream = p.open(format=FORMAT, channels=CHANNELS, rate=RATE,
+					input=True, frames_per_buffer=CHUNK)
+	try:
+		while True:
+			try:
+				data = stream.read(CHUNK, exception_on_overflow=False)
+				audio_queue.put(data, timeout=0.05)
+			except queue.Full:
+				pass  
+			except Exception as e:
+				print(f"[Audio Capture Error]: {e}")
+	finally:
+		stream.stop_stream()
+		stream.close()
+		p.terminate()
 
 model_dir = os.path.join(thisPath, "models", "sherpa-onnx-vits-zh-ll")
 

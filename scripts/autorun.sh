@@ -11,7 +11,6 @@ SYSTEMD_DIR="$USER_HOME/.config/systemd/user"
 
 APP_PATH="$USER_HOME/ugv_rpi/app.py"
 PYTHON_BIN="$USER_HOME/ugv_rpi/ugv-env/bin/python"
-JUPYTER_SCRIPT="$USER_HOME/ugv_rpi/scripts/start_jupyter.sh"
 
 mkdir -p "$SYSTEMD_DIR"
 
@@ -23,10 +22,10 @@ After=sound.target pipewire.service
 Wants=pipewire.service
 
 [Service]
-ExecStart=$PYTHON_BIN $APP_PATH
+ExecStart=/bin/bash -c "$USER_HOME/ugv_rpi/ugv-env/bin/python -u $USER_HOME/ugv_rpi/app.py >> $USER_HOME/ugv_rpi/ugv-app.log 2>&1"
 Restart=always
 Environment=XDG_RUNTIME_DIR=/run/user/%U
-WorkingDirectory=$(dirname "$APP_PATH")
+WorkingDirectory=$USER_HOME/ugv_rpi
 
 [Install]
 WantedBy=default.target
@@ -36,11 +35,9 @@ JUPYTER_SERVICE="$SYSTEMD_DIR/ugv-jupyter.service"
 cat > "$JUPYTER_SERVICE" <<EOL
 [Unit]
 Description=UGV Jupyter Notebook
-After=ugv-app.service
-Wants=ugv-app.service
 
 [Service]
-ExecStart=/bin/bash $JUPYTER_SCRIPT
+ExecStart=/bin/bash -c "$USER_HOME/ugv_rpi/scripts/start_jupyter.sh >> $USER_HOME/ugv_rpi/ugv-jupyter.log 2>&1"
 Restart=always
 Environment=XDG_RUNTIME_DIR=/run/user/%U
 WorkingDirectory=$USER_HOME
@@ -54,6 +51,7 @@ systemctl --user enable ugv-app.service
 systemctl --user enable ugv-jupyter.service
 sudo loginctl enable-linger $USER_NAME
 
+export PATH=$HOME/.local/bin:$PATH
 source "$USER_HOME/ugv_rpi/ugv-env/bin/activate"
 CONFIG_FILE="$USER_HOME/.jupyter/jupyter_notebook_config.py"
 if [ ! -f "$CONFIG_FILE" ]; then

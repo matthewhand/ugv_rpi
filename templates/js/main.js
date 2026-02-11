@@ -60,7 +60,7 @@ fetch(fetchConfig)
         config.cv_moti = yamlObject.code.cv_moti;
         config.cv_face = yamlObject.code.cv_face;
         config.cv_objs = yamlObject.code.cv_objs;
-        config.cv_clor = yamlObject.code.cv_clor;
+        config.cv_color = yamlObject.code.cv_color;
         config.mp_hand = yamlObject.code.mp_hand;
         config.cv_auto = yamlObject.code.cv_auto;
         config.mp_face = yamlObject.code.mp_face;
@@ -118,7 +118,7 @@ window.cv_none = config.cv_none;
 window.cv_moti = config.cv_moti;
 window.cv_face = config.cv_face;
 window.cv_objs = config.cv_objs;
-window.cv_clor = config.cv_clor;
+window.cv_color = config.cv_color;
 window.cv_auto = config.cv_auto;
 
 window.mp_hand = config.mp_hand;
@@ -225,8 +225,8 @@ function toggleAudio() {
     if (!audioContext) {
         initAudioContext().then(() => {
             audioStarted = true;
-            audioIcon.src = '../assets/img/white/volume-mute.svg';
-            audioIcon.alt = 'volume-mute';
+            audioIcon.src = '../assets/img/white/volume-up.svg';
+            audioIcon.alt = 'volume-up';
             playNext();
         });
         return;
@@ -234,15 +234,15 @@ function toggleAudio() {
     if (audioContext.state === 'suspended') {
         audioContext.resume().then(() => {
             audioStarted = true;
-            audioIcon.src = '../assets/img/white/volume-mute.svg';
-            audioIcon.alt = 'volume-mute';
+            audioIcon.src = '../assets/img/white/volume-up.svg';
+            audioIcon.alt = 'volume-up';
             if (queue.length > 0) playNext();
         });
     } else if (audioContext.state === 'running') {
         audioContext.suspend().then(() => {
             audioStarted = false;
-            audioIcon.src = '../assets/img/white/volume-up.svg';
-            audioIcon.alt = 'volume-up';
+            audioIcon.src = '../assets/img/white/volume-mute.svg';
+            audioIcon.alt = 'volume-mute';
         });
     }
 }
@@ -892,7 +892,7 @@ socketCtrl.on('update', function (data) {
             [config.cv_objs]: () => {
                 FButtons[0]?.classList.add("ctl_btn_active");
             },
-            [config.cv_clor]: () => {
+            [config.cv_color]: () => {
                 FButtons[1]?.classList.add("ctl_btn_active");
             },
             [config.mp_hand]: () => {
@@ -909,7 +909,7 @@ socketCtrl.on('update', function (data) {
         const detectTypeHandler = detectTypeMap[data[config.detect_type]];
         if (detectTypeHandler) detectTypeHandler();
 
-        if (data[config.detect_type] == config.cv_auto) {
+        if (data[config.detect_type] == config.cv_face|| data[config.detect_type] == config.cv_color || data[config.detect_type] == config.cv_auto|| data[config.detect_type] == config.mp_hand) {
             if (data[config.cv_movtion_mode] === true) {
                 cv_heartbeat_stop_flag = false;
                 CButtons[0]?.classList.add("ctl_btn_active");
@@ -1021,6 +1021,8 @@ let pressMode = 'increase';
 let leftJoystick = null;
 let rightJoystick = null;
 
+const armModeToggleEl = document.getElementById('arm_mode_toggle');
+
 function toggleArmMode() {
     if (leftJoystick) {
         leftJoystick.destroy();
@@ -1049,8 +1051,6 @@ function toggleArmMode() {
         }
     }    
 
-
-    const armModeToggleEl = document.getElementById('arm_mode_toggle');
     if (armModeToggleEl) {
         armModeToggleEl.textContent = capitalize(armMode);
     }
@@ -1081,7 +1081,41 @@ ledPwmState = createStateManager(ledPwmState, ledPwmCtrl);
 armJointState = createStateManager(armJointState, armJointCtrl);
 armPoseState = createStateManager(armPoseState, armPoseCtrl);
 ptPoseState = createStateManager(ptPoseState, ptPoseCtrl);
-rosBaseSpeedState = createStateManager(rosBaseSpeedState, rosBaseSpeedCtrl);
+rosBaseSpeedState = createSpeedStateManager(rosBaseSpeedState, rosBaseSpeedCtrl);
+
+function createSpeedStateManager(initialState, onChange) {
+  const speedProps = new Set(['x', 'z']);
+
+  const handler = {
+    set(target, prop, value) {
+      const isSpeedProp = speedProps.has(prop);
+      const changed = target[prop] !== value;
+
+      const isZeroSpeed =
+        isSpeedProp && value === 0 &&
+        target.x === 0 &&
+        target.z === 0 ;
+
+      if (changed || (isSpeedProp && !isZeroSpeed)) {
+        target[prop] = value;
+
+        if (onChange && !handler._suspend) {
+          onChange({ ...target });
+        }
+      }
+
+      return true;
+    }
+  };
+
+  handler._suspend = true;
+  const proxy = new Proxy(initialState, handler);
+  proxy._raw = initialState;
+
+  setTimeout(() => handler._suspend = false, 0);
+
+  return proxy;
+}
 
 function createStateManager(initialState, onChange) {
   const handler = {
@@ -1628,26 +1662,48 @@ function rosBaseSpeedCtrl() {
     });
 
     updatingRosSpeed = false;
+    heartbeat_send_flag = true;
 }
 
-document.querySelectorAll('.ctl9_base_btn, .ctl9_base_btn2, .ctl9_base_btn4, .ctl9_base_btn6, .ctl9_base_btn8').forEach(btn => {
-    const onDown = () => {
-        const x_dir = parseFloat(btn.dataset.x || 0);  
-        const z_dir = parseFloat(btn.dataset.z || 0);  
+let moveTimer = null;
+
+document.querySelectorAll(
+    '.ctl9_base_btn, .ctl9_base_btn2, .ctl9_base_btn4, .ctl9_base_btn6, .ctl9_base_btn8'
+).forEach(btn => {
+
+    const sendCmd = () => {
+        const x_dir = parseFloat(btn.dataset.x || 0);
+        const z_dir = parseFloat(btn.dataset.z || 0);
 
         rosBaseSpeedState.x = x_dir * config.max_speed * speed_rate;
         rosBaseSpeedState.z = z_dir * config.max_turn_speed * speed_rate;
+    
+        heartbeat_send_flag = true;
+    };
+
+    const onDown = () => {
+        if (moveTimer) return; 
+        sendCmd();           
+        moveTimer = setInterval(sendCmd, 50); 
     };
 
     const onUp = () => {
-        rosBaseSpeedState.x = 0;
-        rosBaseSpeedState.z = 0;
+        clearInterval(moveTimer);
+        moveTimer = null;
+
+        rosBaseSpeedState.x = 0.0;
+        rosBaseSpeedState.z = 0.0;
+
+        console.log('stop', rosBaseSpeedState);
     };
 
     btn.addEventListener('mousedown', onDown);
     btn.addEventListener('touchstart', onDown);
+
     btn.addEventListener('mouseup', onUp);
+    btn.addEventListener('mouseleave', onUp); 
     btn.addEventListener('touchend', onUp);
+    btn.addEventListener('touchcancel', onUp);
 });
 
 var heartbeat_send_flag = true;
@@ -1655,11 +1711,10 @@ var heartbeat_send_flag = true;
 function heartbeat_send() {
     if (socketJson.connected && heartbeat_send_flag && !cv_heartbeat_stop_flag) {
         cmdJsonCmd({ 'T': config.cmd_ros_movition_ctrl, 'x': 0, 'z': 0 });
-        cv_heartbeat_stop_flag = true;
     }
 }
 
-setInterval(heartbeat_send, 200);
+setInterval(heartbeat_send, 2000);
 
 let updatingLed = false;
 
@@ -1851,11 +1906,16 @@ var last_gp_rt2 = false;
 var startPressed = false;
 var last_gp_picture = false;
 
-let last_btn4 = false;
-let last_btn6 = false;
+let last_btn_l1 = false;
+let last_btn_l2 = false;
+let last_btn_r1 = false;
+let last_btn_r2 = false;
 const speed_levels = [min_rate, mid_rate, max_rate];
 let speed_index = 0;
-let lastSwitchTime = 0;
+let lastSwitchTime_l1 = 0;
+let lastSwitchTime_l2 = 0;
+let lastSwitchTime_r1 = 0;
+let lastSwitchTime_r2 = 0;
 const switchCooldown = 300;
 
 window.addEventListener("gamepadconnected", function (e) {
@@ -1887,10 +1947,10 @@ const mapping = {
     "B": 1,
     "X": 2,
     "Y": 3,
-    "LEFT_BUMPER": 4,
-    "RIGHT_BUMPER": 5,
-    "LEFT_TRIGGER": 6, 
-    "RIGHT_TRIGGER": 7,
+    "L1": 4,
+    "R1": 5,
+    "L2": 6, 
+    "R2": 7,
     "SELECT": 8,
     "START": 9,
     "LEFT_STICK": 10,
@@ -1919,24 +1979,26 @@ function gamepadCtrl() {
             //   logButtons(gp);
             //   logAxes(gp);   
             speed_rate = speed_levels[speed_index];
-            const now = Date.now();
-
-            if (gp.buttons[mapping["LEFT_BUMPER"]].pressed && !last_btn4 && (now - lastSwitchTime > switchCooldown)) {
+            const l1Pressed = gp.buttons[mapping["L1"]].pressed;
+            const now_l1 = Date.now();
+            if ( l1Pressed && !last_btn_l1 && (now_l1 - lastSwitchTime_l1 > switchCooldown)) {
                 speed_index = Math.max(0, speed_index - 1);
                 speed_rate = speed_levels[speed_index];
                 speedRateCtrl(speed_rate);
-                lastSwitchTime = now;
+                lastSwitchTime_l1 = now_l1;
             }
-            if (gp.buttons[mapping["LEFT_TRIGGER"]].pressed && !last_btn6 && (now - lastSwitchTime > switchCooldown)) {
+            last_btn_l1 = l1Pressed;
+
+            const l2Pressed = gp.buttons[mapping["L2"]].pressed;
+            const now_l2 = Date.now();
+            if (l2Pressed && !last_btn_l2 && (now_l2 - lastSwitchTime_l2 > switchCooldown)) {
                 speed_index = Math.min(speed_levels.length - 1, speed_index + 1);
                 speed_rate = speed_levels[speed_index];
                 speedRateCtrl(speed_rate);
-                lastSwitchTime = now;
+                lastSwitchTime_l2 = now_l2;
             }
+            last_btn_l2 = l2Pressed;
 
-            last_btn4 = gp.buttons[mapping["LEFT_BUMPER"]].pressed;
-            last_btn6 = gp.buttons[mapping["LEFT_TRIGGER"]].pressed;
-            
             gp_x = 0;
             if (gp.buttons[mapping["DPAD_UP"]].pressed) gp_x = config.max_speed * speed_rate;
             if (gp.buttons[mapping["DPAD_DOWN"]].pressed) gp_x = -config.max_speed * speed_rate;
@@ -1952,12 +2014,8 @@ function gamepadCtrl() {
                 gp_z = 0;
             }
 
-            if (gp_x !== last_gp_x || gp_z !== last_gp_z) {
-                rosBaseSpeedState.x = gp_x;
-                rosBaseSpeedState.z = gp_z;
-                last_gp_x = gp_x;
-                last_gp_z = gp_z;
-            }
+            rosBaseSpeedState.x = gp_x;
+            rosBaseSpeedState.z = gp_z;
 
             if (gp.buttons[mapping["START"]].pressed && !startPressed) {
                 startPressed = true;
@@ -1989,16 +2047,11 @@ function gamepadCtrl() {
             ledPwmState.io4 += deltaLed;
 
             if (config.module_type === 2) {
-                if (last_gp_rt2 != gp.buttons[mapping["RIGHT_TRIGGER"]].pressed) {
-                    last_gp_rt2 = gp.buttons[mapping["RIGHT_TRIGGER"]].pressed;
+                if (last_gp_rt2 != gp.buttons[mapping["R2"]].pressed) {
+                    last_gp_rt2 = gp.buttons[mapping["R2"]].pressed;
                     cmdSend(config.head_ct, 0);
                 }
                 const gp_pt_speed = 1;
-
-                // if (gp.buttons[mapping["A"]].pressed) ptPoseState.y -= gp_pt_speed;
-                // if (gp.buttons[mapping["B"]].pressed) ptPoseState.x += gp_pt_speed;
-                // if (gp.buttons[mapping["X"]].pressed) ptPoseState.x -= gp_pt_speed;
-                // if (gp.buttons[mapping["Y"]].pressed) ptPoseState.y += gp_pt_speed;
 
                 var change_x = gp.axes[mapping["RIGHT_STICK_X"]];
                 var change_y = gp.axes[mapping["RIGHT_STICK_Y"]];
@@ -2008,40 +2061,60 @@ function gamepadCtrl() {
                     ptPoseState.y = ptPoseState.y - change_y * gp_pt_speed;  
                 }
             } else if (config.module_type === 1 || config.module_type === 3) {
-                    const change_joystick_left_x = gp.axes[mapping["LEFT_STICK_X"]];    
-                    const change_joystick_left_y = gp.axes[mapping["LEFT_STICK_Y"]];
+                const change_joystick_left_x = gp.axes[mapping["LEFT_STICK_X"]];    
+                const change_joystick_left_y = gp.axes[mapping["LEFT_STICK_Y"]];
 
-                    let change_joystick_left_click = 0;
-                    if (gp.buttons[mapping["LEFT_STICK"]].pressed && gp.buttons[mapping["RIGHT_TRIGGER"]].pressed) {
-                        change_joystick_left_click = -1;
-                    } else if (gp.buttons[mapping["LEFT_STICK"]].pressed) {
-                        change_joystick_left_click = 1;
+                let change_joystick_left_click = 0;
+                if (gp.buttons[mapping["LEFT_STICK"]].pressed && gp.buttons[mapping["R2"]].pressed) {
+                    change_joystick_left_click = -1;
+                } else if (gp.buttons[mapping["LEFT_STICK"]].pressed) {
+                    change_joystick_left_click = 1;
+                }
+
+                const change_joystick_right_x = gp.axes[mapping["RIGHT_STICK_X"]];
+                const change_joystick_right_y = -gp.axes[mapping["RIGHT_STICK_Y"]];
+
+                const r1Pressed = gp.buttons[mapping["R1"]].pressed;
+                const now_r1 = Date.now();
+                if (r1Pressed && !last_btn_r1 && (now_r1 - lastSwitchTime_r1 > switchCooldown)) {
+                    armMode = (armMode === 'pose') ? 'joint' : 'pose';
+                    if (armModeToggleEl) {
+                        armModeToggleEl.textContent = capitalize(armMode);
                     }
 
-                    const change_joystick_right_x = gp.axes[mapping["RIGHT_STICK_X"]];
-                    const change_joystick_right_y = -gp.axes[mapping["RIGHT_STICK_Y"]];
+                    lastSwitchTime_r1 = now_r1;
+                }
 
-                if (gp.buttons[mapping["RIGHT_BUMPER"]].pressed) {
-                    armMode = 'pose';
-                    toggleArmMode();
-                    armPoseState.z += change_joystick_left_click * pose_sensitivity;
+                if (armMode === 'pose') {
+                    // armPoseState.z += change_joystick_left_click * pose_sensitivity;
                     if (Math.abs(change_joystick_left_x) > threshold || Math.abs(change_joystick_left_y) > threshold || Math.abs(change_joystick_right_x) > threshold || Math.abs(change_joystick_right_y) > threshold) {
                         armPoseState.x -= change_joystick_left_y * pose_sensitivity;
-                        armPoseState.y -= change_joystick_left_x * pose_sensitivity;
+                        // armPoseState.y -= change_joystick_left_x * pose_sensitivity;
+                        if (r1Pressed) {
+                            armPoseState.z -= change_joystick_left_x * pose_sensitivity;
+                        } else {
+                            armPoseState.y -= change_joystick_left_x * pose_sensitivity;
+                        }
                         armPoseState.r += change_joystick_right_x * joint_sensitivity;
                         armPoseState.p += change_joystick_right_y * joint_sensitivity;
                     }
-                } else {
-                    armMode = 'joint';
-                    toggleArmMode();
-                    armJointState.elbow -= change_joystick_left_click * joint_sensitivity;
+                } else if(armMode === 'joint'){
+                    // armJointState.elbow -= change_joystick_left_click * joint_sensitivity;
                     if (Math.abs(change_joystick_left_x) > threshold || Math.abs(change_joystick_left_y) > threshold || Math.abs(change_joystick_right_x) > threshold || Math.abs(change_joystick_right_y) > threshold) {
                         armJointState.base -= change_joystick_left_x * joint_sensitivity;
-                        armJointState.shoulder -= change_joystick_left_y * joint_sensitivity;
+                        // armJointState.shoulder -= change_joystick_left_y * joint_sensitivity;
+                        if (r1Pressed) {
+                            armJointState.elbow -= change_joystick_left_y * joint_sensitivity;
+                        } else {
+                            armJointState.shoulder -= change_joystick_left_y * joint_sensitivity;
+                        }
                         armJointState.roll += change_joystick_right_x * joint_sensitivity;
                         armJointState.wrist += change_joystick_right_y * joint_sensitivity;
                     }
                 }
+
+                last_btn_r1 = r1Pressed;
+
                 let deltaHand = 0;
                 if (gp.buttons[mapping["A"]].pressed) {
                     deltaHand = 0.005;

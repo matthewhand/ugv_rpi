@@ -1,3 +1,5 @@
+import sys
+sys.stdout.reconfigure(line_buffering=True)
 # import base_ctrl library
 from controllers.base_ctrl import BaseController
 from controllers.joy_ctrl import JoystickReader, JoyTeleop
@@ -230,14 +232,6 @@ def cmdline_ctrl(args_string):
         elif args[1] == '-s' or args[1] == '--select':
             cvf.selet_target_color(args[2])
 
-    elif args[0] == 'video' or args[0] == 'v':
-        if args[1] == '-q' or args[1] == '--quality':
-            try:
-                int(args[2])
-            except:
-                return
-            cvf.set_video_quality(int(args[2]))
-
     elif args[0] == 'line':
         if args[1] == '-r' or args[1] == '--range':
             try:
@@ -259,19 +253,13 @@ def cmdline_ctrl(args_string):
             except:
                 return
             cvf.change_line_color(lower_nums, upper_nums)
-        elif args[1] == '-s' or args[1] == '--set':
-            if len(args) != 9:
-                return
-            try:
-                for i in range(2,9):
-                    float(args[i])
-            except:
-                return
-            # line -s 0.7 0.8 1.6 0.0006 0.6 0.4 0.2
-            cvf.set_line_track_args(float(args[2]), float(args[3]), float(args[4]), float(args[5]), float(args[6]), float(args[7]), float(args[8]))
 
     elif args[0] == 'track':
-        cvf.set_pt_track_args(args[1], args[2])
+        if args[1] == '-b' or args[1] == '--base':
+            cvf.set_track_base(args[2])
+            f['base_config']['robot_name'] = args[2]
+            with open(thisPath + '/config.yaml', "w") as yaml_file:
+                yaml.dump(f, yaml_file)
 
     elif args[0] == 'timelapse':
         if args[1] == '-s' or args[1] == '--start':
@@ -288,11 +276,6 @@ def cmdline_ctrl(args_string):
         elif args[1] == '-e' or args[1] == '--end' or args[1] == '--stop':
             cvf.mission_stop()
 
-    elif args[0] == 'p':
-        main_type = int(args[1][0])
-        module_type = int(args[1][1])
-        set_version(main_type, module_type)
-
     # s 20
     elif args[0] == 's':
         main_type = int(args[1][0])
@@ -307,14 +290,6 @@ def cmdline_ctrl(args_string):
             f['args_config']['slow_speed'] = 0.2
         elif main_type == 3:
             f['base_config']['robot_name'] = "UGV Beast"
-            f['args_config']['max_speed'] = 1.0
-            f['args_config']['slow_speed'] = 0.2
-        elif main_type == 4:
-            f['base_config']['robot_name'] = "COBRA Flex"
-            f['args_config']['max_speed'] = 1.0
-            f['args_config']['slow_speed'] = 0.2
-        elif main_type == 5:
-            f['base_config']['robot_name'] = "COBRA Surge"
             f['args_config']['max_speed'] = 1.0
             f['args_config']['slow_speed'] = 0.2
         f['base_config']['main_type'] = main_type
@@ -382,15 +357,16 @@ def serve_static_settings(filename):
 
 def audio_send_thread():
     while True:
-        data = audio_ctrl.audio_queue.get()
-        socketio.emit('audio', data, namespace='/audio')
-        audio_ctrl.audio_queue.task_done()
+        try:
+            data = audio_ctrl.audio_queue.get()
+            socketio.emit('audio', data, namespace='/audio')
+            audio_ctrl.audio_queue.task_done()
+        except Exception as e:
+            print("[Audio Send Error]", e)
 
 @socketio.on('connect', namespace='/audio')
 def on_audio_connect():
     print('Client connected to /audio')
-    threading.Thread(target=audio_ctrl.audio_capture_thread, daemon=True).start()
-    threading.Thread(target=audio_send_thread, daemon=True).start()
 
 # Web socket
 @socketio.on('json', namespace='/json')
@@ -469,10 +445,11 @@ def base_data_loop():
     sensor_read_time = time.time()
     while True:
         cvf.update_base_data(base.feedback_data())
-        base.base_json_ctrl({"T":105})   
-        data = base.feedback_data()
-        if data["T"] ==1051:
-            socketio.emit('arm_state_update', data, namespace='/arm_state_update')
+        if f['base_config']['module_type'] != 2:
+            base.base_json_ctrl({"T":105})   
+            data = base.feedback_data()
+            if data !=None and data["T"] ==1051:
+                socketio.emit('arm_state_update', data, namespace='/arm_state_update')
         # get sensor data
         if base.extra_sensor:
             if time.time() - sensor_read_time > sensor_interval:
@@ -588,3 +565,9 @@ if __name__ == "__main__":
     # run the main web app
     flask_thread = threading.Thread(target=run_flask, daemon=True)
     flask_thread.start()
+
+    audio_capture_thread = threading.Thread(target=audio_ctrl.audio_capture_thread, daemon=True)
+    audio_capture_thread.start()
+
+    audio_send_thread = threading.Thread(target=audio_send_thread, daemon=True)
+    audio_send_thread.start()
