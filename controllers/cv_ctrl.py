@@ -969,7 +969,8 @@ class OpencvFuncs():
                 self.search_start_time = time.time()
                 self.scan_dir = 1 if self.last_error > 0 else -1
                 # print(f"Lost line → SEARCH_SPIN ({'RIGHT' if self.scan_dir > 0 else 'LEFT'})")
-                return
+                input_speed = 0.0
+                input_turning = 0.0
 
             x = cx_sum / weight_sum
             err = (x - cx) / cx
@@ -992,7 +993,8 @@ class OpencvFuncs():
                 self.last_error = 0.0
                 self.yaw_buffer.clear()
                 # print("Line found → RECOVER")
-                return
+                input_speed = 0.0
+                input_turning = 0.0
 
             dt = time.time() - self.search_start_time
             yaw = max(self.scan_yaw_max * (1 - dt / self.max_scan_time), self.scan_yaw_base)
