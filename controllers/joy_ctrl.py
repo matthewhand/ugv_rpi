@@ -170,7 +170,7 @@ SHANWAN_Android_Gamepad = {
     "X": 3,
     "Y": 4,
     "L1": 6,
-    "R2": 7,
+    "R1": 7,
     "SELECT": 10,
     "START": 11,
     "HOME": 12,
