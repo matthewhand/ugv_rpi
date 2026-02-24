@@ -324,8 +324,8 @@ class OpencvFuncs():
             try:
                 # self.camera = cv2.VideoCapture(0)
                 self.camera = cv2.VideoCapture(0, cv2.CAP_V4L2)
-                self.camera.set(cv2.CAP_PROP_FRAME_WIDTH,  f['video']['default_res_w'])
-                self.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, f['video']['default_res_h'])
+                self.camera.set(cv2.CAP_PROP_FRAME_WIDTH,  frame_width)
+                self.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, frame_height)
                 self.camera.set(
                     cv2.CAP_PROP_FOURCC,
                     cv2.VideoWriter_fourcc(*'MJPG')
@@ -348,7 +348,7 @@ class OpencvFuncs():
                     self.picam2.create_video_configuration(
                         main={
                             "format": 'XRGB8888',
-                            "size": (f['video']['default_res_w'], f['video']['default_res_h'])
+                            "size": (frame_width, frame_height)
                         }
                     )
                 )
@@ -401,7 +401,9 @@ class OpencvFuncs():
                     if not success or input_frame is None:
                         self.camera.release()
                         time.sleep(1)
-                        self.camera = cv2.VideoCapture(0)
+                        self.camera = cv2.VideoCapture(0, cv2.CAP_V4L2)
+                        self.camera.set(cv2.CAP_PROP_FRAME_WIDTH,  frame_width)
+                        self.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, frame_height)
                 elif self.csi_camera_connected:
                     input_frame = self.picam2.capture_array()
                 elif self.oak_camera_connected:
