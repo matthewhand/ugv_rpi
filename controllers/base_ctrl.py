@@ -176,7 +176,6 @@ class BaseController:
 							self.base_voltage_status = v
 						return self.base_data
 			self.rl.clear_buffer()
-			self.data_buffer = json.loads(self.rl.readline().decode('utf-8'))
 			self.base_data = self.data_buffer
 			return self.base_data
 		except Exception as e:
@@ -218,11 +217,6 @@ class BaseController:
 		self.send_command(data)
 
 
-	def base_speed_ctrl(self, input_left, input_right):
-		data = {"T":1,"L":input_left,"R":input_right}
-		self.send_command(data)
-
-
 	def gimbal_ctrl(self, input_x, input_y, input_speed, input_acceleration):
 		data = {"T":133,"X":input_x,"Y":input_y,"SPD":input_speed,"ACC":input_acceleration}
 		self.send_command(data)
@@ -234,30 +228,12 @@ class BaseController:
 
 
 	def base_oled(self, input_line, input_text):
-		data = {"T":3,"lineNum":input_line,"Text":input_text}
+		data = {"T":13,"lineNum":input_line,"Text":input_text}
 		self.send_command(data)
 
 
 	def base_default_oled(self):
 		data = {"T":-3}
-		self.send_command(data)
-
-
-	def bus_servo_id_set(self, old_id, new_id):
-		# data = {"T":54,"old":old_id,"new":new_id}
-		data = {"T":f['cmd_config']['cmd_set_servo_id'],"raw":old_id,"new":new_id}
-		self.send_command(data)
-
-
-	def bus_servo_torque_lock(self, input_id, input_status):
-		# data = {"T":55,"id":input_id,"status":input_status}
-		data = {"T":f['cmd_config']['cmd_servo_torque'],"id":input_id,"cmd":input_status}
-		self.send_command(data)
-
-
-	def bus_servo_mid_set(self, input_id):
-		# data = {"T":58,"id":input_id}
-		data = {"T":f['cmd_config']['cmd_set_servo_mid'],"id":input_id}
 		self.send_command(data)
 
 

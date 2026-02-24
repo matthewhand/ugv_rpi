@@ -12,9 +12,6 @@ import logging
 import math
 import pyudev
 
-
-from .roarm_solver import RoArmM2, RoArmM3
-
 class ReadLine:
     def __init__(self, s):
         self.buf = bytearray()
@@ -151,11 +148,6 @@ with open(thisPath + '/../config.yaml', 'r') as yaml_file:
 
 module_type = f['base_config']['module_type']
 
-if module_type == 1 :
-    roarm = RoArmM2()
-elif module_type == 3 :
-    roarm = RoArmM3()
-
 SHANWAN_Android_Gamepad = {
     "LEFT_STICK_X": 0,
     "LEFT_STICK_Y": 1,
@@ -170,7 +162,7 @@ SHANWAN_Android_Gamepad = {
     "X": 3,
     "Y": 4,
     "L1": 6,
-    "R2": 7,
+    "R1": 7,
     "SELECT": 10,
     "START": 11,
     "HOME": 12,
@@ -192,7 +184,7 @@ Xbox_360_Controller = {
     "X": 2,
     "Y": 3,
     "L1": 4,
-    "R2": 5,
+    "R1": 5,
     "SELECT": 6,
     "START": 7,
     "HOME": 8,
@@ -338,18 +330,20 @@ class JoyTeleop:
         self.prev_l2_pressed = False
         self.prev_l1_pressed = False
         self.prev_r2_pressed = False
-        self.prev_r1_pressed = False        
+        self.prev_r1_pressed = False
         self.prev_led_next_gear_pressed = False
         self.prev_led_down_gear_pressed = False
+        self.prev_leg_btn_pressed = False
 
+        self.mode = 'turn'
         self.speed_gear = 0.3
-        self.speed_level = [0.3,0.66,1.0]
+        self.speed_level = [0.3, 0.66, 1.0]
         self.led_gear = 0.0
-        self.led_level = [round(i / 25.0, 3) for i in range(0, 26)]
+        self.led_level = [round(i / 25.0, 3) for i in range(0, 26)] 
 
         self.xspeed_limit = f['args_config']['max_speed']
         self.yspeed_limit = f['args_config']['max_speed']
-        self.angular_speed_limit = f['args_config']['max_turn_speed']
+        self.yaw_speed_limit = f['args_config']['max_turn_speed']
         self.zero_vel_count = 0
         self.zero_vel_limit = 5
 
@@ -361,28 +355,60 @@ class JoyTeleop:
         self.repeat_interval = 0.1  
         self.last_repeat_time = 0
 
+        self.last_leg_sent_data = None
         self.last_pt_sent_data = None
-        self.last_roarm_sent_data = None
 
         self.ptPoseState = type('', (), {})()
         self.ptPoseState.x = 0.0
         self.ptPoseState.y = 0.0
 
-        self.mode = 'joint'
-        self.armJointState = type('', (), {})()
-        self.armJointState.base = 0.0
-        self.armJointState.shoulder = 0.0191
-        self.armJointState.elbow = 2.9569
-        self.armJointState.wrist = -1.4053
-        self.armJointState.roll = 0.0
-        self.armJointState.hand = 3.1416
+        self.leg_limits = {
+            0: { 
+                "coxa": { "min": -1.134, "max": 0, "initial": -0.5235 },
+                "femur": { "min": 0, "max": 1.57, "initial": 0.5235 },
+                "tibia": { "min": 0, "max": 3.1415, "initial": 2.619 }
+            },
+            1: { 
+                "coxa": { "min": -0.7853, "max": 0.7853, "initial": 0 },
+                "femur": { "min": 0, "max": 1.57, "initial": 0.5235 },
+                "tibia": { "min": 0, "max": 3.1415, "initial": 2.619 }
+            },
+            2: { 
+                "coxa": { "min": 0, "max": 1.134, "initial": 0.5235 },
+                "femur": { "min": 0, "max": 1.57, "initial": 0.5235 },
+                "tibia": { "min": 0, "max": 3.1415, "initial": 2.619 }
+            },
+            3: { 
+                "coxa": { "min": 0, "max": 1.134, "initial": 0.5235 },
+                "femur": { "min": 0, "max": 1.57, "initial": 0.5235 },
+                "tibia": { "min": 0, "max": 3.1415, "initial": 2.619 }
+            },
+            4: { 
+                "coxa": { "min": -0.7853, "max": 0.7853, "initial": 0 },
+                "femur": { "min": 0, "max": 1.57, "initial": 0.5235 },
+                "tibia": { "min": 0, "max": 3.1415, "initial": 2.619 }
+            },
+            5: { 
+                "coxa": { "min": -1.134, "max": 0, "initial": -0.5235 },
+                "femur": { "min": 0, "max": 1.57, "initial": 0.5235 },
+                "tibia": { "min": 0, "max": 3.1415, "initial": 2.619 }
+            }
+        }
 
-        self.armPoseState = type('', (), {})()
-        self.armPoseState.x = 230
-        self.armPoseState.y = 0
-        self.armPoseState.z = 80
-        self.armPoseState.r = 0.0
-        self.armPoseState.p = 0.0
+        self.legJointState = type('', (), {})()
+        self.legJointState.leg = 0
+
+        self.leg_current_state = {}
+        self.leg_initial_state = {}
+
+        for leg, lim in self.leg_limits.items():
+            self.leg_current_state[leg] = {
+                "coxa":  lim["coxa"]["initial"],
+                "femur": lim["femur"]["initial"],
+                "tibia": lim["tibia"]["initial"],
+            }
+
+            self.leg_initial_state[leg] = self.leg_current_state[leg].copy()
 
     def next_gear(self, current, options):
         if current in options:
@@ -400,28 +426,40 @@ class JoyTeleop:
 
     def show_msg(self, type):
         if type=="speed":
-            print(f"[Gear] speed: {self.speed_gear}")
+            print(f"[Gear] Speed: {self.speed_gear}")
         if type=="led":
-            print(f"[Gear] LED: {self.led_Gear}")
+            print(f"[Gear] LED: {self.led_gear}")
         if type=="mode":
-            print(f"MODE: {self.mode}")
+            print(f"MODE: {self.mode}")            
+        if type=="led":
+            print(f"LEG: {self.legJointState.leg}")  
 
-    def send_cmd_vel(self, linear_x, linear_y, angular_z):
-        if linear_x == 0.0 and angular_z == 0.0:
+    def send_cmd_vel(self, linear_x, linear_y, yaw_z):
+        is_zero = (
+            linear_x == 0.0 and
+            linear_y == 0.0 and
+            yaw_z == 0.0
+        )
+
+        if is_zero:
             self.zero_vel_count += 1
             if self.zero_vel_count > self.zero_vel_limit:
-                return  
+                return
         else:
-            self.zero_vel_count = 0  
-            
-        if linear_x == 0.0:
-            if 0 < angular_z < 0.2:
-                angular_z = 0.2
-            elif -0.2 < angular_z < 0:
-                angular_z = -0.2     
+            self.zero_vel_count = 0
 
-        data = json.dumps({'T': f['cmd_config']['cmd_ros_movition_ctrl'], 'X': linear_x, 'Z': angular_z}) + "\n"
+        data = json.dumps({
+            'T': f['cmd_config']['cmd_movition_ctrl'],
+            'X': linear_x,
+            'Y': linear_y,
+            'Yaw': yaw_z
+        }) + "\n"
+
         self.base_controller.send_command(data.encode())
+        for leg, state in self.leg_initial_state.items():
+            self.leg_current_state[leg]["coxa"]  = state["coxa"]
+            self.leg_current_state[leg]["femur"] = state["femur"]
+            self.leg_current_state[leg]["tibia"] = state["tibia"]
 
     def send_led_ctrl(self, led_value):
         IO4 = max(0, min(led_value, 255))
@@ -444,38 +482,23 @@ class JoyTeleop:
             self.last_pt_sent_data = data     
             self.base_controller.send_command(data.encode()) 
 
-    def send_arm_joint_ctrl(self, armJointState):
-        if module_type == 1:       
-            data = json.dumps({
-                'T': f['cmd_config']['cmd_arm_ctrl'], 
-                'base': armJointState.base, 
-                'shoulder': armJointState.shoulder, 
-                'elbow': armJointState.elbow, 
-                'hand': armJointState.hand,                                 
-                "spd": 0, 
-                "acc": 30
-            }) + "\n"
-            if data == self.last_roarm_sent_data:
-                return
-            self.last_roarm_sent_data = data     
-            self.base_controller.send_command(data.encode()) 
+    def send_leg_joint_ctrl(self):
+        leg_idx = self.legJointState.leg
+        state = self.leg_current_state[leg_idx]
 
-        elif module_type == 3:   
-            data = json.dumps({
-                'T': f['cmd_config']['cmd_arm_ctrl'], 
-                'base': armJointState.base, 
-                'shoulder': armJointState.shoulder, 
-                'elbow': armJointState.elbow, 
-                'wrist': armJointState.wrist, 
-                'roll': armJointState.roll, 
-                'hand': armJointState.hand,                                 
-                "spd": 0, 
-                "acc": 30
-            }) + "\n"
-            if data == self.last_roarm_sent_data:
-                return
-            self.last_roarm_sent_data = data             
-            self.base_controller.send_command(data.encode()) 
+        data = json.dumps({
+            'T': f['cmd_config']['cmd_leg_rad_ctrl'],
+            'leg': leg_idx,
+            'coxa': state["coxa"],
+            'femur': state["femur"],
+            'tibia': state["tibia"],
+        }) + "\n"
+
+        if data == self.last_leg_sent_data:
+            return
+
+        self.last_leg_sent_data = data
+        self.base_controller.send_command(data.encode())
 
     def handle_events(self):
         if self.js_reader.Joy_active:
@@ -490,6 +513,10 @@ class JoyTeleop:
                 joystick_name = joystick_names[0]
                 self.mapping = get_joystick_mapping(joystick_name)    
 
+            x = 0
+            y = 0
+            yaw = 0
+
             val = axis[self.mapping["L2"]]
             l2_pressed = (val != -1.0 and val != 0)
             if l2_pressed and not self.prev_l2_pressed:
@@ -503,31 +530,84 @@ class JoyTeleop:
                 self.show_msg("speed")
             self.prev_l1_pressed = l1_pressed
 
+            r1_pressed = buttons[self.mapping["R1"]] == 1
+            if r1_pressed and not self.prev_r1_pressed:
+                self.mode = 'turn' if self.mode == 'move' else 'move'
+                self.show_msg("mode")
+            self.prev_r1_pressed = r1_pressed
+            
+            hat_x = hats[0][0]
+
+            if self.mode == 'turn':
+                yaw = -hat_x * self.yaw_speed_limit * self.speed_gear
+            else:  # move
+                y = -hat_x * self.yspeed_limit * self.speed_gear
+
             x = hats[0][1] * self.xspeed_limit * self.speed_gear
-            # y = axis[self.mapping["LEFT_STICK_X"]] * self.yspeed_limit * self.speed_gear
-            angular = -hats[0][0] * self.angular_speed_limit * self.angular_Gear
 
             self.send_cmd_vel(
                 max(-self.xspeed_limit, min(self.xspeed_limit, x)),
-                0.0,
-                max(-self.angular_speed_limit, min(self.angular_speed_limit, angular)),
+                max(-self.yspeed_limit, min(self.yspeed_limit, y)),
+                max(-self.yaw_speed_limit, min(self.yaw_speed_limit, yaw)),
             )
 
+            leg_btn_pressed = buttons[self.mapping["LEFT_STICK_CLICK"]] == 1
+            if leg_btn_pressed and not self.prev_leg_btn_pressed:
+                self.legJointState.leg = (self.legJointState.leg + 1) % 6
+                self.show_msg("leg")
+            self.prev_leg_btn_pressed = leg_btn_pressed
+
+            joint_sensitivity = 0.01
+
+            leg_idx = self.legJointState.leg
+            leg_state = self.leg_current_state[leg_idx]
+            leg_limit = self.leg_limits[leg_idx]
+
+            change_joystick_left_x = axis[self.mapping["LEFT_STICK_X"]]
+            change_joystick_left_y = axis[self.mapping["LEFT_STICK_Y"]]
+
+            # ---- coxa (X 轴) ----
+            if abs(change_joystick_left_x) > joint_sensitivity:
+                leg_state["coxa"] -= change_joystick_left_x * joint_sensitivity
+                leg_state["coxa"] = max(
+                    leg_limit["coxa"]["min"],
+                    min(leg_limit["coxa"]["max"], leg_state["coxa"])
+                )
+
+            # ---- femur / tibia (Y 轴) ----
+            if abs(change_joystick_left_y) > joint_sensitivity:
+                if r1_pressed:
+                    # R1 + Y → tibia
+                    leg_state["tibia"] += change_joystick_left_y * joint_sensitivity
+                    leg_state["tibia"] = max(
+                        leg_limit["tibia"]["min"],
+                        min(leg_limit["tibia"]["max"], leg_state["tibia"])
+                    )
+                else:
+                    # Y → femur
+                    leg_state["femur"] += change_joystick_left_y * joint_sensitivity
+                    leg_state["femur"] = max(
+                        leg_limit["femur"]["min"],
+                        min(leg_limit["femur"]["max"], leg_state["femur"])
+                    )
+
+            self.send_leg_joint_ctrl()
+
             led_next_gear_pressed = buttons[self.mapping["Y"]] == 1
-            led_down_gear_pressed = buttons[self.mapping["X"]] == 1 
+            led_down_gear_pressed = buttons[self.mapping["X"]] == 1
 
             current_time = time.time()
 
             if led_next_gear_pressed:
                 if not self.prev_led_next_gear_pressed:
-                    self.led_Gear = self.next_gear(self.led_Gear, self.led_level)
+                    self.led_gear = self.next_gear(self.led_gear, self.led_level)
                     self.show_msg("led")
                     self.y_press_start = current_time
                     self.last_repeat_time = current_time
                 else:
                     if current_time - self.y_press_start >= self.repeat_delay:
                         if current_time - self.last_repeat_time >= self.repeat_interval:
-                            self.led_Gear = self.next_gear(self.led_Gear, self.led_level)
+                            self.led_gear = self.next_gear(self.led_gear, self.led_level)
                             self.show_msg("led")
                             self.last_repeat_time = current_time
             else:
@@ -535,14 +615,14 @@ class JoyTeleop:
 
             if led_down_gear_pressed:
                 if not self.prev_led_down_gear_pressed:
-                    self.led_Gear = self.down_gear(self.led_Gear, self.led_level)
+                    self.led_gear = self.down_gear(self.led_gear, self.led_level)
                     self.show_msg("led")
                     self.x_press_start = current_time
                     self.last_repeat_time = current_time
                 else:
                     if current_time - self.x_press_start >= self.repeat_delay:
                         if current_time - self.last_repeat_time >= self.repeat_interval:
-                            self.led_Gear = self.down_gear(self.led_Gear, self.led_level)
+                            self.led_gear = self.down_gear(self.led_gear, gear_levels)
                             self.show_msg("led")
                             self.last_repeat_time = current_time
             else:
@@ -551,7 +631,7 @@ class JoyTeleop:
             self.prev_led_next_gear_pressed = led_next_gear_pressed
             self.prev_led_down_gear_pressed = led_down_gear_pressed
 
-            led_data = self.led_limit * self.led_Gear
+            led_data = self.led_limit * self.led_gear
             self.send_led_ctrl(led_data)
 
             if module_type == 2:
@@ -572,160 +652,7 @@ class JoyTeleop:
 
                 self.send_pt_joint_ctrl(self.ptPoseState)
 
-            elif module_type == 1 or module_type == 3:
-                joint_sensitivity = 0.01
-                pose_sensitivity = 1
-                threshold = 0.01
-
-                change_joystick_left_x = axis[self.mapping["LEFT_STICK_X"]]
-                change_joystick_left_y = axis[self.mapping["LEFT_STICK_Y"]]
-                change_joystick_left_click = buttons[self.mapping["LEFT_STICK_CLICK"]]
-
-                if (buttons[self.mapping["LEFT_STICK_CLICK"]] and axis[self.mapping["R2"]] == -1.0):
-                    change_joystick_left_click = -1
-                elif (buttons[self.mapping["LEFT_STICK_CLICK"]]):
-                    change_joystick_left_click = 1
-                else:
-                    change_joystick_left_click = 0
-
-                change_joystick_right_x = axis[self.mapping["RIGHT_STICK_X"]]
-                change_joystick_right_y = axis[self.mapping["RIGHT_STICK_Y"]]
-                change_joystick_right_click = buttons[self.mapping["RIGHT_STICK_CLICK"]]
-
-                if (buttons[self.mapping["A"]]):
-                    deltaHand = 0.005
-                elif (buttons[self.mapping["B"]]):
-                    deltaHand = -0.005
-                else:
-                    deltaHand = 0
-
-                self.armJointState.hand += deltaHand
-
-                r1_pressed = buttons[self.mapping["R1"]] == 1
-                if r1_pressed and not self.prev_r1_pressed:
-                    self.mode = 'joint'
-                    if self.mode == 'joint':
-                        self.mode = 'pose'
-                    else:
-                        self.mode = 'joint'
-                    self.show_msg("mode")
-                self.prev_r1_pressed = r1_pressed
-
-                if self.mode == 'pose': 
-                    if abs(change_joystick_left_x) > threshold: 
-                        # self.armPoseState.y -= pose_sensitivity * change_joystick_left_x
-                        if r1_pressed:
-                            self.armPoseState.z -= pose_sensitivity * change_joystick_left_x
-                        else:
-                            self.armPoseState.y -= pose_sensitivity * change_joystick_left_x
-
-                    if abs(change_joystick_left_y) > threshold: 
-                        self.armPoseState.x -= pose_sensitivity * change_joystick_left_y
-                    
-                    # self.armPoseState.z -= pose_sensitivity * change_joystick_left_click;
-
-                    if abs(change_joystick_right_x) > threshold: 
-                        self.armPoseState.r += joint_sensitivity * change_joystick_right_x
-                    if abs(change_joystick_right_y) > threshold: 
-                        self.armPoseState.p -= joint_sensitivity * change_joystick_right_y
-                    
-                    if module_type == 1 :
-                        angles = roarm.compute_joint_rad_by_pos(
-                            self.armPoseState.x,
-                            self.armPoseState.y,
-                            self.armPoseState.z,
-                            self.armJointState.hand
-                        )
-
-                        self.armJointState.base = angles[0]
-                        self.armJointState.shoulder = angles[1]	
-                        self.armJointState.elbow = angles[2]
-
-                    elif module_type == 3 :
-                        angles = roarm.compute_joint_rad_by_pos(
-                            self.armPoseState.x,
-                            self.armPoseState.y,
-                            self.armPoseState.z,
-                            self.armPoseState.r,
-                            self.armPoseState.p,
-                            self.armJointState.hand
-                        )
-
-                        self.armJointState.base = angles[0]
-                        self.armJointState.shoulder = angles[1]	
-                        self.armJointState.elbow = angles[2]
-                        self.armJointState.wrist = angles[3]	
-                        self.armJointState.roll = angles[4]	
-                        self.armJointState.hand = angles[5]                    
-                
-                elif self.mode == 'joint': 
-                    if abs(change_joystick_left_x) > threshold: 
-                        self.armJointState.base -= joint_sensitivity * change_joystick_left_x
-                    if abs(change_joystick_left_y) > threshold: 
-                        # self.armJointState.shoulder -= joint_sensitivity * change_joystick_left_y
-                        if r1_pressed:
-                            self.armJointState.elbow -= joint_sensitivity * change_joystick_left_y
-                        else:
-                            self.armJointState.shoulder -= joint_sensitivity * change_joystick_left_y
-
-                    # self.armJointState.elbow += joint_sensitivity * change_joystick_left_click;
-
-                    if abs(change_joystick_right_x) > threshold: 
-                        self.armJointState.roll += joint_sensitivity * change_joystick_right_x
-                    if abs(change_joystick_right_y) > threshold: 
-                        self.armJointState.wrist -= joint_sensitivity * change_joystick_right_y
-
-                self.armJointState.base = max(-math.pi, min(math.pi, self.armJointState.base))
-                self.armJointState.shoulder = max(-math.pi/2, min(math.pi/2, self.armJointState.shoulder))	
-                self.armJointState.elbow = max(-math.pi/6, min(math.pi, self.armJointState.elbow))	
-                self.armJointState.wrist = max(-math.pi/2, min(math.pi/2, self.armJointState.wrist))	
-                self.armJointState.roll = max(-math.pi, min(math.pi, self.armJointState.roll))	
-                self.armJointState.hand = max(math.pi/2, min(math.pi, self.armJointState.hand))	
-
-                if module_type == 1 :
-                    pos = roarm.compute_pos_by_joint_rad(
-                            self.armJointState.base,
-                            self.armJointState.shoulder,
-                            self.armJointState.elbow,	
-                            self.armJointState.hand)
-
-                    self.armPoseState.x = pos[0]
-                    self.armPoseState.y = pos[1]	
-                    self.armPoseState.z = pos[2] 
-
-                elif module_type == 3 :
-                    pos = roarm.compute_pos_by_joint_rad(
-                            self.armJointState.base,
-                            self.armJointState.shoulder,
-                            self.armJointState.elbow,
-                            self.armJointState.wrist,	
-                            self.armJointState.roll,	
-                            self.armJointState.hand)
-
-                    self.armPoseState.x = pos[0]
-                    self.armPoseState.y = pos[1]	
-                    self.armPoseState.z = pos[2]
-                    self.armPoseState.r = pos[3]	
-                    self.armPoseState.p = pos[4]	
-
-                if change_joystick_right_click:
-                    self.armPoseState.x = 230
-                    self.armPoseState.y = 0
-                    self.armPoseState.z = 80
-                    self.armPoseState.r = 0.0
-                    self.armPoseState.p = 0.0
-
-                    self.armJointState.base = 0.0
-                    self.armJointState.shoulder = 0.0191
-                    self.armJointState.elbow = 2.9569
-                    self.armJointState.wrist = -1.4053
-                    self.armJointState.roll = 0.0
-                    self.armJointState.hand = 3.1416
-
-                self.send_arm_joint_ctrl(self.armJointState)
-
 def main():
-    set_version_flag = False
     js_reader = JoystickReader()
     js_reader.start()
     
@@ -736,10 +663,6 @@ def main():
     try:
         while True:
             if js_reader.Joy_active:
-                if not set_version_flag:
-                    data = json.dumps({'T': 900, 'main': f['base_config']['main_type'], 'module': f['base_config']['module_type']}) + "\n"
-                    base_controller.send_command(data.encode()) 
-                    set_version_flag = True
                 joy_ctrl.handle_events()  
             time.sleep(0.05)            
 

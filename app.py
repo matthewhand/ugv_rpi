@@ -33,7 +33,7 @@ if is_raspberry_pi5():
     base = BaseController('/dev/ttyAMA0', 115200)
 else:
     base = BaseController('/dev/serial0', 115200)
-    
+
 threading.Thread(target=lambda: base.breath_light(15), daemon=True).start()
 
 # config file.
@@ -73,11 +73,6 @@ cmd_actions = {
     f['fb']['cv_movtion_mode']: lambda mode: cvf.set_movtion_lock(mode),
 
     f['fb']['led_mode']: lambda mode: cvf.head_light_ctrl(mode),
-
-    f['code']['release']: lambda mode: base.bus_servo_torque_lock(255, 0),
-    f['code']['s_panid']: lambda mode: base.bus_servo_id_set(255, 2),
-    f['code']['s_tilid']: lambda mode: base.bus_servo_id_set(255, 1),
-    f['code']['set_mid']: lambda mode: base.bus_servo_mid_set(255),
 
     f['fb']['base_light']: lambda mode: base.lights_ctrl(mode, base.head_light_status),
     f['code']['base_ct']: lambda mode: base.base_lights_ctrl(),
@@ -151,28 +146,18 @@ def delete_video():
 
 # set product version
 def set_version(input_main, input_module):
-    base.base_json_ctrl({"T":900,"main":input_main,"module":input_module})
     if input_main == 1:
-        cvf.info_update("RaspRover", (0,255,255), 0.36)
-    elif input_main == 2:
-        cvf.info_update("UGV Rover", (0,255,255), 0.36)
-    elif input_main == 3:
-        cvf.info_update("UGV Beast", (0,255,255), 0.36)
+        cvf.info_update("HexArth", (0,255,255), 0.36)
     if input_module == 0:
         cvf.info_update("No Module", (0,255,255), 0.36)
-    elif input_module == 1:
-        cvf.info_update("RoArm M2", (0,255,255), 0.36)
     elif input_module == 2:
         cvf.info_update("PT", (0,255,255), 0.36)
-    elif input_module == 3:
-        cvf.info_update("RoArm M3", (0,255,255), 0.36)
 
 # main cmdline for robot ctrl
 def cmdline_ctrl(args_string):
     if not args_string:
         return
     args = args_string.split()
-    # base -c {"T":1,"L":0.5,"R":0.5}
     if args[0] == 'base':
         if args[1] == '-c' or args[1] == '--cmd':
             base.base_json_ctrl(json.loads(args[2]))
@@ -281,17 +266,10 @@ def cmdline_ctrl(args_string):
         main_type = int(args[1][0])
         module_type = int(args[1][1])
         if main_type == 1:
-            f['base_config']['robot_name'] = "RaspRover"
-            f['args_config']['max_speed'] = 0.65
-            f['args_config']['slow_speed'] = 0.3
-        elif main_type == 2:
-            f['base_config']['robot_name'] = "UGV Rover"
-            f['args_config']['max_speed'] = 1.3
-            f['args_config']['slow_speed'] = 0.2
-        elif main_type == 3:
-            f['base_config']['robot_name'] = "UGV Beast"
-            f['args_config']['max_speed'] = 1.0
-            f['args_config']['slow_speed'] = 0.2
+            f['base_config']['robot_name'] = "HexArth"
+            f['args_config']['max_speed'] = 0.07
+            f['args_config']['max_turn_speed'] = 0.6
+            f['args_config']['slow_speed'] = 0.025
         f['base_config']['main_type'] = main_type
         f['base_config']['module_type'] = module_type
         with open(thisPath + '/config.yaml', "w") as yaml_file:
@@ -379,7 +357,6 @@ def handle_socket_json(json):
 
 # info update single
 def update_data_websocket_single():
-    # {'T':1001,'L':0,'R':0,'r':0,'p':0,'v': 11,'pan':0,'tilt':0}
     try:
         socket_data = {
             f['fb']['picture_size']:si.pictures_size,
@@ -462,10 +439,6 @@ def base_data_loop():
         
         time.sleep(0.025)
 
-@socketio.on('connect', namespace='/arm_state_update')
-def connect_arm():
-    print("Client connected to /arm_state_update")
-
 @socketio.on('message', namespace='/ctrl')
 def handle_socket_cmd(message):
     try:
@@ -506,10 +479,8 @@ class JoyCtrlThread(threading.Thread):
 # commandline on boot
 def cmd_on_boot():
     cmd_list = [
-        'base -c {"T":142,"cmd":50}',   # set feedback interval
-        'base -c {"T":131,"cmd":1}',    # serial feedback flow on
-        'base -c {"T":143,"cmd":0}',    # serial echo off
-        'base -c {"T":4,"cmd":0}',      # select the module - 0:None 1:RoArm-M2-S 2:Gimbal
+        'base -c {"T":130}',    # info feedback
+        'base -c {"T":605,"cmd":2}',    # serial flow
         'base -c {"T":300,"mode":0,"mac":"EF:EF:EF:EF:EF:EF"}',  # the base won't be ctrl by esp-now broadcast cmd, but it can still recv broadcast megs.
         'send -a -b'    # add broadcast mac addr to peer
     ]
@@ -554,12 +525,8 @@ if __name__ == "__main__":
     joy_thread = JoyCtrlThread()
     joy_thread.start()
 
-    # pt/arm looks forward
-    if f['base_config']['module_type'] == 1:
-        base.base_json_ctrl({"T":102,"base": 0,"shoulder": 0.0191,"elbow": 2.9569,"hand": 3.1415,"spd": 0,"acc": 30})
-    elif f['base_config']['module_type'] == 3:
-        base.base_json_ctrl({"T":102,"base": 0,"shoulder": 0.0191,"elbow": 2.9569,"wrist": -1.4053,"roll": 0,"hand": 3.1415,"spd": 0,"acc": 30})
-    elif f['base_config']['module_type'] == 2:
+    # pt looks forward
+    if f['base_config']['module_type'] == 2:
         base.gimbal_ctrl(0, 0, 200, 10)
 
     # run the main web app

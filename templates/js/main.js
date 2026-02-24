@@ -1,4 +1,3 @@
-import { roarm_m2, roarm_m3 } from './roarm_solver.js';
 import { MediaMTXWebRTCReader } from '../libs/webrtc_reader.js';
 import { 
     socketAudio, 
@@ -32,10 +31,10 @@ fetch(fetchConfig)
     try {
         const yamlObject = jsyaml.load(yamlText);
         console.log(yamlObject);
-        config.cmd_ros_movition_ctrl = yamlObject.cmd_config.cmd_ros_movition_ctrl;
+        config.cmd_movition_ctrl = yamlObject.cmd_config.cmd_movition_ctrl;
+        config.cmd_leg_rad_ctrl = yamlObject.cmd_config.cmd_leg_rad_ctrl;
         config.cmd_gimbal_steady = yamlObject.cmd_config.cmd_gimbal_steady;
         config.cmd_gimbal_ctrl = yamlObject.cmd_config.cmd_gimbal_ctrl;
-        config.cmd_arm_ctrl = yamlObject.cmd_config.cmd_arm_ctrl;
         config.cmd_set_led_pwm = yamlObject.cmd_config.cmd_set_led_pwm;
 
         config.max_speed = yamlObject.args_config.max_speed;
@@ -74,11 +73,6 @@ fetch(fetchConfig)
         config.led_off = yamlObject.code.led_off;
         config.led_aut = yamlObject.code.led_aut;
         config.led_ton = yamlObject.code.led_ton;
-
-        config.s_panid = yamlObject.code.s_panid;
-        config.release = yamlObject.code.release;
-        config.set_mid = yamlObject.code.set_mid;
-        config.s_tilid = yamlObject.code.s_tilid;
 
         config.detect_type = yamlObject.fb.detect_type;
         config.led_mode = yamlObject.fb.led_mode;
@@ -141,13 +135,9 @@ window.head_ct = config.head_ct;
 
 window.speedRateCtrl = speedRateCtrl;
 window.captureAndUpdate = captureAndUpdate;
-window.confirmSetPanID = confirmSetPanID;
-window.confirmRelease = confirmRelease;
-window.confirmMiddleSet = confirmMiddleSet;
-window.confirmSetTiltID = confirmSetTiltID;
 window.cmdSend = cmdSend;
-window.toggleArmMode = toggleArmMode;
-window.togglePressMode = togglePressMode;
+window.changeMode = changeMode;
+window.toggleMode = toggleMode;
 window.lookAhead = lookAhead;
 window.steadyCtrl = steadyCtrl;
 
@@ -759,7 +749,7 @@ socketJson.emit('json', { 'T': 1, 'L': 0, 'R': 0 })
 socketCtrl.emit('request_data');
 
 var cv_heartbeat_stop_flag = false;
-let armModeInitialized = false;
+let modeInitialized = false;
 
 socketCtrl.on('update', function (data) {
     if (data[config.detect_type] == 0) return;
@@ -919,40 +909,15 @@ socketCtrl.on('update', function (data) {
             }
         }
 
-        if (!armModeInitialized) {
-            toggleArmMode();
-            armModeInitialized = true;
+        if (!modeInitialized) {
+            toggleMode();
+            modeInitialized = true;
         }
 
     } catch (e) {
         console.log(e);
     }
 });
-
-// setting page
-function confirmSetPanID() {
-    if (confirm("Make sure that you have already DISCONNECT the wire of the Tilt Servo")) {
-        cmdSend(config.s_panid, 0);
-    }
-}
-
-function confirmRelease() {
-    if (confirm("You will unlock the torque lock, then you can manually adjust the angle of the two servos.")) {
-        cmdSend(config.release, 0);
-    }
-}
-
-function confirmMiddleSet() {
-    if (confirm("Set the current position as the middle position.")) {
-        cmdSend(config.set_mid, 0);
-    }
-}
-
-function confirmSetTiltID() {
-    if (confirm("If you didn't disconnect the Tilt Servo in step 1, then both servo IDs will be set to 2 after you click the [Set Pan ID] button. Only in this case, you need to click [Set Tilt ID] to restore both servo IDs to 1, then repeat the entire setup process!")) {
-        cmdSend(config.s_tilid, 0);
-    }
-}
 
 function cmdFill(rawInfo, fillInfo) {
     document.getElementById(rawInfo).value = document.getElementById(fillInfo).innerHTML;
@@ -1015,86 +980,74 @@ function cmdJsonCmd(jsonData) {
     }
 }
 
-let armMode = 'joint';
-let pressMode = 'increase';
-
-let leftJoystick = null;
+let mode = 'move';
 let rightJoystick = null;
+const modeToggleEl = document.getElementById('mode_toggle');
 
-const armModeToggleEl = document.getElementById('arm_mode_toggle');
+function changeMode() {
+    if (mode === 'move') {
+        mode = 'turn';
+    } else {
+        mode = 'move';
+    } 
+    
+    if (modeToggleEl) {
+        modeToggleEl.textContent = capitalize(mode);
+    }    
+}
 
-function toggleArmMode() {
-    if (leftJoystick) {
-        leftJoystick.destroy();
-        leftJoystick = null;
-    }
+function toggleMode() {
     if (rightJoystick) {
         rightJoystick.destroy();
         rightJoystick = null;
     }
-    if (slider && sliderText) {
+    if (mode === 'move') {
+        mode = 'turn';
+    } else {
+        mode = 'move';
+    } 
+    
+    if (modeToggleEl) {
+        modeToggleEl.textContent = capitalize(mode);
+    } 
+
+    if (slider && sliderText) {      
         if(config.module_type === 2){
             sliderText.textContent  = "Y:";
             slider.min = -0.7854;
             rightJoystick = createJoystick('joystick_right', 'x', 'y', 'ahead_on');
-        }else if(config.module_type === 1 || config.module_type === 3 ){
-            sliderText.textContent  = "G:";
-            if (armMode === 'joint') {
-                armMode = 'pose';
-                leftJoystick = createJoystick('joystick_left', 'x', 'y', 'z');
-                rightJoystick = createJoystick('joystick_right', 'p', 'r', 'ahead_on');
-            } else {
-                armMode = 'joint';
-                leftJoystick = createJoystick('joystick_left', 'base', 'shoulder', 'elbow');
-                rightJoystick = createJoystick('joystick_right', 'roll', 'wrist', 'ahead_on');
-            }        
         }
     }    
-
-    if (armModeToggleEl) {
-        armModeToggleEl.textContent = capitalize(armMode);
-    }
 }
 
 function capitalize(str) {
     return str.charAt(0).toUpperCase() + str.slice(1);
 }
 
-function togglePressMode() {
-    if (pressMode === 'increase') {
-        pressMode = 'decrease';
-    } else {
-        pressMode = 'increase';
-    }
-
-    document.getElementById('press_mode_toggle').textContent = capitalize(pressMode);
-}
-
 let ledPwmState = { io4: 0, io5: 0 };
 let ptPoseState = { x: 0, y: 0 };
-let armPoseState = { x: 230, y: 0, z: 80, r: 0, p: 0 };
-let armJointState = { base: 0, shoulder: 0.0191, elbow: 2.9569, wrist: -1.4053, roll: 0, hand: 3.1416 };
-let armlastJointState = { base: 0, shoulder: 0.0191, elbow: 2.9569, wrist: -1.4053, roll: 0, hand: 3.1416 };
-let rosBaseSpeedState = { x: 0, z: 0 };
+let baseSpeedState = { x: 0, y: 0, yaw: 0 };
+let legJointState = { leg: 0, coxa: 0, femur: 0, tibia: 0};
 
 ledPwmState = createStateManager(ledPwmState, ledPwmCtrl);
-armJointState = createStateManager(armJointState, armJointCtrl);
-armPoseState = createStateManager(armPoseState, armPoseCtrl);
 ptPoseState = createStateManager(ptPoseState, ptPoseCtrl);
-rosBaseSpeedState = createSpeedStateManager(rosBaseSpeedState, rosBaseSpeedCtrl);
+baseSpeedState = createSpeedStateManager(baseSpeedState, baseSpeedCtrl);
+legJointState = createStateManager(legJointState, legJointCtrl);
 
 function createSpeedStateManager(initialState, onChange) {
-  const speedProps = new Set(['x', 'z']);
+  const speedProps = new Set(['x', 'y', 'yaw']);
 
   const handler = {
     set(target, prop, value) {
       const isSpeedProp = speedProps.has(prop);
       const changed = target[prop] !== value;
 
+      // 是否是 0 速度（针对当前 prop）
       const isZeroSpeed =
         isSpeedProp && value === 0 &&
         target.x === 0 &&
-        target.z === 0 ;
+        target.y === 0 &&
+        target.yaw === 0;
 
       if (changed || (isSpeedProp && !isZeroSpeed)) {
         target[prop] = value;
@@ -1162,9 +1115,7 @@ const sliderText = document.getElementById('slider_text');
 
 if (slider && sliderText) {
   slider.addEventListener('input', (e) => {
-    if(config.module_type === 1 || config.module_type === 3){
-        armJointState.hand = format(3.1416 - e.target.value);
-    }else if(config.module_type === 2){
+    if(config.module_type === 2){
         ptPoseState.y = radToDeg(e.target.value);
     }
   });
@@ -1246,36 +1197,6 @@ function createJoystick(containerId, axisX, axisY, clickCenter = null) {
                     callback: lookAhead,
                 } : null
             });
-        } else if (config.module_type === 1 || config.module_type === 3) {
-            if (armMode === 'joint') {
-                handleVectorUpdate({
-                    data,
-                    axisX,
-                    axisY,
-                    stateObject: armJointState,
-                    scale: 0.1,
-                    transformVector: (v) => [-v.x, v.y],
-                    clickCenterOptions: clickCenter ? {
-                        factorPerSecond: 0.1,
-                        stateObject: armJointState,
-                        callback: lookAhead,
-                    } : null
-                });
-            } else if (armMode === 'pose') {
-                handleVectorUpdate({
-                    data,
-                    axisX,
-                    axisY,
-                    stateObject: armPoseState,
-                    scale: 20,
-                    transformVector: (v) => [v.y, -v.x],
-                    clickCenterOptions: clickCenter ? {
-                        factorPerSecond: 50,
-                        stateObject: armPoseState,
-                        callback: lookAhead,
-                    } : null
-                });
-            }
         }
     });
 
@@ -1328,16 +1249,8 @@ function createJoystick(containerId, axisX, axisY, clickCenter = null) {
 
                         if (!clickCenterAccumulatorTimer) {
                             clickCenterAccumulatorTimer = setInterval(() => {
-                                const now = Date.now();
-                                const dt = (now - pressStartTime) / 1000;
-                                pressStartTime = now;
-
-                                const direction = (pressMode === 'increase') ? 1 : -1;
                                 if (clickCenter === "ahead_on") {
                                     clickCenterOptions.callback();
-                                } else {
-                                    const increment = direction * clickCenterOptions.factorPerSecond * dt;
-                                    clickCenterOptions.stateObject[clickCenter] += increment;
                                 }
                             }, 30);
                         }
@@ -1367,179 +1280,11 @@ function createJoystick(containerId, axisX, axisY, clickCenter = null) {
 }
 
 function lookAhead() {   
-    if (config.module_type === 1 || config.module_type === 3) {
-        armJointState.base = 0;
-        armJointState.shoulder = 0.0191;
-        armJointState.elbow = 2.9569;
-        armJointState.wrist = -1.4053;
-        armJointState.roll = 0;
-        armJointState.hand = 3.1416;
-        if (slider) { slider.value = 3.1416 - armJointState.hand;}
-    }else if (config.module_type === 2 ) {
+    if (config.module_type === 2 ) {
         ptPoseState.x = 0;
         ptPoseState.y = 0;
         if (slider) { slider.value = 0;}
     }
-}
-
-let updatingJoint = false;
-
-function armJointCtrl() {
-    if (updatingJoint) return;
-
-    const clamp = (val, min, max) => Math.max(min, Math.min(max, val));
-
-    const limits = {
-        base: [-Math.PI, Math.PI],
-        shoulder: [-Math.PI / 2, Math.PI / 2],
-        elbow: [-Math.PI / 6, Math.PI],
-        wrist: [-Math.PI / 2, Math.PI / 2],
-        roll: [-Math.PI, Math.PI],
-        hand: [Math.PI / 2, Math.PI]
-    };
-
-    const clampedState = {};
-    for (let joint in limits) {
-        if (armJointState.hasOwnProperty(joint)) {
-            const [minVal, maxVal] = limits[joint];
-            clampedState[joint] = clamp(armJointState[joint], minVal, maxVal);
-        }
-    }
-
-    const isInvalid = Object.values(clampedState).some(v => isNaN(v));
-    const jointToSend = isInvalid ? armlastJointState : clampedState;
-
-    if (!isInvalid) {
-        updatingJoint = true;
-        for (let joint in jointToSend) {
-            armJointState[joint] = jointToSend[joint];  
-        }
-        armlastJointState = { ...jointToSend };
-        updatingJoint = false;
-    } else {
-        console.warn("Invalid joint value detected, reverting to last valid joint state.");
-        return;
-    }
-
-    const poseRaw = armPoseState._raw;
-    if (config.module_type === 1) {
-        cmdJsonCmd({
-            T: config.cmd_arm_ctrl,
-            base: format(jointToSend.base),
-            shoulder: format(jointToSend.shoulder),
-            elbow: format(jointToSend.elbow),
-            hand: format(jointToSend.hand),
-            spd: 0,
-            acc: 30
-        });
-        [poseRaw.x, poseRaw.y, poseRaw.z] = roarm_m2.computePosbyJointRad(
-            jointToSend.base,
-            jointToSend.shoulder,
-            jointToSend.elbow,
-            jointToSend.hand
-        );
-    }else if (config.module_type === 3) {
-        cmdJsonCmd({
-            T: config.cmd_arm_ctrl,
-            base: format(jointToSend.base),
-            shoulder: format(jointToSend.shoulder),
-            elbow: format(jointToSend.elbow),
-            wrist: format(jointToSend.wrist),
-            roll: format(jointToSend.roll),
-            hand: format(jointToSend.hand),
-            spd: 0,
-            acc: 30
-        });
-        [poseRaw.x, poseRaw.y, poseRaw.z, poseRaw.r, poseRaw.p] = roarm_m3.computePosbyJointRad(
-            jointToSend.base,
-            jointToSend.shoulder,
-            jointToSend.elbow,
-            jointToSend.wrist,
-            jointToSend.roll,
-            jointToSend.hand
-        );       
-    }
-
-    updatePanTiltUI(
-        radToDeg(jointToSend.base),
-        180 - radToDeg(jointToSend.hand)
-    );
-}
-
-let updatingPose = false;
-
-function armPoseCtrl() {
-    if (updatingPose) return;
-    updatingPose = true;
-
-    if (config.module_type === 1) {
-        roarm_m2.setEEMode(0);
-
-        let jointAngles = roarm_m2.computeJointRadbyPos(
-            armPoseState.x,
-            armPoseState.y,
-            armPoseState.z,
-            armJointState.hand
-        );
-
-        if (!roarm_m2.getNanIK()) {
-            armJointState.base = format(jointAngles[0]);
-            armJointState.shoulder = format(jointAngles[1]);
-            armJointState.elbow = format(jointAngles[2]);
-            armJointState.hand = format(armJointState.hand);
-
-            armlastJointState = {
-                base: jointAngles[0],
-                shoulder: jointAngles[1],
-                elbow: jointAngles[2],
-                hand: jointAngles[5] !== undefined ? jointAngles[5] : armJointState.hand,
-            };
-
-        } else {
-            console.warn("Invalid IK solution. Reverting to last joint state.");
-            armJointState.base = format(armlastJointState.base);
-            armJointState.shoulder = format(armlastJointState.shoulder);
-            armJointState.elbow = format(armlastJointState.elbow);
-            armJointState.hand = format(armJointState.hand);
-        }
-    } else if (config.module_type === 3) {
-        let jointAngles = roarm_m3.computeJointRadbyPos(
-            armPoseState.x,
-            armPoseState.y,
-            armPoseState.z,
-            armPoseState.r,
-            armPoseState.p,
-            armJointState.hand
-        );
-        if (!roarm_m3.getNanIK()) {
-            armJointState.base = format(jointAngles[0]);
-            armJointState.shoulder = format(jointAngles[1]);
-            armJointState.elbow = format(jointAngles[2]);
-            armJointState.wrist = format(jointAngles[3]);
-            armJointState.roll = format(jointAngles[4]);
-            armJointState.hand = format(armJointState.hand);
-
-            armlastJointState = {
-                base: jointAngles[0],
-                shoulder: jointAngles[1],
-                elbow: jointAngles[2],
-                wrist: jointAngles[3],
-                roll: jointAngles[4],
-                hand: jointAngles[5] !== undefined ? jointAngles[5] : armJointState.hand,
-            };
-
-        } else {
-            console.warn("Invalid IK solution. Reverting to last joint state.");
-            armJointState.base = format(armlastJointState.base);
-            armJointState.shoulder = format(armlastJointState.shoulder);
-            armJointState.elbow = format(armlastJointState.elbow);
-            armJointState.wrist = format(armlastJointState.wrist);
-            armJointState.roll = format(armlastJointState.roll);            
-            armJointState.hand = format(armJointState.hand);
-        }
-    }
-
-    updatingPose = false;
 }
 
 let updatingPt = false;
@@ -1608,7 +1353,7 @@ function steadyCtrl(inputCmd) {
     }
 }
 
-let updatingRosSpeed = false;
+let updatingSpeed = false;
 let speed_rate = 0.3;
 
 function speedRateCtrl(inputRate) {
@@ -1625,21 +1370,22 @@ function speedRateCtrl(inputRate) {
     }
 }
 
-function rosBaseSpeedCtrl() {
-    if (updatingRosSpeed) return;
+function baseSpeedCtrl() {
+    if (updatingSpeed) return;
 
     const clamp = (val, min, max) => Math.max(min, Math.min(max, val));
 
     const limits = {
-        x: [-1.5, 1.5],
-        z: [-3.1416, 3.1416],
+        x: [-0.07, 0.07],
+        y: [-0.07, 0.07],
+        yaw: [-0.6, 0.6],
     };
 
     const clampedState = {};
     for (let axis in limits) {
-        if (Object.prototype.hasOwnProperty.call(rosBaseSpeedState, axis)) {
+        if (Object.prototype.hasOwnProperty.call(baseSpeedState, axis)) {
             const [minVal, maxVal] = limits[axis];
-            clampedState[axis] = clamp(rosBaseSpeedState[axis], minVal, maxVal);
+            clampedState[axis] = clamp(baseSpeedState[axis], minVal, maxVal);
         }
     }
 
@@ -1649,19 +1395,23 @@ function rosBaseSpeedCtrl() {
         return;
     }
 
-    updatingRosSpeed = true;
+    updatingSpeed = true;
 
     for (let axis in clampedState) {
-        rosBaseSpeedState[axis] = clampedState[axis];
+        baseSpeedState[axis] = clampedState[axis];
     }
 
     cmdJsonCmd({
-        T: config.cmd_ros_movition_ctrl,
-        X: clampedState.x,
-        Z: clampedState.z,
+        T: config.cmd_movition_ctrl,
+        X: clampedState.x, 
+        Y: clampedState.y, 
+        Yaw: clampedState.yaw,
     });
 
-    updatingRosSpeed = false;
+    legCurrentState = JSON.parse(JSON.stringify(legInitialState));
+    updateJointUI();
+
+    updatingSpeed = false;
     heartbeat_send_flag = true;
 }
 
@@ -1673,11 +1423,17 @@ document.querySelectorAll(
 
     const sendCmd = () => {
         const x_dir = parseFloat(btn.dataset.x || 0);
-        const z_dir = parseFloat(btn.dataset.z || 0);
+        const y_dir = parseFloat(btn.dataset.y || 0);
 
-        rosBaseSpeedState.x = x_dir * config.max_speed * speed_rate;
-        rosBaseSpeedState.z = z_dir * config.max_turn_speed * speed_rate;
-    
+        baseSpeedState.x = x_dir * config.max_speed * speed_rate;
+
+        if (mode === 'move') {
+            baseSpeedState.y = y_dir * config.max_speed * speed_rate;
+            baseSpeedState.yaw = 0;
+        } else if (mode === 'turn') {
+            baseSpeedState.y = 0;
+            baseSpeedState.yaw = y_dir * config.max_turn_speed * speed_rate;
+        }
         heartbeat_send_flag = true;
     };
 
@@ -1691,10 +1447,11 @@ document.querySelectorAll(
         clearInterval(moveTimer);
         moveTimer = null;
 
-        rosBaseSpeedState.x = 0.0;
-        rosBaseSpeedState.z = 0.0;
+        baseSpeedState.x = 0;
+        baseSpeedState.y = 0;
+        baseSpeedState.yaw = 0;
 
-        console.log('stop', rosBaseSpeedState);
+        console.log('stop', baseSpeedState);
     };
 
     btn.addEventListener('mousedown', onDown);
@@ -1706,11 +1463,190 @@ document.querySelectorAll(
     btn.addEventListener('touchcancel', onUp);
 });
 
+
+let updatingJoint = false;
+
+const legLimits = {
+    0: { 
+        coxa: { min: -1.134, max: 0, initial: -0.5235 },
+        femur: { min: 0, max: 1.57, initial: 0.5235 },
+        tibia: { min: 0, max: 3.1415, initial: 2.619 }
+    },
+    1: { 
+        coxa: { min: -0.7853, max: 0.7853, initial: 0 },
+        femur: { min: 0, max: 1.57, initial: 0.5235 },
+        tibia: { min: 0, max: 3.1415, initial: 2.619 }
+    },
+    2: { 
+        coxa: { min: 0, max: 1.134, initial: 0.5235 },
+        femur: { min: 0, max: 1.57, initial: 0.5235 },
+        tibia: { min: 0, max: 3.1415, initial: 2.619 }
+    },
+    3: { 
+        coxa: { min: 0, max: 1.134, initial: 0.5235 },
+        femur: { min: 0, max: 1.57, initial: 0.5235 },
+        tibia: { min: 0, max: 3.1415, initial: 2.619 }
+    },
+    4: { 
+        coxa: { min: -0.7853, max: 0.7853, initial: 0 },
+        femur: { min: 0, max: 1.57, initial: 0.5235 },
+        tibia: { min: 0, max: 3.1415, initial: 2.619 }
+    },
+    5: { 
+        coxa: { min: -1.134, max: 0, initial: -0.5235 },
+        femur: { min: 0, max: 1.57, initial: 0.5235 },
+        tibia: { min: 0, max: 3.1415, initial: 2.619 }
+    }
+};
+
+let legCurrentState = {};
+let legInitialState = {};
+for (let leg = 0; leg < 6; leg++) {
+    const lim = legLimits[leg];
+    legCurrentState[leg] = {
+        coxa: lim.coxa.initial,
+        femur: lim.femur.initial,
+        tibia: lim.tibia.initial
+    };
+    legInitialState[leg] = {
+        coxa: lim.coxa.initial,
+        femur: lim.femur.initial,
+        tibia: lim.tibia.initial
+    };
+}
+
+const legSelect = document.getElementById('leg-selection');
+let currentLeg = 0;
+
+if(legSelect){
+    legSelect.addEventListener('change', () => {
+    currentLeg = parseInt(legSelect.value);
+    console.log('Current leg:', currentLeg);
+    legJointState.leg = currentLeg;
+    updateJointUI();
+});
+}
+
+function updateJointUI() {
+    const state = legCurrentState[legJointState.leg];
+    const limits = legLimits[legJointState.leg];
+
+    legSelect.value = String(legJointState.leg);
+
+    const coxaLabel  = document.getElementById('coxa-val');
+    const femurLabel = document.getElementById('femur-val');
+    const tibiaLabel = document.getElementById('tibia-val');
+
+    coxaLabel.textContent  = state.coxa.toFixed(3);
+    femurLabel.textContent = state.femur.toFixed(3);
+    tibiaLabel.textContent = state.tibia.toFixed(3);
+
+    coxaLabel.style.color  = (state.coxa  === limits.coxa.min || state.coxa  === limits.coxa.max)  ? 'red' : '#4FF5C0';
+    femurLabel.style.color = (state.femur === limits.femur.min || state.femur === limits.femur.max) ? 'red' : '#4FF5C0';
+    tibiaLabel.style.color = (state.tibia === limits.tibia.min || state.tibia === limits.tibia.max) ? 'red' : '#4FF5C0';
+}
+
+function clampJointValue(joint, delta) {
+    const limits = legLimits[joint.leg];
+    if (!limits) return delta;
+
+    if (!legCurrentState[joint.leg]) {
+        legCurrentState[joint.leg] = {
+            coxa: limits.coxa.initial,
+            femur: limits.femur.initial,
+            tibia: limits.tibia.initial
+        };
+    }
+
+    const curr = legCurrentState[joint.leg];
+
+    const next = {
+        coxa:  curr.coxa  + (delta.coxa  || 0),
+        femur: curr.femur + (delta.femur || 0),
+        tibia: curr.tibia + (delta.tibia || 0),
+    };
+
+    // clamp
+    next.coxa  = Math.max(limits.coxa.min,  Math.min(limits.coxa.max,  next.coxa));
+    next.femur = Math.max(limits.femur.min, Math.min(limits.femur.max, next.femur));
+    next.tibia = Math.max(limits.tibia.min, Math.min(limits.tibia.max, next.tibia));
+
+    legCurrentState[joint.leg] = { ...next };
+
+    return next;
+}
+
+function legJointCtrl(legJointState) {
+    if (updatingJoint) return;
+    // legJointState.leg = currentLeg;
+
+    updatingJoint = true;
+
+    const clampedState = clampJointValue(legJointState, legJointState);
+
+    const isInvalid = Object.values(clampedState).some(v => isNaN(v));
+    if (isInvalid) {
+        console.warn("Invalid joint value detected, reverting to last valid joint state.");
+        updatingJoint = false;
+        return;
+    }
+
+    for (let joint in clampedState) {
+        legJointState[joint] = clampedState[joint];
+    }
+
+    cmdJsonCmd({
+        T: config.cmd_leg_rad_ctrl,
+        leg: legJointState.leg,
+        coxa: format(clampedState.coxa),
+        femur: format(clampedState.femur),
+        tibia: format(clampedState.tibia),
+    });
+
+    updateJointUI();
+
+    updatingJoint = false;
+    
+    heartbeat_send_flag = false;
+}
+
+const sliders = {
+    coxa: document.getElementById('coxa-slider'),
+    femur: document.getElementById('femur-slider'),
+    tibia: document.getElementById('tibia-slider')
+};
+
+Object.entries(sliders).forEach(([joint, el]) => {
+    noUiSlider.create(el, {
+        start: [0],
+        range: { min: -0.2, max: 0.2 },
+        step: 0.05,
+        behaviour: 'tap-drag',
+    });
+
+    el.noUiSlider.on('update', (values) => {
+        const v = parseFloat(values[0]);
+        if (Math.abs(v) < 1e-3) return;
+        legJointState.coxa  = 0;
+        legJointState.femur = 0;
+        legJointState.tibia = 0;
+
+        legJointState.leg = currentLeg ;
+        legJointState[joint] = v ;
+    });
+
+    el.noUiSlider.on('end', () => {
+        requestAnimationFrame(() => el.noUiSlider.set(0));
+    });
+});
+
 var heartbeat_send_flag = true;
 
 function heartbeat_send() {
     if (socketJson.connected && heartbeat_send_flag && !cv_heartbeat_stop_flag) {
-        cmdJsonCmd({ 'T': config.cmd_ros_movition_ctrl, 'x': 0, 'z': 0 });
+        cmdJsonCmd({T: config.cmd_movition_ctrl, X: 0.0, Y: 0.0, Yaw: 0.0});
+        legCurrentState = JSON.parse(JSON.stringify(legInitialState));
+        updateJointUI(currentLeg);
     }
 }
 
@@ -1765,16 +1701,6 @@ const keyMap = {
     40: 'down',      // ↓
     83: 's',         // swith 
     48: 'ahead_on',  //0
-    49: 'base',      //1
-    50: 'shoulder',  //2
-    51: 'elbow',     //3
-    52: 'wrist',     //4
-    53: 'roll',      //5
-    82: 'r',
-    80: 'p',
-    71: 'g',
-    88: 'x',
-    89: 'y',
     90: 'z',
     67: 'c',
     70: 'f',
@@ -1804,53 +1730,39 @@ function keyboardCtrl() {
     const down = keyState.down;
 
     if (up && !down) {
-        rosBaseSpeedState.x = speed_rate * config.max_speed;
+        baseSpeedState.x = speed_rate * config.max_speed;
     } else if (!up && down) {
-        rosBaseSpeedState.x = -speed_rate * config.max_speed;
+        baseSpeedState.x = -speed_rate * config.max_speed;
     } else {
-        rosBaseSpeedState.x = 0;
+        baseSpeedState.x = 0;
     }
 
     if (left && !right) {
-        rosBaseSpeedState.z = speed_rate * config.max_turn_speed;
+        baseSpeedState.y = speed_rate * config.max_speed;
     } else if (!left && right) {
-        rosBaseSpeedState.z = -speed_rate * config.max_turn_speed;
+        baseSpeedState.y = -speed_rate * config.max_speed;
     } else {
-        rosBaseSpeedState.z = 0;
+        baseSpeedState.y = 0;
     }
-    
+
+    if (keyState.z) {
+        baseSpeedState.yaw = direction * speed_rate * config.max_turn_speed;
+    }else {
+        baseSpeedState.yaw = 0;
+    }
+
     if (keyState.s) directionReversed = !directionReversed;
 
     if (keyState.l) {
         ledPwmState.io4 += 5 * direction;
     }
 
-    const moveXYZ = keyState.x || keyState.y || keyState.z || keyState.r || keyState.p;
-    if (moveXYZ) {
+    const moveXY = keyState.x || keyState.y;
+    if (moveXY) {
         if (config.module_type === 2) {
             if (keyState.x) ptPoseState.x += 5 * direction;
             if (keyState.y) ptPoseState.y += 5 * direction;
-        } else if (config.module_type === 1 || config.module_type === 3) {
-            if (keyState.x) armPoseState.x += 5 * direction;
-            if (keyState.y) armPoseState.y += 5 * direction;
-            if (keyState.z) armPoseState.z += 5 * direction;
-            if (keyState.r) armPoseState.r += -0.02 * direction;
-            if (keyState.p) armPoseState.p += 0.02 * direction;
         }
-    }
-
-    const moveJoint = keyState.base || keyState.shoulder || keyState.elbow || keyState.wrist || keyState.roll;
-    if (moveJoint) {
-        if (keyState.base)     armJointState.base     += 0.03 * direction;
-        if (keyState.shoulder) armJointState.shoulder += 0.03 * direction;
-        if (keyState.elbow)    armJointState.elbow    += 0.03 * direction;
-        if (keyState.wrist)    armJointState.wrist    += 0.03 * direction;
-        if (keyState.roll)     armJointState.roll     += -0.03 * direction;
-    }
-
-    if (keyState.g) {
-        armJointState.hand -= 0.01 * direction;
-        document.getElementById('slider').value = 3.1416 - armJointState.hand;
     }
 
     if (keyState.ahead_on) lookAhead();
@@ -1870,7 +1782,7 @@ document.onkeydown = function (event) {
         keyState[key] = 1;
         keyboardCtrl();
 
-        const repeatableKeys = ['l', 'x', 'y', 'z', 'r', 'p', 'g', 'base', 'shoulder', 'elbow', 'wrist', 'roll', 'up', 'down', 'left', 'right'];
+        const repeatableKeys = ['l', 'up', 'down', 'z', 'left', 'right'];
         if (repeatableKeys.includes(key) && !keyTimers[key]) {
             keyTimers[key] = setInterval(() => {
                 keyboardCtrl();
@@ -1895,10 +1807,13 @@ document.onkeyup = function (event) {
     }
 };
 
+
 // gamepad ctrl functions
 var gp_x = 0.00;
+var gp_y = 0.00;
 var gp_z = 0.00;
 var last_gp_x = 0.00;
+var last_gp_y = 0.00;
 var last_gp_z = 0.00;
 
 var last_gp_rt2 = false;
@@ -1906,16 +1821,20 @@ var last_gp_rt2 = false;
 var startPressed = false;
 var last_gp_picture = false;
 
+let last_left_joystick_click = false;
 let last_btn_l1 = false;
 let last_btn_l2 = false;
 let last_btn_r1 = false;
 let last_btn_r2 = false;
+const gp_pt_speed = 1;
 const speed_levels = [min_rate, mid_rate, max_rate];
 let speed_index = 0;
+let change_joystick_left_click = 0;
 let lastSwitchTime_l1 = 0;
 let lastSwitchTime_l2 = 0;
 let lastSwitchTime_r1 = 0;
 let lastSwitchTime_r2 = 0;
+let lastSwitchTime_joystick_left_click = 0;
 const switchCooldown = 300;
 
 window.addEventListener("gamepadconnected", function (e) {
@@ -1969,7 +1888,6 @@ const mapping = {
 
 function gamepadCtrl() {
     const threshold = 0.01;
-    const pose_sensitivity = 1;
     const joint_sensitivity = 0.01;
     var gamepads = navigator.getGamepads ? navigator.getGamepads() : [];
 
@@ -1979,6 +1897,7 @@ function gamepadCtrl() {
             //   logButtons(gp);
             //   logAxes(gp);   
             speed_rate = speed_levels[speed_index];
+
             const l1Pressed = gp.buttons[mapping["L1"]].pressed;
             const now_l1 = Date.now();
             if ( l1Pressed && !last_btn_l1 && (now_l1 - lastSwitchTime_l1 > switchCooldown)) {
@@ -1991,31 +1910,55 @@ function gamepadCtrl() {
 
             const l2Pressed = gp.buttons[mapping["L2"]].pressed;
             const now_l2 = Date.now();
-            if (l2Pressed && !last_btn_l2 && (now_l2 - lastSwitchTime_l2 > switchCooldown)) {
+            if (gp.buttons[mapping["L2"]].pressed && !last_btn_l2 && (now_l2 - lastSwitchTime_l2 > switchCooldown)) {
                 speed_index = Math.min(speed_levels.length - 1, speed_index + 1);
                 speed_rate = speed_levels[speed_index];
                 speedRateCtrl(speed_rate);
                 lastSwitchTime_l2 = now_l2;
             }
             last_btn_l2 = l2Pressed;
-
+            
             gp_x = 0;
             if (gp.buttons[mapping["DPAD_UP"]].pressed) gp_x = config.max_speed * speed_rate;
             if (gp.buttons[mapping["DPAD_DOWN"]].pressed) gp_x = -config.max_speed * speed_rate;
-            
-            gp_z = 0;   
-            if (gp.buttons[mapping["DPAD_LEFT"]].pressed) gp_z = config.max_turn_speed * speed_rate;
-            if (gp.buttons[mapping["DPAD_RIGHT"]].pressed) gp_z = -config.max_turn_speed * speed_rate;
+
+            gp_y = 0;   
+            gp_z = 0;
+
+            const r1Pressed = gp.buttons[mapping["R1"]].pressed;
+            const now_r1 = Date.now();
+            if (r1Pressed && !last_btn_r1 && (now_r1 - lastSwitchTime_r1 > switchCooldown)) {
+                mode = (mode === 'move') ? 'turn' : 'move';
+                if (modeToggleEl) {
+                    modeToggleEl.textContent = capitalize(mode);
+                }
+
+                lastSwitchTime_r1 = now_r1;
+            }
+
+            if (mode === 'turn') {
+                if (gp.buttons[mapping["DPAD_LEFT"]].pressed) gp_z = config.max_turn_speed * speed_rate;
+                if (gp.buttons[mapping["DPAD_RIGHT"]].pressed) gp_z = -config.max_turn_speed * speed_rate;
+            } else if(mode === 'move'){
+                if (gp.buttons[mapping["DPAD_LEFT"]].pressed) gp_y = config.max_speed * speed_rate;
+                if (gp.buttons[mapping["DPAD_RIGHT"]].pressed) gp_y = -config.max_speed * speed_rate;
+            }
+
+            last_btn_r1 = r1Pressed;
 
             if (Math.abs(gp_x) < threshold) {
                 gp_x = 0;
             }
+            if (Math.abs(gp_y) < threshold) {
+                gp_y = 0;
+            }            
             if (Math.abs(gp_z) < threshold) {
                 gp_z = 0;
             }
 
-            rosBaseSpeedState.x = gp_x;
-            rosBaseSpeedState.z = gp_z;
+            baseSpeedState.x = gp_x;
+            baseSpeedState.y = gp_y;
+            baseSpeedState.yaw = gp_z;
 
             if (gp.buttons[mapping["START"]].pressed && !startPressed) {
                 startPressed = true;
@@ -2046,84 +1989,56 @@ function gamepadCtrl() {
             }
             ledPwmState.io4 += deltaLed;
 
+            legJointState.coxa = 0;
+            legJointState.femur = 0;
+            legJointState.tibia = 0;
+
+            const now_left_joystick_click = Date.now();
+            const leftStickPressed = gp.buttons[mapping["LEFT_STICK"]].pressed;
+
+            if (leftStickPressed && !last_left_joystick_click && (now_left_joystick_click - lastSwitchTime_joystick_left_click > switchCooldown)) {
+                change_joystick_left_click += 1;
+                if(change_joystick_left_click>5) change_joystick_left_click=0;
+                legJointState.leg = change_joystick_left_click;
+                lastSwitchTime_joystick_left_click = now_left_joystick_click;
+                console.log(legJointState.leg)
+            }  
+            last_left_joystick_click = leftStickPressed;
+
+            const change_joystick_left_x = gp.axes[mapping["LEFT_STICK_X"]];    
+            const change_joystick_left_y = gp.axes[mapping["LEFT_STICK_Y"]];
+
+            
+            if (Math.abs(change_joystick_left_y) > joint_sensitivity) {
+                if (r1Pressed) {
+                    legJointState.tibia = change_joystick_left_y * joint_sensitivity;
+                } else {
+                    legJointState.femur = change_joystick_left_y * joint_sensitivity;
+                }
+            }
+
+            if (Math.abs(change_joystick_left_x) > joint_sensitivity) {
+                legJointState.coxa = -change_joystick_left_x * joint_sensitivity;
+            }
+
             if (config.module_type === 2) {
                 if (last_gp_rt2 != gp.buttons[mapping["R2"]].pressed) {
                     last_gp_rt2 = gp.buttons[mapping["R2"]].pressed;
                     cmdSend(config.head_ct, 0);
                 }
-                const gp_pt_speed = 1;
 
                 var change_x = gp.axes[mapping["RIGHT_STICK_X"]];
                 var change_y = gp.axes[mapping["RIGHT_STICK_Y"]];
 
-                if (Math.abs(change_x) > threshold || Math.abs(change_y) > threshold) {
-                    ptPoseState.x = ptPoseState.x + change_x * gp_pt_speed;
-                    ptPoseState.y = ptPoseState.y - change_y * gp_pt_speed;  
+                if (Math.abs(change_x) < threshold) {
+                    change_x = 0;
                 }
-            } else if (config.module_type === 1 || config.module_type === 3) {
-                const change_joystick_left_x = gp.axes[mapping["LEFT_STICK_X"]];    
-                const change_joystick_left_y = gp.axes[mapping["LEFT_STICK_Y"]];
+                if (Math.abs(change_y) < threshold) {
+                    change_y = 0;
+                }    
 
-                let change_joystick_left_click = 0;
-                if (gp.buttons[mapping["LEFT_STICK"]].pressed && gp.buttons[mapping["R2"]].pressed) {
-                    change_joystick_left_click = -1;
-                } else if (gp.buttons[mapping["LEFT_STICK"]].pressed) {
-                    change_joystick_left_click = 1;
-                }
-
-                const change_joystick_right_x = gp.axes[mapping["RIGHT_STICK_X"]];
-                const change_joystick_right_y = -gp.axes[mapping["RIGHT_STICK_Y"]];
-
-                const r1Pressed = gp.buttons[mapping["R1"]].pressed;
-                const now_r1 = Date.now();
-                if (r1Pressed && !last_btn_r1 && (now_r1 - lastSwitchTime_r1 > switchCooldown)) {
-                    armMode = (armMode === 'pose') ? 'joint' : 'pose';
-                    if (armModeToggleEl) {
-                        armModeToggleEl.textContent = capitalize(armMode);
-                    }
-
-                    lastSwitchTime_r1 = now_r1;
-                }
-
-                if (armMode === 'pose') {
-                    // armPoseState.z += change_joystick_left_click * pose_sensitivity;
-                    if (Math.abs(change_joystick_left_x) > threshold || Math.abs(change_joystick_left_y) > threshold || Math.abs(change_joystick_right_x) > threshold || Math.abs(change_joystick_right_y) > threshold) {
-                        armPoseState.x -= change_joystick_left_y * pose_sensitivity;
-                        // armPoseState.y -= change_joystick_left_x * pose_sensitivity;
-                        if (r1Pressed) {
-                            armPoseState.z -= change_joystick_left_x * pose_sensitivity;
-                        } else {
-                            armPoseState.y -= change_joystick_left_x * pose_sensitivity;
-                        }
-                        armPoseState.r += change_joystick_right_x * joint_sensitivity;
-                        armPoseState.p += change_joystick_right_y * joint_sensitivity;
-                    }
-                } else if(armMode === 'joint'){
-                    // armJointState.elbow -= change_joystick_left_click * joint_sensitivity;
-                    if (Math.abs(change_joystick_left_x) > threshold || Math.abs(change_joystick_left_y) > threshold || Math.abs(change_joystick_right_x) > threshold || Math.abs(change_joystick_right_y) > threshold) {
-                        armJointState.base -= change_joystick_left_x * joint_sensitivity;
-                        // armJointState.shoulder -= change_joystick_left_y * joint_sensitivity;
-                        if (r1Pressed) {
-                            armJointState.elbow -= change_joystick_left_y * joint_sensitivity;
-                        } else {
-                            armJointState.shoulder -= change_joystick_left_y * joint_sensitivity;
-                        }
-                        armJointState.roll += change_joystick_right_x * joint_sensitivity;
-                        armJointState.wrist += change_joystick_right_y * joint_sensitivity;
-                    }
-                }
-
-                last_btn_r1 = r1Pressed;
-
-                let deltaHand = 0;
-                if (gp.buttons[mapping["A"]].pressed) {
-                    deltaHand = 0.005;
-                } else if (gp.buttons[mapping["B"]].pressed) {
-                    deltaHand = -0.005;
-                } else {
-                    deltaHand = 0;
-                }
-                armJointState.hand += deltaHand;
+                ptPoseState.x = ptPoseState.x + change_x * gp_pt_speed;
+                ptPoseState.y = ptPoseState.y - change_y * gp_pt_speed;  
             }
 
         }

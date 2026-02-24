@@ -155,7 +155,7 @@ class PID:
 font_path = "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc"
 
 def draw_chinese_text(img, text, position, font_size, color):
-    img = cv2.resize(img, (frame_width, frame_height))
+    img = cv2.resize(img, (640, 480))
     img_pil = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
     draw = ImageDraw.Draw(img_pil)
     font = ImageFont.truetype(font_path, font_size)
@@ -216,8 +216,8 @@ class OpencvFuncs():
         self.target_distance = 0.2
         self.target_yaw = 0.0
 
-        self.x_distance_pid = PID(kp=1.25, ki=0.0, kd=0.05, output_limits=(-0.3, 0.3), tolerance=0.05)
-        self.angle_pid = PID(kp=2.0, ki=0.00, kd=0.0, output_limits=(-1.5708, 1.5708), tolerance=0.1)
+        self.x_distance_pid = PID(kp=1.25, ki=0.0, kd=0.05, output_limits=(-0.07, 0.07), tolerance=0.05)
+        self.angle_pid = PID(kp=1.0, ki=0.00, kd=0.0, output_limits=(-0.6, 0.6), tolerance=0.1)
 
         self.distance_buffer = deque(maxlen=10)
         self.color_ball_yaw_buffer = deque(maxlen=10)
@@ -256,10 +256,10 @@ class OpencvFuncs():
         self.state = TrackState.FOLLOW
 
         self.yaw = None
-        self.kp = 3.0
+        self.kp = 0.5
         self.kd = 0.05
         self.last_error = 0.0
-        self.line_track_speed = 0.2
+        self.line_track_speed = 0.07
         self.yaw_buffer = deque(maxlen=10)
         
         self.line_lower = np.array(f['cv']['line_lower'], dtype=np.uint8)
@@ -268,19 +268,19 @@ class OpencvFuncs():
         self.roi = [
             (250, 300, 40, 600, 0.1),
             (300, 400, 40, 600, 0.3),
-            (400, frame_height, 40, 600, 0.6),
+            (400, 480, 40, 600, 0.6),
         ]
 
         # --- SEARCH_SPIN ---
         self.search_start_time = 0.0
-        self.scan_dir = -1                          
+        self.scan_dir = 1                  
         self.scan_yaw_base = 0.5           
-        self.scan_yaw_max = 3.1416
-        self.max_scan_time = 10.0            
+        self.scan_yaw_max = 0.6             
+        self.max_scan_time = 8.0           
         
         # --- RECOVER ---
         self.recover_start_time = 0.0
-        self.recover_time = 0.4              
+        self.recover_time = 0.4             
 
         # mediapipe detect faces
         self.mp_face_detection = mp.solutions.face_detection
@@ -705,8 +705,8 @@ class OpencvFuncs():
                 if(datetime.datetime.now() - self.last_frame_capture_time).seconds >= 5:
                     self.video_record(False)
 
-        cv2.putText(overlay_buffer, 'NUMBER: {}'.format(len(faces)), (center_x+50, center_y+40), 
-                                                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+        cv2.putText(overlay_buffer, 'NUMBER: {}'.format(len(faces)), (center_x+50, center_y+40), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+
         self.overlay = overlay_buffer
 
     def cv_detect_objects(self, img):
@@ -738,6 +738,7 @@ class OpencvFuncs():
     def cv_detect_color(self, img):
         cx, cy, w = None, None, None
         input_speed_x = 0
+        input_speed_y = 0
         input_turning = 0
         img_h, img_w = img.shape[:2]
         overlay_buffer = np.zeros_like(img)
@@ -774,7 +775,13 @@ class OpencvFuncs():
                 yaw_ctrl = self.angle_pid.compute(self.target_yaw, yaw_avg)
                 yaw_err = abs(yaw_avg)
                 distance_err = abs(distance_avg - self.target_distance)
-                input_turning = yaw_ctrl
+
+                if distance_err < self.target_distance and yaw_err < np.deg2rad(30):
+                    input_speed_y = 0.2*yaw_ctrl
+                    input_turning = 0.0
+                else:
+                    input_speed_y = 0.0
+                    input_turning = yaw_ctrl
 
             if self.track_base =='pt':
                 error_x = 0.1*(cx - center_x) / center_x
@@ -794,8 +801,8 @@ class OpencvFuncs():
 
         if not self.cv_movtion_lock:
             if self.track_base =='ugv':
-                self.base_ctrl.base_json_ctrl({"T": f['cmd_config']['cmd_ros_movition_ctrl'],"X": input_speed_x,"Z": input_turning})
-                cv2.putText(overlay_buffer, f'X: {input_speed_x:.2f}  Z: {input_turning:.2f}',(center_x+50, center_y+80), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+                self.base_ctrl.base_json_ctrl({"T": f['cmd_config']['cmd_movition_ctrl'],"X": input_speed_x,"Y": input_speed_y,"Yaw": input_turning})
+                cv2.putText(overlay_buffer, f'X: {input_speed_x:.2f}  Yaw: {input_speed_y:.2f}',(center_x+50, center_y+80), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
             if self.track_base =='pt':
                 self.base_ctrl.base_json_ctrl({"T": f['cmd_config']['cmd_gimbal_ctrl'],"X": self.pan_angle,"Y": self.tilt_angle,"SPD": 0,"ACC":128})
                 cv2.putText(overlay_buffer, f'X: {self.pan_angle:.2f}  Y: {self.tilt_angle:.2f}',(center_x+50, center_y+80), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
@@ -934,60 +941,60 @@ class OpencvFuncs():
                     self.base_ctrl.lights_ctrl(0, 0)
 
         self.overlay = overlay_buffer
-
+    
     def cv_auto_drive(self, img):
         h, w = img.shape[:2]
         cx = w // 2
-
+    
         lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
-
+    
         weight_sum = 0
         cx_sum = 0
         has_line = False
-
+    
         input_speed = 0.0
         input_turning = 0.0
-
+    
         for (y1, y2, x1, x2, wt) in self.roi:
             crop = lab[y1:y2, x1:x2]
             mask = cv2.inRange(crop, self.line_lower, self.line_upper)
             cnts, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
             if not cnts:
                 continue
-
+    
             c = max(cnts, key=cv2.contourArea)
             if cv2.contourArea(c) < 50:
                 continue
-
+    
             (x, y), _, _ = cv2.minAreaRect(c)
             x += x1
             cx_sum += x * wt
             weight_sum += wt
             has_line = True
-
+    
         if self.state == TrackState.FOLLOW:
             if not has_line or weight_sum == 0:
                 self.state = TrackState.SEARCH_SPIN
                 self.search_start_time = time.time()
                 self.scan_dir = 1 if self.last_error > 0 else -1
-                # print(f"Lost line → SEARCH_SPIN ({'RIGHT' if self.scan_dir > 0 else 'LEFT'})")
+                # print("Lost line → SEARCH_SPIN")
                 input_speed = 0.0
                 input_turning = 0.0
-
+    
             x = cx_sum / weight_sum
             err = (x - cx) / cx
 
             self.yaw_buffer.append(err)
             err_f = robust_mean_remove_outliers(np.array(self.yaw_buffer))
-
+    
             d = err_f - self.last_error
             self.last_error = err_f
-
+    
             z = self.kp * err_f + self.kd * d
-
+    
             input_speed = self.line_track_speed
             input_turning = -z
-
+    
         elif self.state == TrackState.SEARCH_SPIN:
             if has_line:
                 self.state = TrackState.RECOVER
@@ -997,46 +1004,47 @@ class OpencvFuncs():
                 # print("Line found → RECOVER")
                 input_speed = 0.0
                 input_turning = 0.0
-
+    
             dt = time.time() - self.search_start_time
             yaw = max(self.scan_yaw_max * (1 - dt / self.max_scan_time), self.scan_yaw_base)
             input_speed = 0.0
             input_turning = self.scan_dir * yaw
-
+    
         elif self.state == TrackState.RECOVER:
             dt = time.time() - self.recover_start_time
-
+    
             if not has_line:
                 self.state = TrackState.SEARCH_SPIN
                 self.search_start_time = time.time()
                 self.scan_dir = 1 if self.last_error > 0 else -1
                 # print("Recover lost → SEARCH_SPIN")
                 return
-
+    
             if dt > self.recover_time:
                 self.state = TrackState.FOLLOW
                 self.last_error = 0.0
                 # print("Recover done → FOLLOW")
                 return
-
+    
             x = cx_sum / weight_sum
             err = (x - cx) / cx
             z = 0.5 * self.kp * err
-
-            input_speed = 0.0
+    
+            input_speed = self.recover_speed
             input_turning = -z
-
+    
         if not self.cv_movtion_lock:
             self.base_ctrl.base_json_ctrl({
-                "T": f['cmd_config']['cmd_ros_movition_ctrl'],
+                "T":  f['cmd_config']['cmd_movition_ctrl'],
                 "X": input_speed,
-                "Z": input_turning,
+                "Y": 0.0,
+                "Yaw": input_turning
             })
-
+    
         overlay = np.zeros_like(img)
         cv2.putText(overlay, f'State: {self.state.name}', (80, 60),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-        cv2.putText(overlay, f'X: {input_speed:.2f}  Z: {input_turning:.2f}',
+        cv2.putText(overlay, f'X: {input_speed:.2f}  Yaw: {input_turning:.2f}',
                     (80, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
         self.overlay = overlay
 
@@ -1182,9 +1190,9 @@ class OpencvFuncs():
             if not self.mission_flag:
                 self.mission_flag = False
                 break
-            self.base_ctrl.base_json_ctrl({"T":1,"L":input_speed,"R":input_speed})
+            self.base_ctrl.base_json_ctrl({"T":f['cmd_config']['cmd_movition_ctrl'],"X":input_speed,"Y":0.0,"Yaw":0.0})
             time.sleep(input_time)
-            self.base_ctrl.base_json_ctrl({"T":1,"L":0,"R":0})
+            self.base_ctrl.base_json_ctrl({"T":f['cmd_config']['cmd_movition_ctrl'],"X":0.0,"Y":0.0,"Yaw":0.0})
             time.sleep(input_interval/2)
             self.base_ctrl.lights_ctrl(255, 255)
             time.sleep(0.01)
@@ -1197,4 +1205,3 @@ class OpencvFuncs():
 
     def mission_stop(self):
         self.mission_flag = False
-   

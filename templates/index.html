@@ -9,6 +9,8 @@
     <script src="https://cdn.jsdelivr.net/npm/nipplejs@0.9.0/dist/nipplejs.min.js"></script>
     <link rel="stylesheet" type="text/css" href="./css/style.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/nouislider@15.7.0/dist/nouislider.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/nouislider@15.7.0/dist/nouislider.min.js"></script>
     <style type="text/css">
     </style>
   </head>
@@ -86,9 +88,8 @@
                                     </div>
                                     <div class="feed feed_r_b">
                                         <div class="video_btn_container ">
-                                            <button id="arm_mode_toggle" class="video_ctl_btn ctl_btn_active" onclick="toggleArmMode()">Joint</button>
-                                            <button id="press_mode_toggle" class="video_ctl_btn ctl_btn_active" onclick="togglePressMode()">Increase</button>
-                                        </div>
+                                            <button id="mode_toggle" class="video_ctl_btn ctl_btn_active" onclick="changeMode()">move</button>
+                                        </div>                                        
                                         <div class="ctrl_base_box">
                                             <div class="ctrl_base ctrl_base_s" id="ctrl_base_right"> 
                                                 <div id="joystick_right" class="ctrl_stick ctrl_stick_s"></div>
@@ -132,7 +133,7 @@
                                     <li class="normal_btn" onclick="cmdSend(min_res,0);">240P</li> -->
                                 </ul>
                             </div>
-                        </div>
+                        </div> 
                     </div>
                 </div>
                 <div>
@@ -152,17 +153,17 @@
                         </div>
                         <div class="ctl9 ctl9_base">
                             <ul>
-                                <li class="ctl9_base_btn" data-x="1" data-z="1"></li>
-                                <li class="ctl9_base_btn2" data-x="1" data-z="0"></li>
-                                <li class="ctl9_base_btn" data-x="1" data-z="-1"></li>
-                                <li class="ctl9_base_btn4" data-x="0" data-z="1"></li>
+                                <li class="ctl9_base_btn" data-x="1" data-y="1"></li>
+                                <li class="ctl9_base_btn2" data-x="1" data-y="0"></li>
+                                <li class="ctl9_base_btn" data-x="1" data-y="-1"></li>
+                                <li class="ctl9_base_btn4" data-x="0" data-y="1"></li>
 
                                 <li class="ctl9_base_btn"></li>
 
-                                <li class="ctl9_base_btn6" data-x="0" data-z="-1"></li>
-                                <li class="ctl9_base_btn" data-x="-1" data-z="1"></li>
-                                <li class="ctl9_base_btn8" data-x="-1" data-z="0"></li>
-                                <li class="ctl9_base_btn" data-x="-1" data-z="-1"></li>
+                                <li class="ctl9_base_btn6" data-x="0" data-y="-1"></li>
+                                <li class="ctl9_base_btn" data-x="-1" data-y="1"></li>
+                                <li class="ctl9_base_btn8" data-x="-1" data-y="0"></li>
+                                <li class="ctl9_base_btn" data-x="-1" data-y="-1"></li>
                             </ul>
                         </div>
                     </div>
@@ -198,6 +199,41 @@
                                 <div><button onclick="speedRateCtrl(min_rate);" class="ctl_btn ctl_btn_active">Slow</button></div>
                                 <div><button onclick="speedRateCtrl(mid_rate);" class="ctl_btn">Middle</button></div>
                                 <div><button onclick="speedRateCtrl(max_rate);" class="ctl_btn">Fast</button></div>
+                            </div>
+                        </div>
+                        <div>  
+                            <h2 class="sc_title feed_ct_tt">Leg Rad Ctrl</h2>
+                            <div class="leg-panel">
+                                <div id="leg_ctrl_btn">
+                                    <div class="form-group normal_btn video_btn_select_leg">
+                                        <label for="leg-selection" class="font-weight-bold">Select Leg:</label>
+                                        <select id="leg-selection" class="form-control">
+                                            <option value="0">Right Up</option>
+                                            <option value="1">Right Middle</option>
+                                            <option value="2">Right Down</option>
+                                            <option value="3">Left Up</option>
+                                            <option value="4">Left Middle</option>
+                                            <option value="5">Left Down</option>
+                                        </select>
+                                    </div>  
+                                </div>                                
+                                <div class="slider-row">
+                                    <span class="joint-label">Coxa</span>
+                                    <span class="joint-value" id="coxa-val">-0.52</span>
+                                    <div id="coxa-slider" class="joint-slider"></div>
+                                </div>
+
+                                <div class="slider-row">
+                                    <span class="joint-label">Femur</span>
+                                    <span class="joint-value" id="femur-val">0.52</span>
+                                    <div id="femur-slider" class="joint-slider"></div>
+                                </div>
+
+                                <div class="slider-row">
+                                    <span class="joint-label">Tibia</span>
+                                    <span class="joint-value" id="tibia-val">2.09</span>
+                                    <div id="tibia-slider" class="joint-slider"></div>
+                                </div>
                             </div>
                         </div>
                         <div>  
@@ -287,14 +323,6 @@
                     </ul>
                     <div class="long_btn new_page">
                         <a href="./html/video.html"><span>View Video Files Page</span>&nbsp;(<span id="number-videos">0</span>)&nbsp;<span>&gt;</span></a>
-                    </div>
-                </div>
-            </section>
-            <section>
-                <div>
-                    <h2 id="test" class="sc_title normal_sc_title">Bus Servos Initialization Setup</h2>
-                    <div class="long_btn new_page ">
-                        <a class="btn_ico ico_setting" href="./html/settings.html"><span>Setting Page</span>&nbsp;<span>&gt;</span></a>
                     </div>
                 </div>
             </section>

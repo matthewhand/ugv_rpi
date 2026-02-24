@@ -242,24 +242,6 @@ class BaseController:
 		self.send_command(data)
 
 
-	def bus_servo_id_set(self, old_id, new_id):
-		# data = {"T":54,"old":old_id,"new":new_id}
-		data = {"T":f['cmd_config']['cmd_set_servo_id'],"raw":old_id,"new":new_id}
-		self.send_command(data)
-
-
-	def bus_servo_torque_lock(self, input_id, input_status):
-		# data = {"T":55,"id":input_id,"status":input_status}
-		data = {"T":f['cmd_config']['cmd_servo_torque'],"id":input_id,"cmd":input_status}
-		self.send_command(data)
-
-
-	def bus_servo_mid_set(self, input_id):
-		# data = {"T":58,"id":input_id}
-		data = {"T":f['cmd_config']['cmd_set_servo_mid'],"id":input_id}
-		self.send_command(data)
-
-
 	def lights_ctrl(self, pwmA, pwmB):
 		data = {"T":f['cmd_config']['cmd_set_led_pwm'],"IO4":pwmA,"IO5":pwmB}
 		self.send_command(data)
