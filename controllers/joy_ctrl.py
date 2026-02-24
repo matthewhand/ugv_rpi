@@ -192,7 +192,7 @@ Xbox_360_Controller = {
     "X": 2,
     "Y": 3,
     "L1": 4,
-    "R2": 5,
+    "R1": 5,
     "SELECT": 6,
     "START": 7,
     "HOME": 8,
