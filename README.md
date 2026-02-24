@@ -51,7 +51,7 @@ You can use this tutorial to install this program on a pure Raspberry Pi OS.
 
 You can clone this repository from Waveshare's GitHub to your local machine.
 
-    git clone -b refactor/debian12-2025.10.01-py3.11 https://github.com/waveshareteam/ugv_rpi.git
+    git clone -b HexArth/debian12-2025.10.01-py3.11 https://github.com/waveshareteam/ugv_rpi.git
 
 ### Download speech synthesis model file
     cd ugv_rpi/
