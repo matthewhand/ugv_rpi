@@ -193,6 +193,10 @@ class OpencvFuncs():
         self.fps_start_time = time.time()
         self.fps_count = 0
         self.cv_movtion_lock = True
+        self.base_width = 640
+        self.base_height = 480
+        self.cv_w_scale = frame_width/self.base_width
+        self.cv_h_scale = frame_height/self.base_height
 
         # reaction
         self.last_frame_capture_time = datetime.datetime.now()
@@ -268,7 +272,7 @@ class OpencvFuncs():
         self.roi = [
             (250, 300, 40, 600, 0.1),
             (300, 400, 40, 600, 0.3),
-            (400, frame_height, 40, 600, 0.6),
+            (400, 480, 40, 600, 0.6),
         ]
 
         # --- SEARCH_SPIN ---
@@ -412,13 +416,13 @@ class OpencvFuncs():
                     input_frame = 255 * np.ones((frame_height, frame_width, 3), dtype=np.uint8)
                     cv2.putText(input_frame, f"camera read failed... \nusb - csi - oak", 
                                 (round(0.05*frame_width), round(0.1*frame_width + 5 * 13)), 
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.369, (0, 0, 0), 1)
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.369*self.cv_h_scale, (0, 0, 0),int(self.cv_h_scale))
             except Exception as e:
                 print(f"[cv_ctrl.frame_process] error: {e}")
                 input_frame = 255 * np.ones((frame_height, frame_width, 3), dtype=np.uint8)
                 cv2.putText(input_frame, f"camera read failed... \n{e}", 
                             (round(0.05*frame_width), round(0.1*frame_width + 5 * 13)), 
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.369, (0, 0, 0), 1)
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.369*self.cv_h_scale, (0, 0, 0),int(self.cv_h_scale))
         
             # opencv funcs
             if self.cv_mode != f['code']['cv_none']:
@@ -435,9 +439,8 @@ class OpencvFuncs():
                 if time.time() - self.info_update_time > self.info_show_time:
                     self.show_info_flag = False
                 self.overlay = input_frame.copy()
-                cv2.rectangle(self.overlay,  (round((self.info_scale-0.005)*frame_width), round((0.33)*frame_height)), 
-                                        (round(0.98*frame_width), round((0.78)*frame_height)), 
-                                        self.info_bg_color, -1)
+                cv2.rectangle(self.overlay, (round((self.info_scale-0.005)*frame_width), round((0.33)*frame_height)), 
+                                        (round(0.98*frame_width), round((0.78)*frame_height)), self.info_bg_color, -1)
                 cv2.addWeighted(self.overlay, 0.5, input_frame, 0.5, 0, input_frame)
 
                 # info_deque.appendleft(time.time())
@@ -447,7 +450,7 @@ class OpencvFuncs():
                     size = self.info_deque[i]['size']
                     color = self.info_deque[i]['color'] 
                     base_x = round(self.info_scale * frame_width)
-                    base_y = round(self.info_scale * frame_width - i * 20)
+                    base_y = round(0.75 * frame_height - i * 20*self.cv_h_scale)
                     if contains_chinese(text):
                         input_frame = draw_chinese_text(input_frame, text, 
                                     (base_x, base_y - 10), 
@@ -455,13 +458,13 @@ class OpencvFuncs():
                     else:
                         cv2.putText(input_frame, text, 
                                 (base_x, base_y), 
-                                cv2.FONT_HERSHEY_SIMPLEX, size, color, 1)  
+                                cv2.FONT_HERSHEY_SIMPLEX, size*self.cv_h_scale, color,int(self.cv_h_scale))  
                     
             if self.show_base_info_flag:
                 for i in range(0, len(self.recv_deque)):
                     cv2.putText(input_frame, str(self.recv_deque[i]), 
                             (round(0.05*frame_width), round(0.1*frame_width + i * 13)), 
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.369, (255, 255, 255), 1)
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.369*self.cv_h_scale, (255, 255, 255),int(self.cv_h_scale))
 
             # render osd
             input_frame = self.osd_render(input_frame)
@@ -486,7 +489,7 @@ class OpencvFuncs():
                 self.writer = imageio.get_writer(video_filename, fps=30)
                 self.video_record_status_flag = True
             elif self.set_video_record_flag and self.video_record_status_flag:
-                cv2.circle(input_frame, (15, 15), 5, (64, 64, 255), -1)
+                cv2.circle(input_frame, (15, 15), int(5*self.cv_h_scale), (64, 64, 255), -1)
                 self.writer.append_data(np.array(cv2.cvtColor(input_frame, cv2.COLOR_BGRA2RGB)))
             elif not self.set_video_record_flag and self.video_record_status_flag:
                 self.video_record_status_flag = False
@@ -542,7 +545,7 @@ class OpencvFuncs():
             return osd_frame
         
         # add your osd info here
-        # cv2.putText(overlay_buffer, 'OSD_TEST', (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+        # cv2.putText(overlay_buffer, 'OSD_TEST', (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.7*self.cv_h_scale, (255, 255, 255),int(self.cv_h_scale))
 
         # render lidar data
         lidar_points = []
@@ -552,7 +555,7 @@ class OpencvFuncs():
             lidar_points.append((lidar_x, lidar_y))
 
         for lidar_point in lidar_points:
-            cv2.circle(osd_frame, lidar_point, 3, (255, 0, 0), -1)
+            cv2.circle(osd_frame, lidar_point, int(3*self.cv_h_scale), (255, 0, 0), -1)
 
         # render sensor data
         sensor_index = 0
@@ -560,7 +563,7 @@ class OpencvFuncs():
             # sensor_line = sensor_line[:-2]
             cv2.putText(osd_frame, sensor_line,
                         (100, 50 + sensor_index * 20), 
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255,255,255), 1)
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7*self.cv_h_scale, (255,255,255),int(self.cv_h_scale))
             sensor_index = sensor_index + 1
 
 
@@ -592,6 +595,10 @@ class OpencvFuncs():
             self.set_video_record_flag = False
 
     def cv_detect_movition(self, img):
+        overlay_buffer = np.zeros_like(img)
+        height, width = img.shape[:2]
+        img = cv2.resize(img, (self.base_width, self.base_height))
+
         timestamp = datetime.datetime.now()
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         gray = cv2.GaussianBlur(gray, (21, 21), 0)
@@ -612,7 +619,6 @@ class OpencvFuncs():
         cnts = cv2.findContours(thresh.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         cnts = imutils.grab_contours(cnts)
         # loop over the contours
-        overlay_buffer = np.zeros_like(img)
         for c in cnts:
             # if the contour is too small, ignore it
             if cv2.contourArea(c) < 2000:
@@ -620,7 +626,11 @@ class OpencvFuncs():
             # compute the bounding box for the contour, draw it on the frame,
             # and update the text
             (mov_x, mov_y, mov_w, mov_h) = cv2.boundingRect(c)
-            cv2.rectangle(overlay_buffer, (mov_x, mov_y), (mov_x + mov_w, mov_y + mov_h), (128, 255, 0), 1)
+            mov_x = int(mov_x * self.cv_w_scale)
+            mov_y = int(mov_y * self.cv_h_scale)
+            mov_w = int(mov_w * self.cv_w_scale)
+            mov_h = int(mov_h * self.cv_h_scale)
+            cv2.rectangle(overlay_buffer, (mov_x, mov_y), (mov_x + mov_w, mov_y + mov_h), (128, 255, 0),int(self.cv_h_scale))
             self.last_movtion_captured = timestamp
 
             if(timestamp - self.last_frame_capture_time).seconds >= 1:
@@ -646,10 +656,11 @@ class OpencvFuncs():
             self.track_base = 'ugv'
 
     def cv_detect_faces(self, img):
-        faces = self.face_detector.detect(img)
         overlay_buffer = np.zeros_like(img)
-
         height, width = img.shape[:2]
+        img = cv2.resize(img, (self.base_width, self.base_height))
+        faces = self.face_detector.detect(img)
+
         center_x, center_y = width // 2, height // 2
 
         max_area = 0
@@ -662,6 +673,10 @@ class OpencvFuncs():
                     self.base_ctrl.lights_ctrl(self.base_ctrl.base_light_status, self.base_ctrl.head_light_status)
 
             for face in faces:
+                face.x1 = int(face.x1 * self.cv_w_scale)
+                face.y1 = int(face.y1 * self.cv_h_scale)
+                face.x2 = int(face.x2 * self.cv_w_scale)
+                face.y2 = int(face.y2 * self.cv_h_scale)
                 cv2.rectangle(overlay_buffer,(int(face.x1),int(face.y1)),(int(face.x2),int(face.y2)),(64,128,255),1)
                 face_area = (face.x2-face.x1) * (face.y2-face.y1)
                 if face_area > max_area:
@@ -685,7 +700,7 @@ class OpencvFuncs():
                 self.tilt_angle = (180 * self.pt_y) / 3.14
 
                 self.base_ctrl.base_json_ctrl({"T": f['cmd_config']['cmd_gimbal_ctrl'],"X": self.pan_angle,"Y": self.tilt_angle,"SPD": 0,"ACC":128})
-                cv2.putText(overlay_buffer, f'X: {self.pan_angle:.2f}  Y: {self.tilt_angle:.2f}',(center_x+50, center_y+80), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+                cv2.putText(overlay_buffer, f'X: {self.pan_angle:.2f} Y: {self.tilt_angle:.2f}',(int(80*self.cv_h_scale), int(90*self.cv_h_scale)), cv2.FONT_HERSHEY_SIMPLEX, 0.7*self.cv_h_scale, (255, 255, 255),int(self.cv_h_scale))
                 
             if(datetime.datetime.now() - self.last_frame_capture_time).seconds >= 3:
                 if self.detection_reaction_mode == f['code']['re_none']:
@@ -705,13 +720,13 @@ class OpencvFuncs():
                 if(datetime.datetime.now() - self.last_frame_capture_time).seconds >= 5:
                     self.video_record(False)
 
-        cv2.putText(overlay_buffer, 'NUMBER: {}'.format(len(faces)), (center_x+50, center_y+40), 
-                                                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+        cv2.putText(overlay_buffer, 'NUMBER: {}'.format(len(faces)), (int(80*self.cv_h_scale), int(60*self.cv_h_scale)), 
+                                                            cv2.FONT_HERSHEY_SIMPLEX, 0.7*self.cv_h_scale, (255, 255, 255),int(self.cv_h_scale))
         self.overlay = overlay_buffer
 
     def cv_detect_objects(self, img):
         overlay_buffer = np.zeros_like(img)
-        cv2.putText(overlay_buffer, 'CV_OBJS', (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+        cv2.putText(overlay_buffer, 'CV_OBJS', (int(80*self.cv_h_scale), int(60*self.cv_h_scale)), cv2.FONT_HERSHEY_SIMPLEX, 0.7*self.cv_h_scale, (255, 255, 255),int(self.cv_h_scale))
 
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
@@ -729,19 +744,20 @@ class OpencvFuncs():
                 (startX, startY, endX, endY) = box.astype("int")
 
                 label = "{}: {:.2f}%".format(self.class_names[idx], confidence * 100)
-                cv2.rectangle(overlay_buffer, (startX, startY), (endX, endY), (0, 255, 0), 2)
+                cv2.rectangle(overlay_buffer, (startX, startY), (endX, endY), (0, 255, 0),int(self.cv_h_scale))
                 y = startY - 15 if startY - 15 > 15 else startY + 15
-                cv2.putText(overlay_buffer, label, (startX, y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+                cv2.putText(overlay_buffer, label, (startX, y), cv2.FONT_HERSHEY_SIMPLEX, 0.7*self.cv_h_scale, (0, 255, 0),int(self.cv_h_scale))
 
         self.overlay = overlay_buffer
 
     def cv_detect_color(self, img):
+        overlay_buffer = np.zeros_like(img)
+        height, width = img.shape[:2]
+        img = cv2.resize(img, (self.base_width, self.base_height))
         cx, cy, w = None, None, None
         input_speed_x = 0
         input_turning = 0
-        img_h, img_w = img.shape[:2]
-        overlay_buffer = np.zeros_like(img)
-        center_x, center_y = img_w // 2, img_h // 2
+        center_x, center_y = self.base_width // 2, self.base_height // 2
         lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
         mask = cv2.inRange(lab, self.color_lower, self.color_upper)
         contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -754,10 +770,9 @@ class OpencvFuncs():
                 circularity = area / (math.pi * radius * radius)
                 if 0.5 < circularity < 1.3:  
                     cx, cy, w = int(x), int(y), int(radius*2)
-
-                    cv2.circle(overlay_buffer, (cx, cy), int(radius), (0, 255, 0), 2)
-                    cv2.circle(overlay_buffer, (cx, cy), 3, (255, 0, 0), -1)
-                    # print(f'Tracking ball at ({cx}, {cy}), area={area:.1f}, circularity={circularity:.2f}')
+                    cv2.circle(overlay_buffer, (int(cx* self.cv_w_scale), int(cy * self.cv_h_scale)), int(radius*self.cv_h_scale), (0, 255, 0),int(self.cv_h_scale))
+                    cv2.circle(overlay_buffer, (int(cx* self.cv_w_scale), int(cy * self.cv_h_scale)), int(3*self.cv_h_scale), (255, 0, 0), -1)
+                    # print(f'Tracking ball at ({cx* self.cv_w_scale}, {cy * self.cv_h_scale}), area={area:.1f}, circularity={circularity:.2f}')
 
         if cx is not None:
             if self.track_base =='ugv':
@@ -765,7 +780,7 @@ class OpencvFuncs():
                 self.distance_buffer.append(distance_m)
                 distance_avg = robust_mean_remove_outliers(np.array(self.distance_buffer))
 
-                error_x = cx - img_w/2
+                error_x = cx - self.base_height/2
                 current_yaw = np.arctan2(error_x, self.cam_k[0,0])
                 self.color_ball_yaw_buffer.append(current_yaw)
                 yaw_avg = robust_mean_remove_outliers(np.array(self.color_ball_yaw_buffer), is_angle=True)
@@ -795,13 +810,13 @@ class OpencvFuncs():
         if not self.cv_movtion_lock:
             if self.track_base =='ugv':
                 self.base_ctrl.base_json_ctrl({"T": f['cmd_config']['cmd_ros_movition_ctrl'],"X": input_speed_x,"Z": input_turning})
-                cv2.putText(overlay_buffer, f'X: {input_speed_x:.2f}  Z: {input_turning:.2f}',(center_x+50, center_y+80), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+                cv2.putText(overlay_buffer, f'X: {input_speed_x:.2f} Z: {input_turning:.2f}',(int(80*self.cv_h_scale), int(100*self.cv_h_scale)), cv2.FONT_HERSHEY_SIMPLEX, 0.7*self.cv_h_scale, (255, 255, 255),int(self.cv_h_scale))
             if self.track_base =='pt':
                 self.base_ctrl.base_json_ctrl({"T": f['cmd_config']['cmd_gimbal_ctrl'],"X": self.pan_angle,"Y": self.tilt_angle,"SPD": 0,"ACC":128})
-                cv2.putText(overlay_buffer, f'X: {self.pan_angle:.2f}  Y: {self.tilt_angle:.2f}',(center_x+50, center_y+80), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+                cv2.putText(overlay_buffer, f'X: {self.pan_angle:.2f} Y: {self.tilt_angle:.2f}',(int(80*self.cv_h_scale), int(100*self.cv_h_scale)), cv2.FONT_HERSHEY_SIMPLEX, 0.7*self.cv_h_scale, (255, 255, 255),int(self.cv_h_scale))
                 
-        cv2.putText(overlay_buffer, ' UPPER: {}'.format(self.color_upper), (center_x+50, center_y+100), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 128, 128), 1)
-        cv2.putText(overlay_buffer, ' LOWER: {}'.format(self.color_lower), (center_x+50, center_y+120), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 128, 128), 1)
+        cv2.putText(overlay_buffer, ' UPPER: {}'.format(self.color_upper), (int(80*self.cv_h_scale), int(60*self.cv_h_scale)), cv2.FONT_HERSHEY_SIMPLEX, 0.7*self.cv_h_scale, (255, 128, 128),int(self.cv_h_scale))
+        cv2.putText(overlay_buffer, ' LOWER: {}'.format(self.color_lower), (int(80*self.cv_h_scale), int(80*self.cv_h_scale)), cv2.FONT_HERSHEY_SIMPLEX, 0.7*self.cv_h_scale, (255, 128, 128),int(self.cv_h_scale))
         self.overlay = overlay_buffer
 
     def calculate_distance(self, lm1, lm2):
@@ -828,29 +843,33 @@ class OpencvFuncs():
         return (value - original_min) / (original_max - original_min) * (new_max - new_min) + new_min
 
     def mp_detect_hand(self, img):
+        overlay_buffer = np.zeros_like(img)
         height, width = img.shape[:2]
+        img = cv2.resize(img, (self.base_width, self.base_height))
+
         center_x, center_y = width // 2, height // 2
 
         imgRGB = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         results = self.hands.process(imgRGB)
 
-        overlay_buffer = np.zeros_like(imgRGB)
         get_pwm = 0
 
         if results.multi_hand_landmarks:
             for handLms in results.multi_hand_landmarks:
                 xs = []
                 ys = []
+                landmark_points = []
                 # draw joints
                 for id, lm in enumerate(handLms.landmark):
                     cx = int(lm.x * width)
                     cy = int(lm.y * height)
                     xs.append(cx)
                     ys.append(cy)
-                    cv2.circle(overlay_buffer, (cx, cy), 5, (255, 0, 0), -1)
+                    landmark_points.append((cx, cy))
+                    cv2.circle(overlay_buffer, (cx, cy), int(5*self.cv_h_scale), (0, 0, 255), -1)
 
                 # draw lines
-                self.mpDraw.draw_landmarks(overlay_buffer, handLms, self.mpHands.HAND_CONNECTIONS)
+                # self.mpDraw.draw_landmarks(overlay_buffer, handLms, self.mpHands.HAND_CONNECTIONS)
 
                 target_pos = handLms.landmark[self.mpHands.HandLandmark.INDEX_FINGER_TIP]
 
@@ -860,8 +879,17 @@ class OpencvFuncs():
                 track_cx = int((min_x + max_x) / 2)
                 track_cy = int((min_y + max_y) / 2)
 
-                cv2.rectangle(overlay_buffer, (min_x, min_y), (max_x, max_y), (0, 255, 0), 2)
-                cv2.circle(overlay_buffer, (track_cx,track_cy), 8, (0, 0, 255), -1)
+                cv2.rectangle(overlay_buffer, (min_x, min_y), (max_x, max_y), (0, 255, 0),int(self.cv_h_scale))
+                cv2.circle(overlay_buffer, (track_cx,track_cy), int(8*self.cv_h_scale), (0, 255, 0), -1)
+                
+                for connection in self.mpHands.HAND_CONNECTIONS:
+                    start_idx = connection[0]
+                    end_idx = connection[1]
+
+                    x1, y1 = landmark_points[start_idx]
+                    x2, y2 = landmark_points[end_idx]
+
+                    cv2.line(overlay_buffer, (x1, y1), (x2, y2), (255,255,255), int(self.cv_h_scale))
 
                 # print(f"x:{target_pos.x} y:{target_pos.y}")
                 if not self.cv_movtion_lock:
@@ -875,8 +903,12 @@ class OpencvFuncs():
                     self.pt_y += delta_y
                     self.pt_x = max(-3.14, min(3.14, self.pt_x))
                     self.pt_y = max(-0.523, min(1.57, self.pt_y))
+
+                    self.pan_angle = -(180 * self.pt_x) / 3.14
+                    self.tilt_angle = (180 * self.pt_y) / 3.14
+
                     self.base_ctrl.base_json_ctrl({"T": f['cmd_config']['cmd_gimbal_ctrl'],"X": self.pan_angle,"Y": self.tilt_angle,"SPD": 0,"ACC":128})
-                    cv2.putText(overlay_buffer, f'X: {self.pan_angle:.2f}  Y: {self.tilt_angle:.2f}',(center_x+50, center_y+80), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+                    cv2.putText(overlay_buffer, f'X: {self.pan_angle:.2f} Y: {self.tilt_angle:.2f}',(int(80*self.cv_h_scale), int(60*self.cv_h_scale)), cv2.FONT_HERSHEY_SIMPLEX, 0.7*self.cv_h_scale, (255, 255, 255),int(self.cv_h_scale))
                 
                 # check hand gs
                 pinky_finger_gs = self.calculate_angle(
@@ -899,8 +931,8 @@ class OpencvFuncs():
 
                 # LED Ctrl
                 if self.cv_movtion_lock and middle_finger_gs > 20 and pinky_finger_gs > 90:
-                    cv2.putText(overlay_buffer, ' GS: LED Ctrl', (center_x+50, center_y+100), 
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 128, 128), 1)
+                    cv2.putText(overlay_buffer, ' GS: LED Ctrl', (int(80*self.cv_h_scale), int(60*self.cv_h_scale)), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7*self.cv_h_scale, (255, 128, 128),int(self.cv_h_scale))
                     tips_distance = self.calculate_distance(handLms.landmark[self.mpHands.HandLandmark.INDEX_FINGER_TIP],
                         handLms.landmark[self.mpHands.HandLandmark.THUMB_TIP])
 
@@ -918,8 +950,8 @@ class OpencvFuncs():
 
                 # Take Pic
                 elif self.cv_movtion_lock and middle_finger_gs < 10 and pinky_finger_gs > 90 and index_finger_gs < 10:
-                    cv2.putText(overlay_buffer, ' GS: Take Pic', (center_x+50, center_y+100), 
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 128, 128), 1)
+                    cv2.putText(overlay_buffer, ' GS: Take Pic', (int(80*self.cv_h_scale), int(60*self.cv_h_scale)), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7*self.cv_h_scale, (255, 128, 128),int(self.cv_h_scale))
                     if time.time() - self.gs_pic_last_time > self.gs_pic_interval:
                         self.base_ctrl.lights_ctrl(255, 255)
                         time.sleep(0.01)
@@ -929,15 +961,18 @@ class OpencvFuncs():
 
                 # Not Found
                 elif self.cv_movtion_lock:
-                    cv2.putText(overlay_buffer, ' GS: Not Defined', (center_x+50, center_y+100), 
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 128, 128), 1)
+                    cv2.putText(overlay_buffer, ' GS: Not Defined', (int(80*self.cv_h_scale), int(60*self.cv_h_scale)), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7*self.cv_h_scale, (255, 128, 128),int(self.cv_h_scale))
                     self.base_ctrl.lights_ctrl(0, 0)
 
         self.overlay = overlay_buffer
 
     def cv_auto_drive(self, img):
-        h, w = img.shape[:2]
-        cx = w // 2
+        overlay_buffer = np.zeros_like(img)
+        height, width = img.shape[:2]
+        img = cv2.resize(img, (self.base_width, self.base_height))
+
+        cx = width // 2
 
         lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
 
@@ -959,37 +994,50 @@ class OpencvFuncs():
             if cv2.contourArea(c) < 50:
                 continue
 
+            c = c.astype(np.float32)
+
+            c[:, :, 0] += x1
+            c[:, :, 1] += y1
+
+            c[:, :, 0] *= self.cv_w_scale
+            c[:, :, 1] *= self.cv_h_scale
+
+            c = c.astype(np.int32)
+
+            cv2.drawContours(overlay_buffer, [c], -1, (0,0,255), int(2*self.cv_h_scale))
+
             (x, y), _, _ = cv2.minAreaRect(c)
-            x += x1
             cx_sum += x * wt
             weight_sum += wt
             has_line = True
 
         if self.state == TrackState.FOLLOW:
-            if not has_line or weight_sum == 0:
+            if has_line and weight_sum > 0:
+
+                x = cx_sum / weight_sum
+                err = (x - cx) / cx
+
+                self.yaw_buffer.append(err)
+                err_f = robust_mean_remove_outliers(np.array(self.yaw_buffer))
+
+                d = err_f - self.last_error
+                self.last_error = err_f
+
+                z = self.kp * err_f + self.kd * d
+
+                input_speed = self.line_track_speed
+                input_turning = -z
+
+            else:
                 self.state = TrackState.SEARCH_SPIN
                 self.search_start_time = time.time()
                 self.scan_dir = 1 if self.last_error > 0 else -1
-                # print(f"Lost line → SEARCH_SPIN ({'RIGHT' if self.scan_dir > 0 else 'LEFT'})")
+
                 input_speed = 0.0
                 input_turning = 0.0
 
-            x = cx_sum / weight_sum
-            err = (x - cx) / cx
-
-            self.yaw_buffer.append(err)
-            err_f = robust_mean_remove_outliers(np.array(self.yaw_buffer))
-
-            d = err_f - self.last_error
-            self.last_error = err_f
-
-            z = self.kp * err_f + self.kd * d
-
-            input_speed = self.line_track_speed
-            input_turning = -z
-
         elif self.state == TrackState.SEARCH_SPIN:
-            if has_line:
+            if has_line and weight_sum > 0:
                 self.state = TrackState.RECOVER
                 self.recover_start_time = time.time()
                 self.last_error = 0.0
@@ -1006,25 +1054,29 @@ class OpencvFuncs():
         elif self.state == TrackState.RECOVER:
             dt = time.time() - self.recover_start_time
 
-            if not has_line:
+            if has_line:
+                if weight_sum > 0:
+                    x = cx_sum / weight_sum
+                else:
+                    x = self.base_width // 2
+
+                err = (x - cx) / cx
+                z = 0.5 * self.kp * err
+
+                input_speed = 0.0
+                input_turning = -z
+
+                if dt > self.recover_time:
+                    self.state = TrackState.FOLLOW
+                    self.last_error = 0.0
+                    self.yaw_buffer.clear()
+
+            else:
                 self.state = TrackState.SEARCH_SPIN
                 self.search_start_time = time.time()
                 self.scan_dir = 1 if self.last_error > 0 else -1
-                # print("Recover lost → SEARCH_SPIN")
-                return
-
-            if dt > self.recover_time:
-                self.state = TrackState.FOLLOW
-                self.last_error = 0.0
-                # print("Recover done → FOLLOW")
-                return
-
-            x = cx_sum / weight_sum
-            err = (x - cx) / cx
-            z = 0.5 * self.kp * err
-
-            input_speed = 0.0
-            input_turning = -z
+                input_speed = 0.0
+                input_turning = self.scan_dir * self.scan_yaw_base
 
         if not self.cv_movtion_lock:
             self.base_ctrl.base_json_ctrl({
@@ -1033,32 +1085,71 @@ class OpencvFuncs():
                 "Z": input_turning,
             })
 
-        overlay = np.zeros_like(img)
-        cv2.putText(overlay, f'State: {self.state.name}', (80, 60),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-        cv2.putText(overlay, f'X: {input_speed:.2f}  Z: {input_turning:.2f}',
-                    (80, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-        self.overlay = overlay
+        cv2.putText(overlay_buffer, f'State: {self.state.name}', (int(80*self.cv_h_scale), int(60*self.cv_h_scale)),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7*self.cv_h_scale, (255, 255, 255),int(self.cv_h_scale))
+        cv2.putText(overlay_buffer, f'X: {input_speed:.2f}  Z: {input_turning:.2f}',
+                    (int(80*self.cv_h_scale), int(90*self.cv_h_scale)), cv2.FONT_HERSHEY_SIMPLEX, 0.7*self.cv_h_scale, (255, 255, 255),int(self.cv_h_scale))
+        self.overlay = overlay_buffer
 
     def mediaPipe_faces(self, img):
+        overlay_buffer = np.zeros_like(img)
+        height, width = img.shape[:2]
+        img = cv2.resize(img, (self.base_width, self.base_height))
+
         image = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         results = self.face_detection.process(image)
 
-        overlay_buffer = np.zeros_like(image)
-        cv2.putText(overlay_buffer, 'MediaPipe Faces', (100, 70), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
+        cv2.putText(overlay_buffer, 'MediaPipe Faces', (int(80*self.cv_h_scale), int(60*self.cv_h_scale)), cv2.FONT_HERSHEY_SIMPLEX, 0.7*self.cv_h_scale, (255, 255, 255),int(self.cv_h_scale))
         if results.detections:
             for detection in results.detections:
-                self.mpDraw.draw_detection(overlay_buffer, detection)
+                # self.mpDraw.draw_detection(overlay_buffer, detection)
+                bbox = detection.location_data.relative_bounding_box
+
+                xmin = int(bbox.xmin * width)
+                ymin = int(bbox.ymin * height)
+                w = int(bbox.width * width)
+                h = int(bbox.height * height)
+
+                cv2.rectangle(overlay_buffer,(xmin, ymin),(xmin + w, ymin + h),(0,255,0),int(self.cv_h_scale))
+
+                for keypoint in detection.location_data.relative_keypoints:
+
+                    x = int(keypoint.x * width)
+                    y = int(keypoint.y * height)
+
+                    cv2.circle(overlay_buffer, (x, y), 4, (0,0,255), -1)
         self.overlay = overlay_buffer
 
     def mediaPipe_pose(self, img):
+        overlay_buffer = np.zeros_like(img)
+        height, width = img.shape[:2]
+        img = cv2.resize(img, (self.base_width, self.base_height))
+
         image = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         results = self.pose.process(image)
 
-        overlay_buffer = np.zeros_like(image)
-        cv2.putText(overlay_buffer, 'MediaPipe Pose', (100, 70), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
+        cv2.putText(overlay_buffer, 'MediaPipe Pose', (int(80*self.cv_h_scale), int(60*self.cv_h_scale)), cv2.FONT_HERSHEY_SIMPLEX, 0.7*self.cv_h_scale, (255, 255, 255),int(self.cv_h_scale))
         if results.pose_landmarks:
-            self.mpDraw.draw_landmarks(overlay_buffer, results.pose_landmarks, self.mp_pose.POSE_CONNECTIONS)
+            # self.mpDraw.draw_landmarks(overlay_buffer, results.pose_landmarks, self.mp_pose.POSE_CONNECTIONS)
+            landmark_points = []
+
+            for lm in results.pose_landmarks.landmark:
+
+                cx = int(lm.x * width)
+                cy = int(lm.y * height)
+
+                landmark_points.append((cx, cy))
+
+                cv2.circle(overlay_buffer, (cx, cy), 4, (0,0,255), -1)
+
+            for connection in self.mp_pose.POSE_CONNECTIONS:
+                start_idx = connection[0]
+                end_idx = connection[1]
+
+                x1, y1 = landmark_points[start_idx]
+                x2, y2 = landmark_points[end_idx]
+
+                cv2.line(overlay_buffer, (x1,y1), (x2,y2), (255,255,255), int(self.cv_h_scale))
         self.overlay = overlay_buffer
 
     def info_update(self, megs, color, size):

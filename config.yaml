@@ -61,6 +61,31 @@ sbc_config:
   disabled_http_log: true
   feedback_interval: 0.001
 video:
+  # IMX335 5MP USB Camera (B)
+  # [0]: 'MJPG' (Motion-JPEG, compressed)
+  #       Size: Discrete 160x120
+  #               Interval: Discrete 0.033s (30.000 fps)
+  #       Size: Discrete 320x240
+  #               Interval: Discrete 0.033s (30.000 fps)
+  #       Size: Discrete 352x288
+  #               Interval: Discrete 0.033s (30.000 fps)
+  #       Size: Discrete 640x480
+  #               Interval: Discrete 0.033s (30.000 fps)
+  #       Size: Discrete 800x600
+  #               Interval: Discrete 0.033s (30.000 fps)
+  #       Size: Discrete 1024x768
+  #               Interval: Discrete 0.033s (30.000 fps)
+  #       Size: Discrete 1280x720
+  #               Interval: Discrete 0.033s (30.000 fps)
+  #       Size: Discrete 1280x960
+  #               Interval: Discrete 0.033s (30.000 fps)
+  #       Size: Discrete 1920x1080
+  #               Interval: Discrete 0.033s (30.000 fps)
+  #       Size: Discrete 2048x1536
+  #               Interval: Discrete 0.033s (30.000 fps)
+  #       Size: Discrete 2592x1944
+  #               Interval: Discrete 0.033s (30.000 fps)
+  # Recommended resolution settings for line following: 640x480,1024x768,1280x960,2048x1536
   default_res_h: 480
   default_res_w: 640
 cmd_config:
