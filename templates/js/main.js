@@ -404,6 +404,50 @@ if(pauseBtn){
 //video
 const videoElement = document.getElementById('video');
 const message = document.getElementById('message');
+const wrapper = document.getElementById('video-wrapper');
+const miniPlayer = document.getElementById('mini-player');
+
+let placeholder = null;
+let isMini = false;
+
+function enterMiniPlayer() {
+  if (isMini) return;
+  isMini = true;
+
+  miniPlayer.appendChild(videoElement);
+  miniPlayer.style.display = 'block';
+
+  videoElement.style.width = '100%';
+  videoElement.style.height = '100%';
+}
+
+function exitMiniPlayer() {
+  if (!isMini) return;
+  isMini = false;
+
+  wrapper.appendChild(videoElement);
+  miniPlayer.style.display = 'none';
+
+  if (placeholder) {
+    placeholder.remove();
+    placeholder = null;
+  }
+
+  videoElement.style.width = '100%';
+  videoElement.style.height = '100%';
+}
+
+const observer = new IntersectionObserver((entries) => {
+  entries.forEach(entry => {
+    if (!entry.isIntersecting) {
+      enterMiniPlayer();
+    } else {
+      exitMiniPlayer();
+    }
+  });
+}, { threshold: 0.05 });
+
+observer.observe(wrapper);
 
 const playPauseBtn = document.getElementById('playPause-btn');
 const playPauseIcon = document.getElementById('playPause-icon');

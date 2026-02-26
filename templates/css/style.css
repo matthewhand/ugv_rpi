@@ -68,8 +68,10 @@ main {
     overflow: hidden;
 }
 .video video{
-    width: 640px;
-    height: 480px;
+    /* width: 640px;
+    height: 480px; */
+    width: 100%;
+    height: 100%;
     border-radius: 4px;
     /* z-index: -1;       */
     pointer-events: none;
@@ -78,6 +80,20 @@ main {
     width: 640px;
     height: 480px;
     border-radius: 4px;
+}
+.mini-player {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  width: 320px;
+  height: 180px;
+  background: black;
+  box-shadow: 0 8px 20px rgba(0,0,0,0.3);
+  z-index: 9999;
+  display: none;
+  border-radius: 12px;
+  overflow: hidden;
+  cursor: pointer;
 }
 .feed{
     color: #4FF5C0;
@@ -838,12 +854,28 @@ li:hover .delete-audio-btn {
         height: 75vw;
     }
     .video video{
-        width: 100.1vw;
-        height: auto;
+        /* width: 100.1vw;
+        height: auto; */
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
     }    
     .video img{
         width: 100.1vw;
         height: auto;
+    }
+    .mini-player {
+        position: fixed;
+        bottom: 12px;
+        right: 12px;
+        width: 40vw;
+        height: 22.5vw; 
+        background: black;
+        box-shadow: 0 6px 16px rgba(0,0,0,0.3);
+        z-index: 9999;
+        display: none;
+        border-radius: 10px;
+        overflow: hidden;
     }
     .video_feed > div{
         width: 96vw;
@@ -1012,12 +1044,28 @@ li:hover .delete-audio-btn {
         height: 75vw;
     }
     .video video{
-        width: 100.2vw;
-        height: auto;
+        /* width: 100.2vw;
+        height: auto; */
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
     }    
     .video img{
         width: 100.2vw;
         height: auto;
+    }
+    .mini-player {
+        position: fixed;
+        bottom: 12px;
+        right: 12px;
+        width: 40vw;
+        height: 22.5vw; 
+        background: black;
+        box-shadow: 0 6px 16px rgba(0,0,0,0.3);
+        z-index: 9999;
+        display: none;
+        border-radius: 10px;
+        overflow: hidden;
     }
     .video_feed > div{
         width: 96vw;
