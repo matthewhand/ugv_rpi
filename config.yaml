@@ -83,9 +83,7 @@ video:
   #               Interval: Discrete 0.033s (30.000 fps)
   #       Size: Discrete 2048x1536
   #               Interval: Discrete 0.033s (30.000 fps)
-  #       Size: Discrete 2592x1944
-  #               Interval: Discrete 0.033s (30.000 fps)
-  # Recommended resolution settings for line following: 640x480,1024x768,1280x960,2048x1536
+  # Recommended resolution settings for color detect and line following: 640x480,1024x768,1280x960
   default_res_h: 480
   default_res_w: 640
 cmd_config:

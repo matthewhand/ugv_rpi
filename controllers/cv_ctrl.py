@@ -780,7 +780,7 @@ class OpencvFuncs():
                 self.distance_buffer.append(distance_m)
                 distance_avg = robust_mean_remove_outliers(np.array(self.distance_buffer))
 
-                error_x = cx - self.base_height/2
+                error_x = cx - center_x
                 current_yaw = np.arctan2(error_x, self.cam_k[0,0])
                 self.color_ball_yaw_buffer.append(current_yaw)
                 yaw_avg = robust_mean_remove_outliers(np.array(self.color_ball_yaw_buffer), is_angle=True)
