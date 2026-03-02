@@ -268,13 +268,19 @@ class OpencvFuncs():
         
         self.line_lower = np.array(f['cv']['line_lower'], dtype=np.uint8)
         self.line_upper = np.array(f['cv']['line_upper'], dtype=np.uint8)
-
-        self.roi = [
-            (250, 300, 40, 600, 0.1),
-            (300, 400, 40, 600, 0.3),
-            (400, 480, 40, 600, 0.6),
+        module_type = f['base_config']['module_type']
+        if module_type==0 or module_type==2:
+            self.roi = [
+                (250, 300, 40, 600, 0.1),
+                (300, 400, 40, 600, 0.3),
+                (400, 480, 40, 600, 0.6),
+            ]
+        elif module_type==1 or module_type==3:
+            self.roi = [
+            (150, 200, 40, 600, 0.2),
+            (200, 250, 40, 600, 0.3),
+            (250, 300, 40, 600, 0.5)
         ]
-
         # --- SEARCH_SPIN ---
         self.search_start_time = 0.0
         self.scan_dir = -1                          
@@ -408,6 +414,11 @@ class OpencvFuncs():
                         self.camera = cv2.VideoCapture(0, cv2.CAP_V4L2)
                         self.camera.set(cv2.CAP_PROP_FRAME_WIDTH,  frame_width)
                         self.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, frame_height)
+                        self.camera.set(
+                            cv2.CAP_PROP_FOURCC,
+                            cv2.VideoWriter_fourcc(*'MJPG')
+                        )
+
                 elif self.csi_camera_connected:
                     input_frame = self.picam2.capture_array()
                 elif self.oak_camera_connected:
@@ -454,7 +465,7 @@ class OpencvFuncs():
                     if contains_chinese(text):
                         input_frame = draw_chinese_text(input_frame, text, 
                                     (base_x, base_y - 10), 
-                                    int(35*size), color)
+                                    int(35*size*self.cv_h_scale), color)
                     else:
                         cv2.putText(input_frame, text, 
                                 (base_x, base_y), 
@@ -562,7 +573,7 @@ class OpencvFuncs():
         for sensor_line in self.base_ctrl.rl.sensor_data:
             # sensor_line = sensor_line[:-2]
             cv2.putText(osd_frame, sensor_line,
-                        (100, 50 + sensor_index * 20), 
+                        (int(100*self.cv_w_scale), int((50 + sensor_index * 20*self.cv_h_scale))), 
                         cv2.FONT_HERSHEY_SIMPLEX, 0.7*self.cv_h_scale, (255,255,255),int(self.cv_h_scale))
             sensor_index = sensor_index + 1
 
