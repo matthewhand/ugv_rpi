@@ -170,13 +170,11 @@ class BaseController:
 					self.base_data = self.data_buffer
 					self.data_buffer = None
 					if self.base_data["T"] == 1001:
-						# print(self.base_data)
 						v = self.base_data.get('v')
 						if isinstance(v, (int, float)):
 							self.base_voltage_status = v
-						return self.base_data
+					return self.base_data
 			self.rl.clear_buffer()
-			self.base_data = self.data_buffer
 			return self.base_data
 		except Exception as e:
 			self.rl.clear_buffer()
