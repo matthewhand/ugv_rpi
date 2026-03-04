@@ -505,7 +505,7 @@ class JoyTeleop:
 
             x = hats[0][1] * self.xspeed_limit * self.speed_gear
             # y = axis[self.mapping["LEFT_STICK_X"]] * self.yspeed_limit * self.speed_gear
-            angular = -hats[0][0] * self.angular_speed_limit * self.angular_Gear
+            angular = -hats[0][0] * self.angular_speed_limit * self.speed_gear
 
             self.send_cmd_vel(
                 max(-self.xspeed_limit, min(self.xspeed_limit, x)),
@@ -520,14 +520,14 @@ class JoyTeleop:
 
             if led_next_gear_pressed:
                 if not self.prev_led_next_gear_pressed:
-                    self.led_Gear = self.next_gear(self.led_Gear, self.led_level)
+                    self.led_gear = self.next_gear(self.led_gear, self.led_level)
                     self.show_msg("led")
                     self.y_press_start = current_time
                     self.last_repeat_time = current_time
                 else:
                     if current_time - self.y_press_start >= self.repeat_delay:
                         if current_time - self.last_repeat_time >= self.repeat_interval:
-                            self.led_Gear = self.next_gear(self.led_Gear, self.led_level)
+                            self.led_gear = self.next_gear(self.led_gear, self.led_level)
                             self.show_msg("led")
                             self.last_repeat_time = current_time
             else:
@@ -535,14 +535,14 @@ class JoyTeleop:
 
             if led_down_gear_pressed:
                 if not self.prev_led_down_gear_pressed:
-                    self.led_Gear = self.down_gear(self.led_Gear, self.led_level)
+                    self.led_gear = self.down_gear(self.led_gear, self.led_level)
                     self.show_msg("led")
                     self.x_press_start = current_time
                     self.last_repeat_time = current_time
                 else:
                     if current_time - self.x_press_start >= self.repeat_delay:
                         if current_time - self.last_repeat_time >= self.repeat_interval:
-                            self.led_Gear = self.down_gear(self.led_Gear, self.led_level)
+                            self.led_gear = self.down_gear(self.led_gear, self.led_level)
                             self.show_msg("led")
                             self.last_repeat_time = current_time
             else:
@@ -551,7 +551,7 @@ class JoyTeleop:
             self.prev_led_next_gear_pressed = led_next_gear_pressed
             self.prev_led_down_gear_pressed = led_down_gear_pressed
 
-            led_data = self.led_limit * self.led_Gear
+            led_data = self.led_limit * self.led_gear
             self.send_led_ctrl(led_data)
 
             if module_type == 2:
@@ -603,7 +603,6 @@ class JoyTeleop:
 
                 r1_pressed = buttons[self.mapping["R1"]] == 1
                 if r1_pressed and not self.prev_r1_pressed:
-                    self.mode = 'joint'
                     if self.mode == 'joint':
                         self.mode = 'pose'
                     else:
@@ -612,20 +611,17 @@ class JoyTeleop:
                 self.prev_r1_pressed = r1_pressed
 
                 if self.mode == 'pose': 
-                    if abs(change_joystick_left_x) > threshold: 
-                        # self.armPoseState.y -= pose_sensitivity * change_joystick_left_x
-                        if r1_pressed:
-                            self.armPoseState.z -= pose_sensitivity * change_joystick_left_x
-                        else:
-                            self.armPoseState.y -= pose_sensitivity * change_joystick_left_x
-
                     if abs(change_joystick_left_y) > threshold: 
                         self.armPoseState.x -= pose_sensitivity * change_joystick_left_y
-                    
-                    # self.armPoseState.z -= pose_sensitivity * change_joystick_left_click;
+
+                    if abs(change_joystick_left_x) > threshold: 
+                        self.armPoseState.y -= pose_sensitivity * change_joystick_left_x
+
+                    self.armPoseState.z -= pose_sensitivity * change_joystick_left_click;
 
                     if abs(change_joystick_right_x) > threshold: 
                         self.armPoseState.r += joint_sensitivity * change_joystick_right_x
+
                     if abs(change_joystick_right_y) > threshold: 
                         self.armPoseState.p -= joint_sensitivity * change_joystick_right_y
                     
@@ -661,17 +657,15 @@ class JoyTeleop:
                 elif self.mode == 'joint': 
                     if abs(change_joystick_left_x) > threshold: 
                         self.armJointState.base -= joint_sensitivity * change_joystick_left_x
-                    if abs(change_joystick_left_y) > threshold: 
-                        # self.armJointState.shoulder -= joint_sensitivity * change_joystick_left_y
-                        if r1_pressed:
-                            self.armJointState.elbow -= joint_sensitivity * change_joystick_left_y
-                        else:
-                            self.armJointState.shoulder -= joint_sensitivity * change_joystick_left_y
 
-                    # self.armJointState.elbow += joint_sensitivity * change_joystick_left_click;
+                    if abs(change_joystick_left_y) > threshold: 
+                        self.armJointState.shoulder -= joint_sensitivity * change_joystick_left_y
+
+                    self.armJointState.elbow += joint_sensitivity * change_joystick_left_click;
 
                     if abs(change_joystick_right_x) > threshold: 
                         self.armJointState.roll += joint_sensitivity * change_joystick_right_x
+                        
                     if abs(change_joystick_right_y) > threshold: 
                         self.armJointState.wrist -= joint_sensitivity * change_joystick_right_y
 

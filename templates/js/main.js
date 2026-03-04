@@ -2130,28 +2130,18 @@ function gamepadCtrl() {
                 }
 
                 if (armMode === 'pose') {
-                    // armPoseState.z += change_joystick_left_click * pose_sensitivity;
+                    armPoseState.z += change_joystick_left_click * pose_sensitivity;
                     if (Math.abs(change_joystick_left_x) > threshold || Math.abs(change_joystick_left_y) > threshold || Math.abs(change_joystick_right_x) > threshold || Math.abs(change_joystick_right_y) > threshold) {
                         armPoseState.x -= change_joystick_left_y * pose_sensitivity;
-                        // armPoseState.y -= change_joystick_left_x * pose_sensitivity;
-                        if (r1Pressed) {
-                            armPoseState.z -= change_joystick_left_x * pose_sensitivity;
-                        } else {
-                            armPoseState.y -= change_joystick_left_x * pose_sensitivity;
-                        }
+                        armPoseState.y -= change_joystick_left_x * pose_sensitivity;
                         armPoseState.r += change_joystick_right_x * joint_sensitivity;
                         armPoseState.p += change_joystick_right_y * joint_sensitivity;
                     }
                 } else if(armMode === 'joint'){
-                    // armJointState.elbow -= change_joystick_left_click * joint_sensitivity;
+                    armJointState.elbow -= change_joystick_left_click * joint_sensitivity;
                     if (Math.abs(change_joystick_left_x) > threshold || Math.abs(change_joystick_left_y) > threshold || Math.abs(change_joystick_right_x) > threshold || Math.abs(change_joystick_right_y) > threshold) {
                         armJointState.base -= change_joystick_left_x * joint_sensitivity;
-                        // armJointState.shoulder -= change_joystick_left_y * joint_sensitivity;
-                        if (r1Pressed) {
-                            armJointState.elbow -= change_joystick_left_y * joint_sensitivity;
-                        } else {
-                            armJointState.shoulder -= change_joystick_left_y * joint_sensitivity;
-                        }
+                        armJointState.shoulder -= change_joystick_left_y * joint_sensitivity;
                         armJointState.roll += change_joystick_right_x * joint_sensitivity;
                         armJointState.wrist += change_joystick_right_y * joint_sensitivity;
                     }
