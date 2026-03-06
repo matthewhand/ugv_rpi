@@ -85,7 +85,7 @@
                                         </div>
                                     </div>
                                     <div class="feed feed_r_b">
-                                        <div class="video_btn_container ">
+                                        <div id="armControlButtons" class="video_btn_container ">
                                             <button id="arm_mode_toggle" class="video_ctl_btn ctl_btn_active" onclick="toggleArmMode()">Joint</button>
                                             <button id="press_mode_toggle" class="video_ctl_btn ctl_btn_active" onclick="togglePressMode()">Increase</button>
                                         </div>
@@ -200,6 +200,14 @@
                                 <div><button onclick="speedRateCtrl(mid_rate);" class="ctl_btn">Middle</button></div>
                                 <div><button onclick="speedRateCtrl(max_rate);" class="ctl_btn">Fast</button></div>
                             </div>
+                        </div>
+                        <div class="roarm_view" id="roarmView">  
+                            <h2 class="sc_title feed_ct_tt">RoArm View</h2>
+                                <iframe
+                                    id="roarmViewerFrame"
+                                    class="roarm_viewer_frame"
+                                    allowfullscreen>
+                                </iframe>
                         </div>
                         <div>  
                             <h2 class="sc_title feed_ct_tt">PT Steady/Ahead</h2>

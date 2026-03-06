@@ -17,11 +17,23 @@ import {
     fetchSendCommand,
 } from './api.js';
 import config from './config.js';
-
+let roarm_type =null;
+const view = document.getElementById("roarmView");
 //config
 function onConfigLoaded() {
   if (config.robot_name) {
     document.title = config.robot_name + " WEB CTRL";
+  }
+  if (config.module_type !== undefined) {
+    view.classList.remove("hidden");
+    if (config.module_type===1){
+        roarm_type='roarm_m2'
+    }else if (config.module_type===3){
+        roarm_type='roarm_m3'
+    }else if (config.module_type===0 || config.module_type===2){
+        view.classList.add("hidden");
+    }
+    document.getElementById("roarmViewerFrame").src = `http://${window.location.hostname}:3000/play/${roarm_type}/`;
   }
   startRobotControl();
 }
@@ -1066,6 +1078,7 @@ let leftJoystick = null;
 let rightJoystick = null;
 
 const armModeToggleEl = document.getElementById('arm_mode_toggle');
+const armButtons = document.getElementById("armControlButtons");
 
 function toggleArmMode() {
     if (leftJoystick) {
@@ -1075,6 +1088,11 @@ function toggleArmMode() {
     if (rightJoystick) {
         rightJoystick.destroy();
         rightJoystick = null;
+    }
+    if (config.module_type === 1 || config.module_type === 3) {
+        armButtons.classList.remove("hidden");
+    } else {
+        armButtons.classList.add("hidden");
     }
     if (slider && sliderText) {
         if(config.module_type === 2){
@@ -1092,6 +1110,8 @@ function toggleArmMode() {
                 leftJoystick = createJoystick('joystick_left', 'base', 'shoulder', 'elbow');
                 rightJoystick = createJoystick('joystick_right', 'roll', 'wrist', 'ahead_on');
             }        
+        }else if(config.module_type === 0 ){
+            slider.classList.add("hidden");
         }
     }    
 

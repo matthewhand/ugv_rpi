@@ -89,7 +89,7 @@ class BaseController:
             line = line.decode('utf-8')
             self.data_buffer = json.loads(line)
             self.base_data = self.data_buffer
-            self.read_fail_count = 0  # 成功后清零
+            self.read_fail_count = 0  
             return self.base_data
 
         except json.JSONDecodeError as e:

@@ -670,6 +670,20 @@ ul.video-list li a:hover div .normal_btn_play::before{background-image: url('../
     text-align: center;
     opacity: 1;
 }
+.roarm_view{
+    text-align: center;
+}
+.roarm_viewer_frame{
+    width: min(400px, 90vw);
+    aspect-ratio: 1 / 1;
+    border: none;
+    display: block;
+    margin: 0 auto;
+    border-radius: 8px;
+}
+.hidden{
+    display:none;
+}
 .delete-audio-btn {
     background-color: transparent;  
     color: rgb(255, 255, 255);                   
