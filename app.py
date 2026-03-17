@@ -283,7 +283,7 @@ def cmdline_ctrl(args_string):
 def handle_command():
     command = request.form['command']
     print("Received command:", command)
-    cvf.info_update("CMD:" + command, (0,255,255), 0.36)
+    cvf.info_update("CMD: " + command, (0,255,255), 0.36)
     try:
         cmdline_ctrl(command)
     except Exception as e:

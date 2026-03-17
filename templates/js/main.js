@@ -394,6 +394,50 @@ if(pauseBtn){
 //video
 const videoElement = document.getElementById('video');
 const message = document.getElementById('message');
+const wrapper = document.getElementById('video-wrapper');
+const miniPlayer = document.getElementById('mini-player');
+
+let placeholder = null;
+let isMini = false;
+
+function enterMiniPlayer() {
+  if (isMini) return;
+  isMini = true;
+
+  miniPlayer.appendChild(videoElement);
+  miniPlayer.style.display = 'block';
+
+  videoElement.style.width = '100%';
+  videoElement.style.height = '100%';
+}
+
+function exitMiniPlayer() {
+  if (!isMini) return;
+  isMini = false;
+
+  wrapper.appendChild(videoElement);
+  miniPlayer.style.display = 'none';
+
+  if (placeholder) {
+    placeholder.remove();
+    placeholder = null;
+  }
+
+  videoElement.style.width = '100%';
+  videoElement.style.height = '100%';
+}
+
+const observer = new IntersectionObserver((entries) => {
+  entries.forEach(entry => {
+    if (!entry.isIntersecting) {
+      enterMiniPlayer();
+    } else {
+      exitMiniPlayer();
+    }
+  });
+}, { threshold: 0.05 });
+
+observer.observe(wrapper);
 
 const playPauseBtn = document.getElementById('playPause-btn');
 const playPauseIcon = document.getElementById('playPause-icon');
@@ -901,10 +945,10 @@ socketCtrl.on('update', function (data) {
 
         if (data[config.detect_type] == config.cv_face|| data[config.detect_type] == config.cv_color || data[config.detect_type] == config.cv_auto|| data[config.detect_type] == config.mp_hand) {
             if (data[config.cv_movtion_mode] === true) {
-                cv_heartbeat_stop_flag = false;
+                cv_heartbeat_stop_flag = true;
                 CButtons[0]?.classList.add("ctl_btn_active");
             } else {
-                cv_heartbeat_stop_flag = true;
+                cv_heartbeat_stop_flag = false;
                 CButtons[1]?.classList.add("ctl_btn_active");
             }
         }
@@ -1412,7 +1456,7 @@ function baseSpeedCtrl() {
     updateJointUI();
 
     updatingSpeed = false;
-    heartbeat_send_flag = true;
+    heartbeat_send_flag = false;
 }
 
 let moveTimer = null;
@@ -1434,7 +1478,7 @@ document.querySelectorAll(
             baseSpeedState.y = 0;
             baseSpeedState.yaw = y_dir * config.max_turn_speed * speed_rate;
         }
-        heartbeat_send_flag = true;
+        heartbeat_send_flag = false;
     };
 
     const onDown = () => {

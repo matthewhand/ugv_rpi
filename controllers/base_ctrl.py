@@ -176,7 +176,6 @@ class BaseController:
 							self.base_voltage_status = v
 						return self.base_data
 			self.rl.clear_buffer()
-			self.base_data = self.data_buffer
 			return self.base_data
 		except Exception as e:
 			self.rl.clear_buffer()
