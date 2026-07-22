@@ -7,6 +7,9 @@ This is a Raspberry Pi example for the [Waveshare](https://www.waveshare.com/) U
 
 ![](./media/UGV-Rover-details-23.jpg)
 
+> **Fork:** [effectsmachine/ugv_rpi](https://github.com/effectsmachine/ugv_rpi) — forked from [waveshareteam/ugv_rpi](https://github.com/waveshareteam/ugv_rpi).  
+> Changes relative to upstream are documented below alongside the commits that introduced them.
+
 ## Basic Description
 The Waveshare UGV robots utilize both an upper computer and a lower computer. This repository contains the program running on the upper computer, which is typically a Raspberry Pi in this setup.  
 
