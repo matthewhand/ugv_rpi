@@ -71,7 +71,10 @@ si = os_info.SystemInfo()
 app = Flask(__name__)
 # log = logging.getLogger('werkzeug')
 # log.disabled = True
-socketio = SocketIO(app)
+# manage_session=False: avoid Flask 3.1 crash
+# "AttributeError: property 'session' of 'RequestContext' object has no setter"
+# which otherwise breaks ALL Socket.IO handlers (sticks never reach the robot).
+socketio = SocketIO(app, manage_session=False)
 
 # Hot reload for UI iteration on :5000
 #   UGV_HOT_RELOAD=1     → templates auto-reload + no browser cache (default for run_dev.sh)
@@ -509,6 +512,64 @@ def api_esp32_wifi():
         'success': False,
         'error': "action must be 'stop', 'start_ap', or 'info'",
     }), 400
+
+
+@app.route('/api/ptz', methods=['GET', 'POST'])
+def api_ptz():
+    """Interrogate / command pan-tilt.
+
+    GET  → hardware pan/tilt from ESP32 feedback (T:1001) + last commanded angles
+    POST {"action":"status"} same as GET
+    POST {"action":"goto","x":20,"y":0}  → T:133 then re-read positions
+    POST {"action":"center"}             → T:133 X=0 Y=0
+    POST {"action":"feedback"}           → force T:130 only
+    """
+    if request.method == 'GET':
+        snap = _ptz_status_snapshot(request_feedback=True)
+        olog.info(
+            'ptz_status',
+            f'PTZ status hw_pan={snap["hardware"].get("pan_deg")} '
+            f'hw_tilt={snap["hardware"].get("tilt_deg")}',
+            hw_pan=snap['hardware'].get('pan_deg'),
+            hw_tilt=snap['hardware'].get('tilt_deg'),
+            feedback_T=snap['hardware'].get('feedback_T'),
+            control_mode=snap['control_mode'],
+        )
+        return jsonify(snap)
+
+    data = request.get_json(silent=True) or {}
+    action = (data.get('action') or 'status').strip().lower()
+    if action in ('status', 'read', 'query'):
+        return jsonify(_ptz_status_snapshot(request_feedback=True))
+    if action in ('feedback',):
+        return jsonify(_ptz_status_snapshot(request_feedback=True, wait_s=0.5))
+    if action in ('center', 'home', 'goto', 'move', 'set'):
+        if action in ('center', 'home'):
+            x, y = 0.0, 0.0
+        else:
+            x = float(data.get('x', data.get('X', data.get('pan', 0))) or 0)
+            y = float(data.get('y', data.get('Y', data.get('tilt', 0))) or 0)
+        spd = float(data.get('spd', data.get('SPD', 0)) or 0)
+        acc = float(data.get('acc', data.get('ACC', 0)) or 0)
+        # Always send serial for diagnostics (independent of control_mode routing)
+        cmd = {'T': 133, 'X': x, 'Y': y, 'SPD': spd, 'ACC': acc}
+        try:
+            base.base_json_ctrl({'T': 4, 'cmd': 2})  # gimbal module
+            base.base_json_ctrl(cmd)
+            try:
+                cvf.pan_angle = x
+                cvf.tilt_angle = -y
+            except Exception:
+                pass
+            olog.info('ptz_cmd', f'PTZ goto X={x} Y={y} (serial T:133)', X=x, Y=y, path='serial')
+        except Exception as e:
+            olog.error('ptz_cmd', f'PTZ goto failed: {e}', error=str(e))
+            return jsonify({'success': False, 'error': str(e), 'command': cmd}), 500
+        time.sleep(float(data.get('wait_s', 0.6) or 0.6))
+        snap = _ptz_status_snapshot(request_feedback=True)
+        snap['command_sent'] = cmd
+        return jsonify(snap)
+    return jsonify({'success': False, 'error': "action must be status|goto|center|feedback"}), 400
 
 
 @app.route('/api/logs', methods=['GET', 'POST', 'DELETE'])
@@ -1172,18 +1233,96 @@ def _get_telemetry_payload():
         'cpu_temp': getattr(si, 'cpu_temp', None),
         'ram': getattr(si, 'ram', None),
         'wifi_rssi': getattr(si, 'wifi_rssi', None),
+        'pan_angle_cmd': getattr(cvf, 'pan_angle', None),  # last UI/CV command (not always HW)
+        'tilt_angle_cmd': getattr(cvf, 'tilt_angle', None),
         'pan_angle': getattr(cvf, 'pan_angle', None),
         'tilt_angle': getattr(cvf, 'tilt_angle', None),
         'video_fps': getattr(cvf, 'video_fps', None),
         'motor_enabled': getattr(base, 'enable_motor_control', None),
+        'control_mode': get_control_mode(),
     }
     try:
         bd = base.base_data if isinstance(getattr(base, 'base_data', None), dict) else {}
         data['voltage_raw'] = bd.get('v')
         data['base_feedback_T'] = bd.get('T')
+        # Hardware pan/tilt when module_type=2 and feedback flow is on (T:1001)
+        if 'pan' in bd:
+            data['hw_pan_deg'] = bd.get('pan')
+        if 'tilt' in bd:
+            data['hw_tilt_deg'] = bd.get('tilt')
+        data['base_feedback'] = {
+            k: bd.get(k) for k in ('T', 'L', 'R', 'v', 'pan', 'tilt', 'odl', 'odr')
+            if k in bd
+        }
     except Exception:
         pass
     return data
+
+
+def _ptz_status_snapshot(request_feedback=True, wait_s=0.35):
+    """Read pan/tilt: request ESP32 feedback (T:130) and return last base_data + ROS if any."""
+    if request_feedback:
+        try:
+            # Ensure gimbal module + feedback flow, then one-shot feedback
+            base.base_json_ctrl({'T': 4, 'cmd': int(f['base_config'].get('module_type') or 2)})
+            base.base_json_ctrl({'T': 131, 'cmd': 1})
+            base.base_json_ctrl({'T': 130})
+            time.sleep(max(0.05, float(wait_s)))
+            # Drain a few feedback frames so pan/tilt fields land in base.base_data
+            for _ in range(8):
+                fb = base.feedback_data()
+                if isinstance(fb, dict) and fb.get('T') == 1001:
+                    break
+                time.sleep(0.05)
+        except Exception as e:
+            olog.warn('ptz_status', f'Feedback request failed: {e}', error=str(e))
+
+    bd = base.base_data if isinstance(getattr(base, 'base_data', None), dict) else {}
+    hw_pan = bd.get('pan')
+    hw_tilt = bd.get('tilt')
+    out = {
+        'success': True,
+        'control_mode': get_control_mode(),
+        'module_type_cfg': f['base_config'].get('module_type'),
+        'serial_open': bool(getattr(base, 'ser', None)),
+        'commanded': {
+            'pan_deg': getattr(cvf, 'pan_angle', None),
+            'tilt_deg': getattr(cvf, 'tilt_angle', None),
+            'note': 'Last angles commanded by UI/CV in this process (not encoder readback).',
+        },
+        'hardware': {
+            'pan_deg': hw_pan,
+            'tilt_deg': hw_tilt,
+            'feedback_T': bd.get('T'),
+            'voltage_raw': bd.get('v'),
+            'wheel_L': bd.get('L'),
+            'wheel_R': bd.get('R'),
+            'raw': {k: bd.get(k) for k in bd} if bd else {},
+            'note': (
+                'From ESP32 T:1001 when module_type=2. pan/tilt absent means module not set '
+                'to gimbal, feedback flow off, or bus servos not responding (watch for T:1005).'
+            ),
+        },
+        'how_to_command': {
+            'serial_simple': {'T': 133, 'X': 20, 'Y': 0, 'SPD': 0, 'ACC': 0},
+            'feedback_on': {'T': 131, 'cmd': 1},
+            'feedback_once': {'T': 130},
+            'module_gimbal': {'T': 4, 'cmd': 2},
+        },
+    }
+    # Optional ROS joint readback via rosbridge subscribe is heavy; just probe topics exist
+    if get_control_mode() == 'ros2':
+        try:
+            import ros_motion
+            out['ros'] = {
+                'bridge': ros_motion.rosbridge_status(),
+                'joint_states_topic': ros_motion.joint_states_topic(),
+                'pt_joint_topic': ros_motion.pt_joint_topic(),
+                'note': 'Publish path only; position subscribe not polled here.',
+            }
+        except Exception as e:
+            out['ros'] = {'error': str(e)}
+    return out
 
 
 def _openai_tools_for_agent():
