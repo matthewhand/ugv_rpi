@@ -1525,11 +1525,18 @@ def _openai_tools_for_agent():
                 'parameters': {'type': 'object', 'properties': {}},
             },
         })
-    # Motion group
-    if by_name.get('send_motor_command', {}).get('status') == 'active':
+    # Motion group — register each leaf independently by catalog status
+    active_motion = {
+        n for n in _MOTION_TOOLS
+        if by_name.get(n, {}).get('status') == 'active'
+    }
+    if active_motion:
         try:
             import ros_motion
-            tools.extend(ros_motion.openai_motion_tools())
+            tools.extend(
+                t for t in ros_motion.openai_motion_tools()
+                if t.get('function', {}).get('name') in active_motion
+            )
         except Exception as e:
             print(f'[app.py] ros_motion tools unavailable: {e}')
     return tools
