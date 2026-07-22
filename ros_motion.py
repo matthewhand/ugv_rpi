@@ -73,6 +73,80 @@ def _limits() -> Tuple[float, float, int]:
     return max_lin, max_ang, max_ms
 
 
+# Default short timed move when duration_ms is missing/0 (unless continuous=true).
+_DEFAULT_DRIVE_MS = 1000
+
+# Module-level scheduled auto-stop (daemon timer). Cancelled on new drive/stop.
+_drive_timer_lock = threading.Lock()
+_drive_timer: Optional[threading.Timer] = None
+_drive_timer_gen = 0
+
+
+def _cancel_scheduled_drive_stop() -> None:
+    """Cancel any pending timed auto-stop (call under lock or via public stop)."""
+    global _drive_timer, _drive_timer_gen
+    with _drive_timer_lock:
+        _drive_timer_gen += 1
+        if _drive_timer is not None:
+            try:
+                _drive_timer.cancel()
+            except Exception:
+                pass
+            _drive_timer = None
+
+
+def _schedule_drive_stop(duration_ms: int) -> None:
+    """Schedule ros_stop after duration_ms; supersedes any previous timer."""
+    global _drive_timer, _drive_timer_gen
+    with _drive_timer_lock:
+        _drive_timer_gen += 1
+        gen = _drive_timer_gen
+        if _drive_timer is not None:
+            try:
+                _drive_timer.cancel()
+            except Exception:
+                pass
+            _drive_timer = None
+
+        def _fire():
+            global _drive_timer
+            with _drive_timer_lock:
+                if gen != _drive_timer_gen:
+                    return
+                _drive_timer = None
+            try:
+                publish_cmd_vel(0.0, 0.0)
+            except Exception:
+                pass
+
+        t = threading.Timer(max(0.0, duration_ms) / 1000.0, _fire)
+        t.daemon = True
+        _drive_timer = t
+        t.start()
+
+
+def _resolve_drive_duration(
+    duration_ms: Any,
+    continuous: bool,
+    max_ms: int,
+) -> Tuple[int, bool]:
+    """Return (duration_ms, continuous). Missing/0 → default short timed move."""
+    if continuous:
+        return 0, True
+    try:
+        if duration_ms is None or duration_ms == '' or int(duration_ms) == 0:
+            dur = _DEFAULT_DRIVE_MS
+        else:
+            dur = int(duration_ms)
+    except (TypeError, ValueError):
+        dur = _DEFAULT_DRIVE_MS
+    if dur < 0:
+        dur = _DEFAULT_DRIVE_MS
+    if dur > max_ms:
+        dur = max_ms
+    return dur, False
+
+
 class RosbridgeClient:
     """Rosbridge publisher. Can be used one-shot or kept open for high-rate PT."""
 
@@ -280,21 +354,34 @@ def prefer_ros_for_pt() -> bool:
 
 
 def ros_stop() -> Dict[str, Any]:
+    _cancel_scheduled_drive_stop()
     return publish_cmd_vel(0.0, 0.0)
 
 
-def ros_drive(linear_x: float, angular_z: float = 0.0, duration_ms: int = 0) -> Dict[str, Any]:
+def ros_drive(
+    linear_x: float,
+    angular_z: float = 0.0,
+    duration_ms: Any = None,
+    continuous: bool = False,
+) -> Dict[str, Any]:
+    """Publish cmd_vel; default is a short timed move with async auto-stop.
+
+    duration_ms missing/0 → 1000 ms timed move (unless continuous=True).
+    continuous=True → no auto-stop (caller must stop_motors).
+    Timed moves schedule stop on a daemon timer and return immediately.
+    """
     max_lin, max_ang, max_ms = _limits()
     lin = _clamp(float(linear_x), -max_lin, max_lin)
     ang = _clamp(float(angular_z), -max_ang, max_ang)
-    dur = int(duration_ms or 0)
-    if dur < 0:
-        dur = 0
-    if dur > max_ms:
-        dur = max_ms
+    dur, is_continuous = _resolve_drive_duration(duration_ms, bool(continuous), max_ms)
 
+    # New command supersedes any previous scheduled stop
+    _cancel_scheduled_drive_stop()
     result = publish_cmd_vel(lin, ang)
     result['duration_ms'] = dur
+    result['continuous'] = is_continuous
+    result['stopped'] = False
+    result['async_stop'] = False
     result['clamped'] = {
         'linear_x': lin,
         'angular_z': ang,
@@ -302,10 +389,10 @@ def ros_drive(linear_x: float, angular_z: float = 0.0, duration_ms: int = 0) -> 
         'max_angular': max_ang,
         'max_drive_ms': max_ms,
     }
-    if dur > 0:
-        time.sleep(dur / 1000.0)
-        stop = ros_stop()
-        result['stopped'] = stop.get('ok', False)
+    if not is_continuous and dur > 0:
+        _schedule_drive_stop(dur)
+        result['scheduled_stop_ms'] = dur
+        result['async_stop'] = True
     return result
 
 
@@ -333,7 +420,9 @@ def openai_motion_tools() -> list:
                     'Drive the rover chassis. Path follows Flask control_mode '
                     '(direct serial T:13 or ROS 2 /cmd_vel). '
                     'linear_x is forward m/s (positive=forward), angular_z is yaw rad/s '
-                    '(positive=left). Optional duration_ms auto-stops after that time. '
+                    '(positive=left). Default is a short timed move (~1000 ms, clamped); '
+                    'prefer duration_ms 500–2000. Auto-stop is scheduled asynchronously. '
+                    'Pass continuous=true only if you will call stop_motors yourself. '
                     'Values are hard-clamped server-side for safety.'
                 ),
                 'parameters': {
@@ -343,7 +432,18 @@ def openai_motion_tools() -> list:
                         'angular_z': {'type': 'number', 'description': 'Yaw rate rad/s'},
                         'duration_ms': {
                             'type': 'integer',
-                            'description': 'Drive duration then stop (0 = continuous until stop_motors)',
+                            'description': (
+                                'Timed drive duration in ms then auto-stop. '
+                                'Missing/0 defaults to 1000 ms (not continuous). '
+                                'Recommend 500–2000; hard-clamped to max.'
+                            ),
+                        },
+                        'continuous': {
+                            'type': 'boolean',
+                            'description': (
+                                'If true, no auto-stop (drive until stop_motors). '
+                                'Default false — prefer short timed moves.'
+                            ),
                         },
                     },
                     'required': ['linear_x'],
@@ -354,7 +454,10 @@ def openai_motion_tools() -> list:
             'type': 'function',
             'function': {
                 'name': 'stop_motors',
-                'description': 'Emergency stop wheels on the active control path.',
+                'description': (
+                    'Emergency stop wheels on the active control path. '
+                    'Cancels any pending timed auto-stop.'
+                ),
                 'parameters': {'type': 'object', 'properties': {}},
             },
         },
@@ -389,12 +492,19 @@ def execute_motion_tool(name: str, arguments: dict) -> Dict[str, Any]:
         if name == 'stop_motors':
             out = ros_stop()
             out['control_mode'] = 'ros2'
+            out['pending_stop_cancelled'] = True
             return out
         if name == 'send_motor_command':
+            cont = args.get('continuous')
+            if isinstance(cont, str):
+                cont = cont.strip().lower() in ('1', 'true', 'yes', 'on')
+            else:
+                cont = bool(cont)
             out = ros_drive(
                 linear_x=float(args.get('linear_x', 0.0)),
                 angular_z=float(args.get('angular_z', 0.0)),
-                duration_ms=int(args.get('duration_ms') or 0),
+                duration_ms=args.get('duration_ms'),
+                continuous=cont,
             )
             out['control_mode'] = 'ros2'
             return out

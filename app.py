@@ -893,6 +893,55 @@ _TOOL_TREE = [
 
 _MOTION_TOOLS = frozenset({'send_motor_command', 'send_gimbal_command', 'stop_motors'})
 
+# AI timed-drive auto-stop (direct serial path). Cancelled on new drive/stop.
+_DEFAULT_AI_DRIVE_MS = 1000
+_ai_drive_timer_lock = threading.Lock()
+_ai_drive_timer = None  # threading.Timer
+_ai_drive_timer_gen = 0
+
+
+def _cancel_ai_drive_timer():
+    """Cancel any pending AI timed auto-stop on the direct serial path."""
+    global _ai_drive_timer, _ai_drive_timer_gen
+    with _ai_drive_timer_lock:
+        _ai_drive_timer_gen += 1
+        if _ai_drive_timer is not None:
+            try:
+                _ai_drive_timer.cancel()
+            except Exception:
+                pass
+            _ai_drive_timer = None
+
+
+def _schedule_ai_drive_stop(duration_ms):
+    """Schedule serial zero-velocity after duration_ms; supersedes prior timer."""
+    global _ai_drive_timer, _ai_drive_timer_gen
+    with _ai_drive_timer_lock:
+        _ai_drive_timer_gen += 1
+        gen = _ai_drive_timer_gen
+        if _ai_drive_timer is not None:
+            try:
+                _ai_drive_timer.cancel()
+            except Exception:
+                pass
+            _ai_drive_timer = None
+
+        def _fire():
+            global _ai_drive_timer
+            with _ai_drive_timer_lock:
+                if gen != _ai_drive_timer_gen:
+                    return
+                _ai_drive_timer = None
+            try:
+                base.base_json_ctrl({'T': 13, 'X': 0, 'Z': 0})
+            except Exception:
+                pass
+
+        t = threading.Timer(max(0.0, float(duration_ms)) / 1000.0, _fire)
+        t.daemon = True
+        _ai_drive_timer = t
+        t.start()
+
 
 def _iter_tree_nodes(nodes=None, parent=None, depth=0):
     for node in (nodes if nodes is not None else _TOOL_TREE):
@@ -1642,7 +1691,6 @@ def _execute_motion_via_mode(name, args):
 
     # ---- direct serial (ESP32 UART) ----
     import math
-    import time as _time
 
     max_lin = float(os.environ.get('UGV_MAX_LINEAR') or 0.35)
     max_ang = float(os.environ.get('UGV_MAX_ANGULAR') or 0.8)
@@ -1652,33 +1700,62 @@ def _execute_motion_via_mode(name, args):
         return max(lo, min(hi, v))
 
     if name == 'stop_motors':
+        _cancel_ai_drive_timer()
         base.base_json_ctrl({'T': 13, 'X': 0, 'Z': 0})
         base.base_json_ctrl({'T': 1, 'L': 0, 'R': 0})
         olog.warn('ai_motion', 'AI stop_motors via direct serial',
                   tool=name, control_mode=mode, path='serial', ok=True)
-        return {'ok': True, 'backend': 'direct', 'control_mode': mode, 'path': 'serial'}
+        return {
+            'ok': True,
+            'backend': 'direct',
+            'control_mode': mode,
+            'path': 'serial',
+            'pending_stop_cancelled': True,
+        }
 
     if name == 'send_motor_command':
         lin = _clamp(float(args.get('linear_x', 0.0)), -max_lin, max_lin)
         ang = _clamp(float(args.get('angular_z', 0.0)), -max_ang, max_ang)
-        dur = int(args.get('duration_ms') or 0)
-        if dur < 0:
+        cont = args.get('continuous')
+        if isinstance(cont, str):
+            cont = cont.strip().lower() in ('1', 'true', 'yes', 'on')
+        else:
+            cont = bool(cont)
+        # Default missing/0 → short timed move; continuous only if continuous=true
+        if cont:
             dur = 0
-        if dur > max_ms:
-            dur = max_ms
+            is_continuous = True
+        else:
+            is_continuous = False
+            raw = args.get('duration_ms')
+            try:
+                if raw is None or raw == '' or int(raw) == 0:
+                    dur = _DEFAULT_AI_DRIVE_MS
+                else:
+                    dur = int(raw)
+            except (TypeError, ValueError):
+                dur = _DEFAULT_AI_DRIVE_MS
+            if dur < 0:
+                dur = _DEFAULT_AI_DRIVE_MS
+            if dur > max_ms:
+                dur = max_ms
+        # Supersede any previous scheduled auto-stop, then start motion
+        _cancel_ai_drive_timer()
         base.base_json_ctrl({'T': 13, 'X': lin, 'Z': ang})
-        stopped = False
-        if dur > 0:
-            _time.sleep(dur / 1000.0)
-            base.base_json_ctrl({'T': 13, 'X': 0, 'Z': 0})
-            stopped = True
+        async_stop = False
+        scheduled_stop_ms = None
+        if not is_continuous and dur > 0:
+            _schedule_ai_drive_stop(dur)
+            async_stop = True
+            scheduled_stop_ms = dur
         olog.info(
             'ai_motion',
-            f'AI drive lin={lin:.3f} ang={ang:.3f} dur={dur}ms (direct)',
+            f'AI drive lin={lin:.3f} ang={ang:.3f} dur={dur}ms continuous={is_continuous} (direct)',
             tool=name, control_mode=mode, path='serial', ok=True,
-            linear_x=lin, angular_z=ang, duration_ms=dur, stopped=stopped,
+            linear_x=lin, angular_z=ang, duration_ms=dur,
+            continuous=is_continuous, async_stop=async_stop, stopped=False,
         )
-        return {
+        out = {
             'ok': True,
             'backend': 'direct',
             'control_mode': mode,
@@ -1686,8 +1763,13 @@ def _execute_motion_via_mode(name, args):
             'linear_x': lin,
             'angular_z': ang,
             'duration_ms': dur,
-            'stopped': stopped,
+            'continuous': is_continuous,
+            'stopped': False,
+            'async_stop': async_stop,
         }
+        if scheduled_stop_ms is not None:
+            out['scheduled_stop_ms'] = scheduled_stop_ms
+        return out
 
     if name == 'send_gimbal_command':
         pan = _clamp(float(args.get('pan_rad', 0.0)), -1.2, 1.2)
