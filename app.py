@@ -52,6 +52,7 @@ from flask import Flask, render_template, Response, request, jsonify, redirect, 
 from flask_socketio import SocketIO, emit
 from werkzeug.utils import secure_filename
 from aiortc import RTCPeerConnection, RTCSessionDescription
+import hmac
 import json
 import uuid
 import asyncio
@@ -945,7 +946,14 @@ def _required_names(name, seen=None):
     return reqs
 
 
+# Motion tools default off for safer first boot; telemetry stays on.
 _DEFAULT_TOOL_CAPS = {n: True for n in _all_node_names()}
+_DEFAULT_TOOL_CAPS.update({
+    'group_ros2_motion': False,
+    'send_motor_command': False,
+    'send_gimbal_command': False,
+    'stop_motors': False,
+})
 _ai_capabilities = dict(_DEFAULT_TOOL_CAPS)
 
 
@@ -1763,10 +1771,48 @@ def _run_agent_loop(messages, max_rounds=6):
         tool_trace,
     )
 
+# ---------------------------------------------------------------------------
+# Optional AI API auth: when UGV_AI_TOKEN is set/non-empty, require it on
+# /api/ai/* and /api/snapshot. Accept X-UGV-Token or Authorization: Bearer.
+# ---------------------------------------------------------------------------
+def _ai_auth_token():
+    return (os.environ.get('UGV_AI_TOKEN') or '').strip()
+
+
+def _request_provided_ai_token():
+    hdr = (request.headers.get('X-UGV-Token') or '').strip()
+    if hdr:
+        return hdr
+    auth = (request.headers.get('Authorization') or '').strip()
+    if auth.lower().startswith('bearer '):
+        return auth[7:].strip()
+    return ''
+
+
+def _ai_request_authorized():
+    expected = _ai_auth_token()
+    if not expected:
+        return True  # open LAN mode when unset
+    provided = _request_provided_ai_token()
+    if not provided or len(provided) != len(expected):
+        return False
+    return hmac.compare_digest(provided, expected)
+
+
+@app.before_request
+def _gate_ai_apis():
+    path = request.path or ''
+    if not (path.startswith('/api/ai/') or path == '/api/snapshot'):
+        return None
+    if _ai_request_authorized():
+        return None
+    return jsonify({'success': False, 'error': 'unauthorized'}), 401
+
+
 @app.route('/api/ai/config', methods=['GET'])
 def api_ai_config():
     cfg = _ai_env_config()
-    # Never send full key to browser — only a masked hint
+    # Never send full key to browser — only a masked hint / boolean
     key = cfg['api_key'] or ''
     masked = (key[:3] + '…' + key[-2:]) if len(key) > 6 else ('***' if key else '')
     _, method = _get_token_encoder()
@@ -2159,7 +2205,8 @@ def api_ai_motion_status():
 
 @app.route('/ai')
 def ai_agent_page():
-    return render_template('ai_agent.html')
+    # Same-origin single-operator: inject token so page fetches can auth when set.
+    return render_template('ai_agent.html', ugv_ai_token=_ai_auth_token())
 
 # Route to render the HTML template
 @app.route('/')

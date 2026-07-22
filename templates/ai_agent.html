@@ -281,6 +281,15 @@
   </div>
 
   <script>
+    // Injected by /ai when UGV_AI_TOKEN is set (same-origin single operator).
+    window.__UGV_AI_TOKEN__ = {{ ugv_ai_token|default('', true)|tojson }};
+    function aiHeaders(extra) {
+      const h = Object.assign({}, extra || {});
+      const t = window.__UGV_AI_TOKEN__;
+      if (t) h['X-UGV-Token'] = t;
+      return h;
+    }
+
     const logEl = document.getElementById('log');
     const inputEl = document.getElementById('input');
     const sendBtn = document.getElementById('send-btn');
@@ -362,7 +371,7 @@
       try {
         const r = await fetch('/api/ai/estimate', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: aiHeaders({ 'Content-Type': 'application/json' }),
           body: JSON.stringify({
             history,
             message: inputEl.value.trim(),
@@ -470,7 +479,7 @@
       try {
         const r = await fetch('/api/ai/capabilities', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: aiHeaders({ 'Content-Type': 'application/json' }),
           body: JSON.stringify({ [toolName]: enabled }),
         });
         const d = await r.json();
@@ -514,7 +523,7 @@
 
     async function loadServerCfg() {
       try {
-        const r = await fetch('/api/ai/config');
+        const r = await fetch('/api/ai/config', { headers: aiHeaders() });
         const d = await r.json();
         document.getElementById('base_url').value = d.base_url || '';
         document.getElementById('model').value = d.model || '';
@@ -542,7 +551,7 @@
       try {
         const r = await fetch('/api/ai/compress', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: aiHeaders({ 'Content-Type': 'application/json' }),
           body: JSON.stringify({ history, keep_recent: 4 }),
         });
         const d = await r.json();
@@ -572,7 +581,7 @@
     async function refreshSnapshot() {
       snapStatus.textContent = 'loading…';
       try {
-        const r = await fetch('/api/snapshot');
+        const r = await fetch('/api/snapshot', { headers: aiHeaders() });
         const d = await r.json();
         if (!d.success) throw new Error(d.error || 'snapshot failed');
         snapPreview.src = d.data_url;
@@ -602,7 +611,7 @@
       try {
         const r = await fetch('/api/ai/chat', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: aiHeaders({ 'Content-Type': 'application/json' }),
           body: JSON.stringify({
             message,
             history,
