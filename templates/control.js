@@ -1405,17 +1405,40 @@ function toggleRTSP() {
     });
 }
 
+function updateControlModeBtn(mode) {
+    var btn = document.getElementById('motor-toggle-btn');
+    if (!btn) return;
+    // Unified: both chassis + PTZ route via this mode (see app._route_json_command).
+    if (mode === 'direct') {
+        btn.innerHTML = 'Control: Direct serial';
+        btn.style.color = '#55ff55';
+        btn.title = 'Flask → ESP32 UART for wheels + pan/tilt. Click to use ROS 2 relay.';
+    } else {
+        btn.innerHTML = 'Control: ROS 2 relay';
+        btn.style.color = '#5b8cff';
+        btn.title = 'Flask → rosbridge → ugv_bringup → ESP32. Click for direct serial.';
+    }
+}
+
+// Legacy name kept for any other callers
+function updateMotorToggleBtn(enable_motor_control) {
+    updateControlModeBtn(enable_motor_control ? 'direct' : 'ros2');
+}
+
 function toggleMotors() {
-    fetch('/api/toggle_motors', {method: 'POST'})
+    fetch('/api/control_mode', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({toggle: true})
+    })
     .then(res => res.json())
     .then(data => {
-        var btn = document.getElementById('motor-toggle-btn');
-        if (data.enable_motor_control) {
-            btn.innerHTML = 'Motors: Direct ON';
-            btn.style.color = '#55ff55';
-        } else {
-            btn.innerHTML = 'Motors: ROS 2 Bypass (OFF)';
-            btn.style.color = '#ff5555';
-        }
-    });
+        updateControlModeBtn(data.control_mode || (data.enable_motor_control ? 'direct' : 'ros2'));
+    })
+    .catch(function (e) { console.warn('control_mode toggle failed', e); });
 }
+
+// Sync label with server on load
+fetch('/api/status').then(function (r) { return r.json(); }).then(function (d) {
+    updateControlModeBtn(d.control_mode || (d.enable_motor_control ? 'direct' : 'ros2'));
+}).catch(function () {});

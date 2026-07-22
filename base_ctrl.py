@@ -152,7 +152,11 @@ class BaseController:
 
 		self.use_lidar = f['base_config']['use_lidar']
 		self.extra_sensor = f['base_config']['extra_sensor']
-		self.enable_motor_control = True  # Default ON: disable via /api/toggle_motors when ROS 2 owns serial
+		# When False (ROS 2 owns chassis): drop wheel cmds only so pan/tilt still works from Flask UI.
+		# Wheel/chassis T codes: 1 = differential drive, 13 = X/Z velocity (ugv_bringup style).
+		# Gimbal T:133 / T:141 always pass through when serial is open.
+		self.enable_motor_control = True  # Default ON; disable via /api/toggle_motors or UGV_MOTOR_BYPASS
+		self._chassis_bypass_types = {1, 13, "1", "13"}
 		
 
 	def feedback_data(self):
@@ -185,8 +189,8 @@ class BaseController:
 
 	def send_command(self, data):
 		if not self.enable_motor_control and isinstance(data, dict):
-			if data.get("T") in [1, 133, 141]:
-				print("[base_ctrl] Motor command bypassed (enable_motor_control=False for ROS 2)")
+			if data.get("T") in self._chassis_bypass_types:
+				print("[base_ctrl] Chassis command bypassed (enable_motor_control=False; gimbal T:133/141 still allowed)")
 				return
 		self.command_queue.put(data)
 

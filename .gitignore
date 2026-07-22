@@ -5,3 +5,9 @@ tutorial_en/.ipynb_checkpoints/
 tutorial_cn/.ipynb_checkpoints/
 templates/pictures/photo*
 templates/videos/video*
+.env
+.ai_capabilities.json
+.control_mode.json
+.kilo/
+*.log
+hailort.log

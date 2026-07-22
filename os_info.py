@@ -48,12 +48,14 @@ class SystemInfo(threading.Thread):
 
     def get_cpu_temperature(self):
         try:
+            if os.path.exists('/sys/class/thermal/thermal_zone0/temp'):
+                with open('/sys/class/thermal/thermal_zone0/temp', 'r') as tf:
+                    return round(float(tf.read().strip()) / 1000.0, 1)
             temperature_str = os.popen('vcgencmd measure_temp').readline()
             temperature = float(temperature_str.replace("temp=", "").replace("'C\n", ""))
             return temperature
         except Exception as e:
-            print("Error reading CPU temperature:", str(e))
-            return None
+            return 0.0
 
     def get_ip_address(self, interface):
         try:

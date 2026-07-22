@@ -11,12 +11,19 @@ from collections import deque
 import textwrap
 
 # libraries for csi camera
-from picamera2 import Picamera2
-from picamera2.encoders import H264Encoder, Encoder
-from picamera2.outputs import FfmpegOutput
+try:
+    from picamera2 import Picamera2
+    from picamera2.encoders import H264Encoder, Encoder
+    from picamera2.outputs import FfmpegOutput
+except Exception:
+    Picamera2 = None
+
 
 # libraries for oak camera
-import depthai as dai
+try:
+    import depthai as dai
+except Exception:
+    dai = None
 
 # config file.
 curpath = os.path.realpath(__file__)
@@ -93,6 +100,7 @@ class OpencvFuncs():
                             "bottle", "bus", "car", "cat", "chair", "cow", "diningtable",
                             "dog", "horse", "motorbike", "person", "pottedplant", "sheep",
                             "sofa", "train", "tvmonitor"]
+        self.last_detections = []  # structured list for AI tools
 
         # mediapipe
         self.mpDraw = mp.solutions.drawing_utils
@@ -522,29 +530,72 @@ class OpencvFuncs():
                                                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
         self.overlay = overlay_buffer
 
+    def detect_objects_structured(self, img_bgr, conf_threshold=0.25, max_dets=20):
+        """Run MobileNet-SSD; return list of {label, confidence, bbox_norm [x1,y1,x2,y2]}."""
+        if img_bgr is None or not hasattr(img_bgr, 'shape'):
+            return []
+        (h, w) = img_bgr.shape[:2]
+        if h < 2 or w < 2:
+            return []
+        # Network trained on RGB
+        img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
+        blob = cv2.dnn.blobFromImage(cv2.resize(img_rgb, (300, 300)), 0.007843, (300, 300), 127.5)
+        self.net.setInput(blob)
+        detections = self.net.forward()
+        out = []
+        for i in range(0, detections.shape[2]):
+            confidence = float(detections[0, 0, i, 2])
+            if confidence < conf_threshold:
+                continue
+            idx = int(detections[0, 0, i, 1])
+            if idx < 0 or idx >= len(self.class_names):
+                continue
+            box = detections[0, 0, i, 3:7]
+            x1 = float(max(0.0, min(1.0, box[0])))
+            y1 = float(max(0.0, min(1.0, box[1])))
+            x2 = float(max(0.0, min(1.0, box[2])))
+            y2 = float(max(0.0, min(1.0, box[3])))
+            out.append({
+                'label': self.class_names[idx],
+                'confidence': round(confidence, 3),
+                'bbox_norm': [round(x1, 3), round(y1, 3), round(x2, 3), round(y2, 3)],
+                'bbox_px': [
+                    int(x1 * w), int(y1 * h), int(x2 * w), int(y2 * h),
+                ],
+            })
+            if len(out) >= max_dets:
+                break
+        out.sort(key=lambda d: d['confidence'], reverse=True)
+        self.last_detections = out
+        return out
+
+    def grab_bgr_frame(self):
+        """Capture one BGR frame from the active camera (no HUD)."""
+        try:
+            if self.usb_camera_connected:
+                success, frame = self.camera.read()
+                if success:
+                    return frame
+            elif self.csi_camera_connected:
+                return self.picam2.capture_array()
+            elif self.oak_camera_connected:
+                frame = self.output_queue.get().getCvFrame()
+                return cv2.resize(frame, (640, 480))
+        except Exception as e:
+            print(f'[cv_ctrl.grab_bgr_frame] {e}')
+        return None
+
     def cv_detect_objects(self, img):
         overlay_buffer = np.zeros_like(img)
         cv2.putText(overlay_buffer, 'CV_OBJS', (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
 
-        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-
-        (h, w) = img.shape[:2]
-        blob = cv2.dnn.blobFromImage(cv2.resize(img, (300, 300)), 0.007843, (300, 300), 127.5)
-        self.net.setInput(blob)
-        detections = self.net.forward()
-
-        for i in range(0, detections.shape[2]):
-            confidence = detections[0, 0, i, 2]
-
-            if confidence > 0.2:
-                idx = int(detections[0, 0, i, 1])
-                box = detections[0, 0, i, 3:7] * np.array([w, h, w, h])
-                (startX, startY, endX, endY) = box.astype("int")
-
-                label = "{}: {:.2f}%".format(self.class_names[idx], confidence * 100)
-                cv2.rectangle(overlay_buffer, (startX, startY), (endX, endY), (0, 255, 0), 2)
-                y = startY - 15 if startY - 15 > 15 else startY + 15
-                cv2.putText(overlay_buffer, label, (startX, y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+        dets = self.detect_objects_structured(img, conf_threshold=0.2)
+        for d in dets:
+            startX, startY, endX, endY = d['bbox_px']
+            label = "{}: {:.2f}%".format(d['label'], d['confidence'] * 100)
+            cv2.rectangle(overlay_buffer, (startX, startY), (endX, endY), (0, 255, 0), 2)
+            y = startY - 15 if startY - 15 > 15 else startY + 15
+            cv2.putText(overlay_buffer, label, (startX, y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
 
         self.overlay = overlay_buffer
 

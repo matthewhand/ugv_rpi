@@ -1,0 +1,704 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>UGV AI Agent</title>
+  <style>
+    :root {
+      --bg: #0f1117;
+      --panel: #1a1d27;
+      --border: #2a2f3d;
+      --text: #e8eaef;
+      --muted: #9aa3b2;
+      --accent: #5b8cff;
+      --user: #243047;
+      --ai: #1e2a22;
+      --danger: #ff6b6b;
+      --ok: #3dd68c;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      background: var(--bg); color: var(--text); height: 100vh; display: flex; flex-direction: column;
+    }
+    header {
+      display: flex; align-items: center; justify-content: space-between; gap: 12px;
+      padding: 12px 16px; border-bottom: 1px solid var(--border); background: var(--panel);
+    }
+    header h1 { font-size: 16px; margin: 0; font-weight: 600; }
+    header a { color: var(--muted); text-decoration: none; font-size: 13px; }
+    header a:hover { color: var(--text); }
+    .wrap { flex: 1; display: grid; grid-template-columns: 280px 1fr; min-height: 0; }
+    @media (max-width: 800px) { .wrap { grid-template-columns: 1fr; } .cfg { display: none; } .cfg.open { display: block; } }
+    .cfg {
+      border-right: 1px solid var(--border); background: var(--panel); padding: 14px;
+      overflow-y: auto; font-size: 13px;
+    }
+    .cfg label { display: block; color: var(--muted); margin: 10px 0 4px; }
+    .cfg input {
+      width: 100%; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border);
+      background: #12151d; color: var(--text); font-size: 13px;
+    }
+    .cfg .hint { color: var(--muted); font-size: 11px; margin-top: 8px; line-height: 1.4; }
+    .cfg button, .bar button, .send-btn {
+      border: 0; border-radius: 8px; padding: 8px 12px; cursor: pointer; font-weight: 600;
+      background: var(--accent); color: #fff; font-size: 13px;
+    }
+    .cfg button.secondary { background: #2a3142; }
+    .cfg .tools-label {
+      display: block; color: var(--muted); margin: 16px 0 8px; font-size: 11px;
+      text-transform: uppercase; letter-spacing: 0.04em;
+    }
+    .tool-tree {
+      margin-top: 6px; display: flex; flex-direction: column; gap: 6px;
+    }
+    .tool-node { display: flex; flex-direction: column; gap: 6px; }
+    .tool-node-children {
+      display: flex; flex-direction: column; gap: 6px;
+      margin-left: 14px; padding-left: 10px;
+      border-left: 1px solid #2a2f3d;
+    }
+    .tool-chips {
+      display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px;
+    }
+    .tool-chip {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 5px 10px 5px 8px; border-radius: 999px; font-size: 11px; font-weight: 600;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      border: 1px solid var(--border); background: #12151d; color: var(--muted);
+      cursor: pointer; max-width: 100%; user-select: none; text-align: left;
+      transition: border-color .15s, background .15s, color .15s;
+    }
+    .tool-chip.group {
+      font-family: ui-sans-serif, system-ui, sans-serif;
+      font-size: 12px; border-radius: 10px; width: 100%;
+      justify-content: flex-start;
+    }
+    .tool-chip:hover { filter: brightness(1.08); }
+    .tool-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .tool-chip .sw {
+      width: 14px; height: 14px; border-radius: 50%; border: 2px solid currentColor;
+      display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;
+      font-size: 9px; line-height: 1;
+    }
+    .tool-chip.active {
+      color: #b8f0d4; border-color: #2d6b4f; background: #13241c;
+    }
+    .tool-chip.active .sw { background: var(--ok); border-color: var(--ok); color: #0a0f0c; }
+    .tool-chip.active .sw::after { content: '✓'; }
+    .tool-chip.unavailable {
+      color: #e0b35a; border-color: #5c4a2a; background: #1a1610;
+    }
+    .tool-chip.unavailable .sw { border-color: #d4a017; color: #d4a017; }
+    .tool-chip.unavailable .sw::after { content: '!'; font-weight: 800; }
+    .tool-chip.off {
+      color: #6b7280; border-color: #2a2f3d; background: #0e1118; border-style: dashed;
+    }
+    .tool-chip.off .sw { border-color: #4b5563; }
+    .tool-chip .meta {
+      font-size: 9px; font-weight: 500; opacity: 0.85; margin-left: auto;
+      font-family: ui-sans-serif, system-ui, sans-serif;
+    }
+    .tool-chip .sub {
+      display: block; font-size: 10px; font-weight: 400; opacity: 0.8;
+      font-family: ui-sans-serif, system-ui, sans-serif; margin-top: 1px;
+    }
+    .main { display: flex; flex-direction: column; min-height: 0; }
+    .video-row {
+      display: grid;
+      grid-template-columns: minmax(220px, 1.4fr) minmax(160px, 0.7fr);
+      gap: 12px;
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--border);
+      background: #12151d;
+      align-items: stretch;
+    }
+    @media (max-width: 900px) {
+      .video-row { grid-template-columns: 1fr; }
+    }
+    .video-live, .video-still {
+      display: flex; flex-direction: column; gap: 6px; min-width: 0;
+    }
+    .video-live .label, .video-still .label {
+      font-size: 11px; color: var(--muted); font-weight: 600;
+      text-transform: uppercase; letter-spacing: 0.04em;
+    }
+    #live-preview {
+      width: 100%; aspect-ratio: 16/10; max-height: 280px;
+      object-fit: cover; border-radius: 8px;
+      background: #000; border: 1px solid var(--border);
+    }
+    #snap-preview {
+      width: 100%; aspect-ratio: 16/10; max-height: 160px;
+      object-fit: cover; border-radius: 8px;
+      background: #000; border: 1px solid var(--border);
+    }
+    .video-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    .snap-meta { font-size: 12px; color: var(--muted); line-height: 1.45; }
+    .snap-meta strong { color: var(--ok); }
+    .live-dot {
+      display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+      background: #3dd68c; margin-right: 4px;
+      box-shadow: 0 0 0 0 rgba(61,214,140,.6);
+      animation: pulse 1.6s infinite;
+    }
+    @keyframes pulse {
+      0% { box-shadow: 0 0 0 0 rgba(61,214,140,.5); }
+      70% { box-shadow: 0 0 0 8px rgba(61,214,140,0); }
+      100% { box-shadow: 0 0 0 0 rgba(61,214,140,0); }
+    }
+    .log {
+      flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 10px;
+    }
+    .msg {
+      max-width: 760px; padding: 10px 12px; border-radius: 12px; line-height: 1.45;
+      font-size: 14px; display: flex; flex-direction: column; gap: 8px;
+    }
+    .msg .msg-text { white-space: pre-wrap; word-break: break-word; }
+    .msg.user { align-self: flex-end; background: var(--user); border: 1px solid #31425f; }
+    .msg.ai { align-self: flex-start; background: var(--ai); border: 1px solid #2d4638; }
+    .msg.sys { align-self: center; color: var(--muted); font-size: 12px; background: transparent; border: 0; }
+    .msg.err { align-self: stretch; background: #2a1518; border: 1px solid #5c2a32; color: #ffb4b4; }
+    .msg-thumb-wrap {
+      display: flex; align-items: flex-end; gap: 8px; flex-wrap: wrap;
+    }
+    .msg-thumb {
+      width: 96px; height: 64px; object-fit: cover; border-radius: 6px;
+      border: 1px solid rgba(255,255,255,.15); background: #000; cursor: zoom-in;
+      display: block;
+    }
+    .msg-thumb-label {
+      font-size: 10px; color: var(--muted); align-self: center;
+    }
+    .msg-thumb-lightbox {
+      position: fixed; inset: 0; z-index: 10000; background: rgba(0,0,0,.82);
+      display: none; align-items: center; justify-content: center; padding: 24px;
+      cursor: zoom-out;
+    }
+    .msg-thumb-lightbox.open { display: flex; }
+    .msg-thumb-lightbox img {
+      max-width: min(960px, 95vw); max-height: 90vh; border-radius: 8px;
+      border: 1px solid #333;
+    }
+    .composer {
+      border-top: 1px solid var(--border); padding: 12px 14px; background: var(--panel);
+      display: flex; flex-direction: column; gap: 8px;
+    }
+    .composer textarea {
+      width: 100%; min-height: 64px; resize: vertical; border-radius: 10px;
+      border: 1px solid var(--border); background: #12151d; color: var(--text);
+      padding: 10px 12px; font: inherit;
+    }
+    .bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .bar label { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
+    .bar .spacer { flex: 1; }
+    .send-btn:disabled { opacity: 0.5; cursor: wait; }
+    .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); display: inline-block; }
+    .status-dot.ok { background: var(--ok); }
+    .status-dot.bad { background: var(--danger); }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>UGV AI Agent <span style="color:var(--muted);font-weight:400">· local vision</span></h1>
+    <div style="display:flex;gap:14px;align-items:center">
+      <span class="status-dot" id="status-dot" title="LLM config"></span>
+      <button class="secondary" id="cfg-toggle" style="background:#2a3142;border:0;color:#fff;border-radius:8px;padding:6px 10px;cursor:pointer">Config</button>
+      <a href="/">← Control</a>
+    </div>
+  </header>
+
+  <div class="msg-thumb-lightbox" id="thumb-lightbox" title="Click to close">
+    <img id="thumb-lightbox-img" alt="snapshot full size" />
+  </div>
+
+  <div class="wrap">
+    <aside class="cfg" id="cfg-panel">
+      <div style="font-weight:600;margin-bottom:4px">OpenAI settings (server)</div>
+      <div class="hint">Read-only. Edit <code>ugv_rpi/.env</code> and restart the app. Custom base URL / model only live in <code>.env</code>; code defaults to official OpenAI when those vars are unset.</div>
+      <label>OPENAI_BASE_URL</label>
+      <input id="base_url" spellcheck="false" readonly />
+      <label>OPENAI_MODEL</label>
+      <input id="model" spellcheck="false" readonly />
+      <label>OPENAI_API_KEY</label>
+      <input id="api_key_masked" spellcheck="false" readonly placeholder="(set on server)" />
+      <div style="margin-top:12px;display:flex;gap:8px">
+        <button class="secondary" id="reload-cfg">Refresh from server</button>
+      </div>
+      <div class="hint" id="cfg-hint"></div>
+
+      <span class="tools-label">LLM tools — click to toggle</span>
+      <div class="tool-tree" id="tool-tree" role="tree" aria-label="Tool hierarchy"></div>
+      <div class="hint" id="tools-legend" style="margin-top:8px">
+        <span style="color:#3dd68c">✓ on</span> offered &nbsp;·&nbsp;
+        <span style="color:#e0b35a">! blocked</span> &nbsp;·&nbsp;
+        <span style="color:#6b7280">○ off</span><br/>
+        Enabling a child turns parents on; enabling drive also enables stop_motors; disabling a group turns children off.
+      </div>
+      <div class="hint" id="motion-hint"></div>
+    </aside>
+
+    <section class="main">
+      <div class="video-row">
+        <div class="video-live">
+          <div class="label"><span class="live-dot"></span>Live camera (MJPEG)</div>
+          <img id="live-preview" src="/video_feed" alt="Live camera feed" />
+          <div class="video-actions">
+            <button id="live-reload-btn" class="secondary" style="background:#2a3142" title="Reload stream">Reload stream</button>
+            <span class="snap-meta" id="live-info">Same pipeline as the main dashboard `/video_feed`.</span>
+          </div>
+        </div>
+        <div class="video-still">
+          <div class="label">Still for LLM attach</div>
+          <img id="snap-preview" alt="snapshot for LLM" />
+          <div class="snap-meta">
+            <div>Last grab: <strong id="snap-status">none</strong></div>
+            <div id="snap-info">Used when “Attach live camera snapshot” is checked (or after Grab).</div>
+          </div>
+          <div class="video-actions">
+            <button id="snap-btn" class="secondary" style="background:#2a3142">Grab still now</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="log" id="log"></div>
+
+      <div class="composer">
+        <textarea id="input" placeholder="Ask about what the robot sees… e.g. Describe the scene in front of the camera."></textarea>
+        <div class="bar">
+          <label><input type="checkbox" id="attach" checked /> Attach still from camera when sending (vision)</label>
+          <span class="spacer"></span>
+          <span style="position:relative;display:inline-flex">
+            <span id="ctx-tip" style="display:none;position:absolute;bottom:calc(100% + 8px);right:0;min-width:240px;padding:8px 10px;border-radius:8px;background:#0b0e14;border:1px solid #3dd68c;color:#e8eaef;font-size:11px;line-height:1.4;z-index:20;white-space:pre-wrap"></span>
+            <button id="compress-btn" class="secondary" style="background:#2a3142" title="Compress older chat">Compress</button>
+          </span>
+          <button id="clear-btn" class="secondary" style="background:#2a3142">Clear chat</button>
+          <button class="send-btn" id="send-btn">Send</button>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    const logEl = document.getElementById('log');
+    const inputEl = document.getElementById('input');
+    const sendBtn = document.getElementById('send-btn');
+    const attachEl = document.getElementById('attach');
+    const snapPreview = document.getElementById('snap-preview');
+    const snapStatus = document.getElementById('snap-status');
+    const snapInfo = document.getElementById('snap-info');
+    const statusDot = document.getElementById('status-dot');
+    const cfgHint = document.getElementById('cfg-hint');
+
+    let history = [];
+    // UI-only images for chat bubbles (not re-sent as base64 history to the API)
+    let uiImages = []; // parallel to user turns when attach used
+    let estimateTimer = null;
+    const compressBtn = document.getElementById('compress-btn');
+    const ctxTip = document.getElementById('ctx-tip');
+    const compressWrap = compressBtn.parentElement;
+    const lightbox = document.getElementById('thumb-lightbox');
+    const lightboxImg = document.getElementById('thumb-lightbox-img');
+
+    function openThumbLightbox(url) {
+      if (!url) return;
+      lightboxImg.src = url;
+      lightbox.classList.add('open');
+    }
+    lightbox.addEventListener('click', () => {
+      lightbox.classList.remove('open');
+      lightboxImg.removeAttribute('src');
+    });
+
+    function addMsg(role, text, opts) {
+      opts = opts || {};
+      const div = document.createElement('div');
+      div.className = 'msg ' + role;
+      const textEl = document.createElement('div');
+      textEl.className = 'msg-text';
+      textEl.textContent = text;
+      div.appendChild(textEl);
+      if (opts.imageUrl) {
+        attachThumb(div, opts.imageUrl, opts.imageLabel);
+      }
+      logEl.appendChild(div);
+      logEl.scrollTop = logEl.scrollHeight;
+      return div;
+    }
+
+    function attachThumb(msgEl, imageUrl, label) {
+      if (!msgEl || !imageUrl) return;
+      let wrap = msgEl.querySelector('.msg-thumb-wrap');
+      if (!wrap) {
+        wrap = document.createElement('div');
+        wrap.className = 'msg-thumb-wrap';
+        msgEl.appendChild(wrap);
+      }
+      const img = document.createElement('img');
+      img.className = 'msg-thumb';
+      img.src = imageUrl;
+      img.alt = label || 'camera snapshot';
+      img.title = 'Click to enlarge';
+      img.addEventListener('click', (e) => {
+        e.stopPropagation();
+        openThumbLightbox(imageUrl);
+      });
+      wrap.appendChild(img);
+      if (label) {
+        const lab = document.createElement('span');
+        lab.className = 'msg-thumb-label';
+        lab.textContent = label;
+        wrap.appendChild(lab);
+      }
+    }
+
+    function setTip(text) {
+      ctxTip.textContent = text;
+      compressBtn.title = text.replace(/\n/g, ' · ');
+    }
+
+    async function refreshEstimate() {
+      try {
+        const r = await fetch('/api/ai/estimate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            history,
+            message: inputEl.value.trim(),
+            attach_snapshot: attachEl.checked,
+          }),
+        });
+        const d = await r.json();
+        if (!d.success) {
+          setTip('Estimate failed: ' + (d.error || 'unknown'));
+          return;
+        }
+        setTip(
+          `Context ~${d.tokens_est} tokens\n` +
+          `text ~${d.text_tokens_est}` +
+          (d.image_tokens_est ? `, image ~${d.image_tokens_est}` : '') +
+          `\n${d.history_messages} history msgs · ${d.method || ''}` +
+          (d.snapshot_bytes ? `\nsnapshot ${d.snapshot_bytes} B` : '') +
+          `\nClick Compress to summarize older turns`
+        );
+      } catch (e) {
+        setTip('Estimate error: ' + e);
+      }
+    }
+
+    function scheduleEstimate() {
+      if (estimateTimer) clearTimeout(estimateTimer);
+      estimateTimer = setTimeout(refreshEstimate, 350);
+    }
+
+    function makeChip(t) {
+      const status = t.status || (t.enabled === false ? 'off' : 'active');
+      const chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = 'tool-chip ' + status + (t.kind === 'group' ? ' group' : '');
+      chip.dataset.tool = t.name;
+      chip.setAttribute('role', 'treeitem');
+      chip.setAttribute('aria-pressed', t.enabled !== false ? 'true' : 'false');
+      chip.title = (t.description || t.name) + '\n' + (t.reason || '') +
+        '\nClick to ' + (t.enabled === false ? 'enable' : 'disable') +
+        (t.requires && t.requires.length ? ('\nAlso enables: ' + t.requires.join(', ')) : '');
+
+      const sw = document.createElement('span');
+      sw.className = 'sw';
+      sw.setAttribute('aria-hidden', 'true');
+
+      const textWrap = document.createElement('span');
+      textWrap.style.minWidth = '0';
+      const label = document.createElement('span');
+      label.textContent = t.label || t.name || '?';
+      textWrap.appendChild(label);
+      if (t.kind === 'group' && t.description) {
+        const sub = document.createElement('span');
+        sub.className = 'sub';
+        sub.textContent = t.description;
+        textWrap.appendChild(sub);
+      }
+
+      const meta = document.createElement('span');
+      meta.className = 'meta';
+      if (status === 'active') meta.textContent = 'on';
+      else if (status === 'unavailable') meta.textContent = 'blocked';
+      else meta.textContent = 'off';
+
+      chip.appendChild(sw);
+      chip.appendChild(textWrap);
+      chip.appendChild(meta);
+
+      if (t.toggleable !== false) {
+        chip.addEventListener('click', () => {
+          const next = !(t.enabled !== false);
+          setToolEnabled(t.name, next);
+        });
+      } else {
+        chip.style.cursor = 'default';
+      }
+      return chip;
+    }
+
+    function renderNode(t) {
+      const wrap = document.createElement('div');
+      wrap.className = 'tool-node';
+      wrap.appendChild(makeChip(t));
+      if (t.children && t.children.length) {
+        const kids = document.createElement('div');
+        kids.className = 'tool-node-children';
+        kids.setAttribute('role', 'group');
+        t.children.forEach((c) => kids.appendChild(renderNode(c)));
+        wrap.appendChild(kids);
+      }
+      return wrap;
+    }
+
+    function renderToolTree(tree) {
+      const host = document.getElementById('tool-tree');
+      host.innerHTML = '';
+      const list = tree || [];
+      if (!list.length) {
+        host.innerHTML = '<span class="hint" style="margin:0">no tools</span>';
+        return;
+      }
+      list.forEach((t) => host.appendChild(renderNode(t)));
+    }
+
+    async function setToolEnabled(toolName, enabled) {
+      try {
+        const r = await fetch('/api/ai/capabilities', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ [toolName]: enabled }),
+        });
+        const d = await r.json();
+        if (!d.success) throw new Error(d.error || 'save failed');
+        renderToolTree(d.tool_tree || []);
+        updateMotionHint(d);
+      } catch (e) {
+        cfgHint.textContent = 'Toggle failed: ' + e;
+        loadServerCfg();
+      }
+    }
+
+    function updateMotionHint(d) {
+      const mh = document.getElementById('motion-hint');
+      if (!mh) return;
+      const br = d.rosbridge || {};
+      const mode = d.control_mode || d.motion_backend || '?';
+      const tools = d.tools || [];
+      const motion = tools.filter((t) =>
+        ['send_motor_command', 'send_gimbal_command', 'stop_motors'].includes(t.name)
+      );
+      const anyOn = motion.some((t) => t.enabled !== false);
+      const anyActive = motion.some((t) => t.status === 'active');
+      if (anyActive) {
+        const pathLabel = mode === 'direct'
+          ? 'Direct serial (UART)'
+          : 'ROS 2 relay (rosbridge)';
+        mh.innerHTML = '<span style="color:#3dd68c">Motion live</span> · control_mode=' +
+          mode + ' · ' + pathLabel +
+          ' · toggle on main UI: Control: Direct serial / ROS 2 relay';
+      } else if (!anyOn) {
+        mh.innerHTML = '<span style="color:#6b7280">Motion tools off</span> — enable the Motion group or a child tool.';
+      } else {
+        mh.innerHTML = '<span style="color:#e0b35a">Motion tools blocked</span> · control_mode=' +
+          mode +
+          ' · rosbridge ' + (br.ok ? 'up' : 'down') +
+          (br.error ? (' (' + br.error + ')') : '') +
+          '. Switch Control to Direct serial on main UI, or start rosbridge + ugv_bringup.';
+      }
+    }
+
+    async function loadServerCfg() {
+      try {
+        const r = await fetch('/api/ai/config');
+        const d = await r.json();
+        document.getElementById('base_url').value = d.base_url || '';
+        document.getElementById('model').value = d.model || '';
+        document.getElementById('api_key_masked').value = d.api_key_masked || (d.api_key_set ? '***' : '');
+        statusDot.className = 'status-dot ' + (d.api_key_set ? 'ok' : 'bad');
+        cfgHint.textContent = (d.note || (`${d.model} @ ${d.base_url}`)) +
+          (d.token_estimate_method ? ` · tokens: ${d.token_estimate_method}` : '');
+        renderToolTree(d.tool_tree || []);
+        updateMotionHint(d);
+        scheduleEstimate();
+      } catch (e) {
+        statusDot.className = 'status-dot bad';
+        cfgHint.textContent = 'Failed to load /api/ai/config: ' + e;
+        renderToolTree([]);
+      }
+    }
+
+    async function compress() {
+      if (!history.length) {
+        addMsg('sys', 'Nothing to compress yet.');
+        return;
+      }
+      compressBtn.disabled = true;
+      const thinking = addMsg('sys', 'Compressing older context…');
+      try {
+        const r = await fetch('/api/ai/compress', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ history, keep_recent: 4 }),
+        });
+        const d = await r.json();
+        thinking.remove();
+        if (!d.success) {
+          addMsg('err', d.error || 'compress failed');
+          return;
+        }
+        if (!d.compressed) {
+          addMsg('sys', d.reason || 'Already short.');
+          scheduleEstimate();
+          return;
+        }
+        history = d.history || [];
+        addMsg('sys', `Compressed: ${d.label_before} → ${d.label_after}` +
+          (d.saved_tokens_est != null ? ` (saved ~${d.saved_tokens_est})` : ''));
+        if (d.summary) addMsg('sys', 'Summary: ' + d.summary);
+        scheduleEstimate();
+      } catch (e) {
+        thinking.remove();
+        addMsg('err', String(e.message || e));
+      } finally {
+        compressBtn.disabled = false;
+      }
+    }
+
+    async function refreshSnapshot() {
+      snapStatus.textContent = 'loading…';
+      try {
+        const r = await fetch('/api/snapshot');
+        const d = await r.json();
+        if (!d.success) throw new Error(d.error || 'snapshot failed');
+        snapPreview.src = d.data_url;
+        snapStatus.textContent = 'ok';
+        snapInfo.textContent = `${d.bytes} bytes JPEG from live pipeline`;
+      } catch (e) {
+        snapStatus.textContent = 'error';
+        snapInfo.textContent = String(e.message || e);
+      }
+    }
+
+    async function send() {
+      const message = inputEl.value.trim();
+      if (!message) return;
+      sendBtn.disabled = true;
+      const wantAttach = !!attachEl.checked;
+      // User bubble first; thumb filled when server returns the attached frame
+      const userEl = addMsg('user', message);
+      if (wantAttach) {
+        const pending = document.createElement('div');
+        pending.className = 'msg-thumb-label';
+        pending.textContent = 'attaching camera still…';
+        userEl.appendChild(pending);
+      }
+      inputEl.value = '';
+      const thinking = addMsg('sys', 'Thinking… (vision may take 10–60s on local GPU)');
+      try {
+        const r = await fetch('/api/ai/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            message,
+            history,
+            attach_snapshot: wantAttach,
+          }),
+        });
+        const d = await r.json();
+        thinking.remove();
+        // remove pending label
+        userEl.querySelectorAll('.msg-thumb-label').forEach((el) => {
+          if (el.textContent.indexOf('attaching') === 0) el.remove();
+        });
+        if (!d.success) {
+          addMsg('err', d.error || ('HTTP ' + r.status));
+          return;
+        }
+        if (d.snapshot_data_url) {
+          snapPreview.src = d.snapshot_data_url;
+          snapStatus.textContent = 'attached';
+          const bytes = d.snapshot_bytes || 0;
+          snapInfo.textContent = `sent ${bytes} bytes to ${d.model || 'model'}`;
+          attachThumb(
+            userEl,
+            d.snapshot_data_url,
+            bytes ? `${Math.round(bytes / 1024)} KB still` : 'camera still'
+          );
+          uiImages.push(d.snapshot_data_url);
+        } else if (wantAttach) {
+          attachThumb(userEl, null);
+          const miss = document.createElement('span');
+          miss.className = 'msg-thumb-label';
+          miss.textContent = 'no still returned';
+          userEl.appendChild(miss);
+        }
+        addMsg('ai', d.reply || '(empty reply)');
+        if (Array.isArray(d.tool_calls) && d.tool_calls.length) {
+          d.tool_calls.forEach((tc) => {
+            const ok = tc.result && tc.result.ok !== false;
+            addMsg('sys', `tool ${tc.name}(${JSON.stringify(tc.arguments || {})}) → ${ok ? 'ok' : 'fail'} ${JSON.stringify(tc.result || {}).slice(0, 180)}`);
+          });
+        }
+        // Text-only history for the API (thumbnails stay UI-only)
+        history.push({ role: 'user', content: message });
+        history.push({ role: 'assistant', content: d.reply || '' });
+        if (history.length > 24) history = history.slice(-24);
+        if (uiImages.length > 12) uiImages = uiImages.slice(-12);
+        if (d.context_tokens_est != null) {
+          snapInfo.textContent = (snapInfo.textContent || '') + ` · context ~${d.context_tokens_est} tok`;
+        }
+        if (d.motion_backend) {
+          snapInfo.textContent += ` · motion=${d.motion_backend}`;
+        }
+        scheduleEstimate();
+      } catch (e) {
+        thinking.remove();
+        addMsg('err', String(e.message || e));
+      } finally {
+        sendBtn.disabled = false;
+        inputEl.focus();
+      }
+    }
+
+    document.getElementById('send-btn').onclick = send;
+    document.getElementById('clear-btn').onclick = () => {
+      history = [];
+      uiImages = [];
+      logEl.innerHTML = '';
+      addMsg('sys', 'Chat cleared.');
+      scheduleEstimate();
+    };
+    document.getElementById('snap-btn').onclick = () => refreshSnapshot().then(scheduleEstimate);
+    document.getElementById('live-reload-btn').onclick = () => {
+      const live = document.getElementById('live-preview');
+      // Bust cache / reconnect MJPEG
+      live.src = '/video_feed?t=' + Date.now();
+      document.getElementById('live-info').textContent = 'Stream reloaded ' + new Date().toLocaleTimeString();
+    };
+    document.getElementById('reload-cfg').onclick = loadServerCfg;
+    document.getElementById('cfg-toggle').onclick = () => {
+      document.getElementById('cfg-panel').classList.toggle('open');
+    };
+    compressBtn.onclick = compress;
+    compressBtn.addEventListener('mouseenter', refreshEstimate);
+    compressWrap.addEventListener('mouseenter', () => { ctxTip.style.display = 'block'; });
+    compressWrap.addEventListener('mouseleave', () => { ctxTip.style.display = 'none'; });
+    attachEl.addEventListener('change', scheduleEstimate);
+    inputEl.addEventListener('input', scheduleEstimate);
+    inputEl.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        send();
+      }
+    });
+
+    addMsg('sys', 'Ready. Hover Compress for ~token estimate (tiktoken when available).');
+    loadServerCfg().then(refreshSnapshot);
+  </script>
+</body>
+</html>

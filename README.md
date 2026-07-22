@@ -21,14 +21,24 @@ This is a Raspberry Pi example for the [Waveshare](https://www.waveshare.com/) U
 
 ### ROS 2 motor bypass mode (`base_ctrl.py`, `app.py`, `templates/`)
 
-`BaseController` gains an `enable_motor_control` flag (default `True`). When set to `False`, wheel and gimbal commands (`T:1`, `T:133`, `T:141`) are dropped silently so ROS 2 can own `/dev/serial0` without collision from `app.py`.
+`BaseController` gains an `enable_motor_control` flag (default `True`). When set to `False` (ROS 2 chassis mode), only **wheel/chassis** commands are dropped (`T:1` differential drive, `T:13` X/Z velocity). **Pan/tilt gimbal** commands (`T:133`, `T:141`) still go out so the web UI stick can aim the camera while ROS owns driving.
 
 Toggled at runtime — no restart required:
 
 - **Web UI:** "Motors: Direct ON / ROS 2 Bypass" button in the dashboard
 - **API:** `POST /api/toggle_motors`, `GET /api/status`
+- **Env:** `UGV_MOTOR_BYPASS=1` at process start
 
-All non-motion serial commands (lights, servo config, settings) pass through regardless of the flag.
+Gimbal kits should set `base_config.module_type: 2` in `config.yaml` (0=None, 1=ARM, 2=Gimbal). Lights and other non-chassis serial commands always pass through.
+
+### Pan/tilt via ROS 2 (optional)
+
+With `UGV_MOTION_BACKEND=ros2` and `UGV_PT_BACKEND=auto` (default), the web stick’s `T:133` commands are **routed over rosbridge** when it is up:
+
+- publishes `sensor_msgs/JointState` on `/joint_states` (names `pt_base_link_to_pt_link1`, `pt_link1_to_pt_link2`) for **`ugv_bringup`** → ESP32  
+- also publishes `Float64MultiArray` on `/pt_joint_position_controller/commands` (joy/vision/gazebo path)
+
+If rosbridge is down, Flask **falls back to serial `T:133`**. Force with `UGV_PT_BACKEND=serial` or `ros2`.
 
 ## Basic Description
 The Waveshare UGV robots utilize both an upper computer and a lower computer. This repository contains the program running on the upper computer, which is typically a Raspberry Pi in this setup.  

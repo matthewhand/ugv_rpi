@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>UGV Rover - 3D Digital Twin</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background-color: #0b0f19;
+            font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            color: #e2e8f0;
+        }
+        #canvas-container {
+            width: 100vw;
+            height: 100vh;
+        }
+        .hud-panel {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background: rgba(15, 23, 42, 0.85);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(56, 189, 248, 0.3);
+            border-radius: 12px;
+            padding: 16px 20px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+            z-index: 10;
+            min-width: 240px;
+        }
+        .hud-panel h2 {
+            margin: 0 0 10px 0;
+            font-size: 16px;
+            color: #38bdf8;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background-color: #ef4444;
+            box-shadow: 0 0 8px #ef4444;
+            display: inline-block;
+        }
+        .status-dot.connected {
+            background-color: #22c55e;
+            box-shadow: 0 0 8px #22c55e;
+        }
+        .joint-val {
+            display: flex;
+            justify-content: space-between;
+            font-size: 13px;
+            margin: 6px 0;
+            color: #94a3b8;
+        }
+        .joint-val span {
+            color: #f1f5f9;
+            font-weight: 600;
+        }
+        .controls-info {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            background: rgba(15, 23, 42, 0.7);
+            padding: 10px 16px;
+            border-radius: 8px;
+            font-size: 12px;
+            color: #64748b;
+            z-index: 10;
+        }
+        .back-btn {
+            display: inline-block;
+            margin-top: 10px;
+            padding: 6px 12px;
+            background: #0284c7;
+            color: #fff;
+            text-decoration: none;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: 600;
+            transition: background 0.2s;
+        }
+        .back-btn:hover {
+            background: #0369a1;
+        }
+    </style>
+    <!-- Three.js CDN libraries -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/roslib@1/build/roslib.min.js"></script>
+</head>
+<body>
+    <div class="hud-panel">
+        <h2><span id="status-dot" class="status-dot"></span> ROS 2 Digital Twin</h2>
+        <div class="joint-val">Bridge: <span id="bridge-status">Disconnected</span></div>
+        <div class="joint-val">Pan Angle: <span id="pan-val">0.0°</span></div>
+        <div class="joint-val">Tilt Angle: <span id="tilt-val">0.0°</span></div>
+        <div class="joint-val">Wheel Velocity: <span id="wheel-val">0.0 m/s</span></div>
+        <a href="/" class="back-btn">← Back to Dashboard</a>
+    </div>
+
+    <div class="controls-info">
+        Mouse Left: Rotate | Scroll: Zoom | Mouse Right: Pan
+    </div>
+
+    <div id="canvas-container"></div>
+
+    <script>
+        // --- 1. Three.js Scene Setup ---
+        const container = document.getElementById('canvas-container');
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x0b0f19);
+        scene.fog = new THREE.FogExp2(0x0b0f19, 0.03);
+
+        const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 100);
+        camera.position.set(1.2, 1.0, 1.5);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(window.devicePixelRatio);
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        container.appendChild(renderer.domElement);
+
+        const controls = new THREE.OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.05;
+        controls.target.set(0, 0.2, 0);
+
+        // Lights & Floor Grid
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
+        scene.add(ambientLight);
+
+        const dirLight = new THREE.DirectionalLight(0x38bdf8, 1.2);
+        dirLight.position.set(3, 5, 4);
+        dirLight.castShadow = true;
+        scene.add(dirLight);
+
+        const gridHelper = new THREE.GridHelper(10, 20, 0x38bdf8, 0x1e293b);
+        gridHelper.position.y = 0;
+        scene.add(gridHelper);
+
+        // --- 2. Build 3D UGV Rover Model ---
+        const robotGroup = new THREE.Group();
+
+        // Base Chassis Box
+        const chassisGeo = new THREE.BoxGeometry(0.32, 0.12, 0.22);
+        const chassisMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, metalness: 0.8, roughness: 0.3 });
+        const chassis = new THREE.Mesh(chassisGeo, chassisMat);
+        chassis.position.y = 0.12;
+        chassis.castShadow = true;
+        robotGroup.add(chassis);
+
+        // Top Accent Cover
+        const coverGeo = new THREE.BoxGeometry(0.24, 0.04, 0.18);
+        const coverMat = new THREE.MeshStandardMaterial({ color: 0x0284c7, metalness: 0.5, roughness: 0.4 });
+        const cover = new THREE.Mesh(coverGeo, coverMat);
+        cover.position.set(0, 0.18, 0);
+        robotGroup.add(cover);
+
+        // Wheels
+        const wheels = [];
+        const wheelGeo = new THREE.CylinderGeometry(0.05, 0.05, 0.04, 24);
+        const wheelMat = new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.9 });
+        wheelGeo.rotateZ(Math.PI / 2);
+
+        const wheelPositions = [
+            [-0.14, 0.05,  0.13], [0, 0.05,  0.13], [0.14, 0.05,  0.13],
+            [-0.14, 0.05, -0.13], [0, 0.05, -0.13], [0.14, 0.05, -0.13]
+        ];
+
+        wheelPositions.forEach(pos => {
+            const w = new THREE.Mesh(wheelGeo, wheelMat);
+            w.position.set(...pos);
+            w.castShadow = true;
+            robotGroup.add(w);
+            wheels.push(w);
+        });
+
+        // Pan-Tilt Gimbal Assembly
+        const panBaseMat = new THREE.MeshStandardMaterial({ color: 0x38bdf8, metalness: 0.6 });
+        
+        const panLink = new THREE.Group();
+        panLink.position.set(0.08, 0.20, 0);
+        
+        const panBaseMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.04, 16), panBaseMat);
+        panLink.add(panBaseMesh);
+
+        const tiltLink = new THREE.Group();
+        tiltLink.position.set(0, 0.04, 0);
+
+        const cameraCube = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.04, 0.06), new THREE.MeshStandardMaterial({ color: 0x0f172a }));
+        cameraCube.position.set(0, 0.02, 0.02);
+        tiltLink.add(cameraCube);
+
+        panLink.add(tiltLink);
+        robotGroup.add(panLink);
+
+        scene.add(robotGroup);
+
+        // --- 3. Live Animation & ROS 2 Bridge ---
+        let currentPan = 0;
+        let currentTilt = 0;
+        let isConnected = false;
+
+        // ROS 2 WebSocket Connection
+        try {
+            const ros = new ROSLIB.Ros({ url: 'ws://' + window.location.hostname + ':9090' });
+
+            ros.on('connection', function() {
+                isConnected = true;
+                document.getElementById('status-dot').classList.add('connected');
+                document.getElementById('bridge-status').innerText = 'Connected (:9090)';
+            });
+
+            ros.on('error', function(error) {
+                document.getElementById('bridge-status').innerText = 'Standalone Sim Mode';
+            });
+
+            ros.on('close', function() {
+                document.getElementById('bridge-status').innerText = 'Disconnected';
+            });
+
+            const jointListener = new ROSLIB.Topic({
+                ros: ros,
+                name: '/joint_states',
+                messageType: 'sensor_msgs/JointState'
+            });
+
+            jointListener.subscribe(function(msg) {
+                if (msg.name && msg.position) {
+                    const panIdx = msg.name.indexOf('pt_base_link_to_pt_link1');
+                    const tiltIdx = msg.name.indexOf('pt_link1_to_pt_link2');
+                    if (panIdx !== -1) currentPan = msg.position[panIdx];
+                    if (tiltIdx !== -1) currentTilt = msg.position[tiltIdx];
+                }
+            });
+        } catch(e) {
+            document.getElementById('bridge-status').innerText = 'Standalone Sim Mode';
+        }
+
+        // Animation Loop
+        let animTime = 0;
+        function animate() {
+            requestAnimationFrame(animate);
+            animTime += 0.02;
+
+            if (!isConnected) {
+                // Smooth demo oscillation when ROS 2 bridge is offline
+                currentPan = Math.sin(animTime * 0.8) * 0.6;
+                currentTilt = Math.sin(animTime * 1.2) * 0.3;
+            }
+
+            panLink.rotation.y = currentPan;
+            tiltLink.rotation.x = currentTilt;
+
+            // Rotate wheels
+            wheels.forEach(w => w.rotation.x += 0.02);
+
+            document.getElementById('pan-val').innerText = (currentPan * 57.2958).toFixed(1) + '°';
+            document.getElementById('tilt-val').innerText = (currentTilt * 57.2958).toFixed(1) + '°';
+
+            controls.update();
+            renderer.render(scene, camera);
+        }
+
+        animate();
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+</html>
