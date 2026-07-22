@@ -10,6 +10,15 @@ This is a Raspberry Pi example for the [Waveshare](https://www.waveshare.com/) U
 > **Fork:** [effectsmachine/ugv_rpi](https://github.com/effectsmachine/ugv_rpi) — forked from [waveshareteam/ugv_rpi](https://github.com/waveshareteam/ugv_rpi).  
 > Changes relative to upstream are documented below alongside the commits that introduced them.
 
+## Changes from upstream
+
+### Serial port robustness (`base_ctrl.py`)
+
+- `serial.Serial()` init wrapped in try/except — app boots cleanly when `/dev/serial0` is absent or locked (e.g. ROS 2 already owns it)
+- `send_command` and `process_commands` guard against `self.ser = None` — no crash when serial unavailable
+- `feedback_data` and `on_data_received` return early / skip reset if serial is None
+- `ReadLine` returns empty bytes immediately when `s` is None rather than blocking
+
 ## Basic Description
 The Waveshare UGV robots utilize both an upper computer and a lower computer. This repository contains the program running on the upper computer, which is typically a Raspberry Pi in this setup.  
 

@@ -47,6 +47,9 @@ class ReadLine:
 			self.buf = self.buf[i+1:]
 			return r
 		while True:
+			if not self.s:
+				time.sleep(0.1)
+				return b""
 			i = max(1, min(512, self.s.in_waiting))
 			data = self.s.read(i)
 			i = data.find(b"\n")
@@ -131,7 +134,11 @@ class ReadLine:
 class BaseController:
 
 	def __init__(self, uart_dev_set, buad_set):
-		self.ser = serial.Serial(uart_dev_set, buad_set, timeout=1)
+		try:
+			self.ser = serial.Serial(uart_dev_set, buad_set, timeout=1)
+		except Exception as e:
+			print(f"[base_ctrl] Serial port {uart_dev_set} error: {e}")
+			self.ser = None
 		self.rl = ReadLine(self.ser)
 		self.command_queue = queue.Queue()
 		self.command_thread = threading.Thread(target=self.process_commands, daemon=True)
@@ -145,10 +152,13 @@ class BaseController:
 
 		self.use_lidar = f['base_config']['use_lidar']
 		self.extra_sensor = f['base_config']['extra_sensor']
+		self.enable_motor_control = True  # Default ON: disable via /api/toggle_motors when ROS 2 owns serial
 		
 
 	def feedback_data(self):
 		try:
+			if not self.rl.s:
+				return None
 			while self.rl.s.in_waiting > 0:
 				self.data_buffer = json.loads(self.rl.readline().decode('utf-8'))
 				if 'T' in self.data_buffer:
@@ -167,19 +177,25 @@ class BaseController:
 
 
 	def on_data_received(self):
-		self.ser.reset_input_buffer()
+		if self.ser:
+			self.ser.reset_input_buffer()
 		data_read = json.loads(self.rl.readline().decode('utf-8'))
 		return data_read
 
 
 	def send_command(self, data):
+		if not self.enable_motor_control and isinstance(data, dict):
+			if data.get("T") in [1, 133, 141]:
+				print("[base_ctrl] Motor command bypassed (enable_motor_control=False for ROS 2)")
+				return
 		self.command_queue.put(data)
 
 
 	def process_commands(self):
 		while True:
 			data = self.command_queue.get()
-			self.ser.write((json.dumps(data) + '\n').encode("utf-8"))
+			if self.ser:
+				self.ser.write((json.dumps(data) + '\n').encode("utf-8"))
 
 
 	def base_json_ctrl(self, input_json):
