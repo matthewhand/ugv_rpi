@@ -40,6 +40,23 @@ With `UGV_MOTION_BACKEND=ros2` and `UGV_PT_BACKEND=auto` (default), the web stic
 
 If rosbridge is down, Flask **falls back to serial `T:133`**. Force with `UGV_PT_BACKEND=serial` or `ros2`.
 
+### AI vision agent (`/ai`)
+
+OpenAI-compatible chat UI at `/ai` with optional live camera still attach.
+
+- **Env:** `OPENAI_API_KEY` (required), optional `OPENAI_BASE_URL` and `OPENAI_MODEL` (defaults: official OpenAI + `gpt-4o-mini`)
+- **Auth (optional):** when `UGV_AI_TOKEN` is set, `/api/ai/*` and `/api/snapshot` require that token
+- **Capabilities:** toggle tree persisted in `.ai_capabilities.json` — motion tools default **off** for safety; enable in the AI UI before the LLM can drive
+- **Tools:** telemetry, CV detections, snapshot metadata, and motion (direct serial or ROS 2 per `control_mode`)
+- **Vision:** attach checkbox sends a live JPEG on that turn; chat history stays text-only (no image re-send)
+
+### Drive safety / conventions
+
+- Positive `linear_x` / `T:13` X = forward (ROS unicycle). UI `T:1` positive L/R = forward on stock firmware.
+- If physical forward is reversed relative to that convention, set `UGV_INVERT_LINEAR=1` (and optionally `UGV_INVERT_ANGULAR=1`).
+- AI chassis drives are **timed by default**; continuous motion requires an explicit continuous flag.
+- Motion tools must be enabled in the AI capability UI before the LLM can call them.
+
 ## Basic Description
 The Waveshare UGV robots utilize both an upper computer and a lower computer. This repository contains the program running on the upper computer, which is typically a Raspberry Pi in this setup.  
 
