@@ -16,6 +16,8 @@ Configure via env (ugv_rpi/.env):
   UGV_MAX_LINEAR=0.35
   UGV_MAX_ANGULAR=0.8
   UGV_MAX_DRIVE_MS=4000
+  UGV_INVERT_LINEAR=1     (optional; flip linear_x if motors wired reversed)
+  UGV_INVERT_ANGULAR=1    (optional; flip angular_z)
 
 Prerequisites for ROS chassis/PT:
   ros2 launch ugv_bringup bringup_lidar.launch.py use_rviz:=false
@@ -64,6 +66,33 @@ def joint_states_topic() -> str:
 
 def _clamp(v: float, lo: float, hi: float) -> float:
     return max(lo, min(hi, v))
+
+
+def _env_flag(name: str) -> bool:
+    return (os.environ.get(name) or '').strip().lower() in ('1', 'true', 'yes', 'on')
+
+
+def apply_drive_inverts(linear_x: float, angular_z: float) -> Tuple[float, float]:
+    """Apply UGV_INVERT_LINEAR / UGV_INVERT_ANGULAR to drive velocities.
+
+    Sign conventions:
+      - UI T:1: positive L/R = forward on stock Waveshare hardware.
+      - ROS/AI: positive linear_x = forward; positive angular_z = CCW (REP-103).
+      - UI T:1 is mapped to twist as lin=(L+R)/2 in app._route_json_command when
+        control_mode is ros2; that mapping assumes UI positive = forward.
+
+    Use UGV_INVERT_LINEAR=1 if motors are wired reversed so physical forward
+    matches software without forking UI stick maps. UGV_INVERT_ANGULAR=1 flips
+    yaw the same way (default off). Applied consistently on ROS /cmd_vel publish
+    and AI direct-serial T:13 paths.
+    """
+    lin = float(linear_x)
+    ang = float(angular_z)
+    if _env_flag('UGV_INVERT_LINEAR'):
+        lin = -lin
+    if _env_flag('UGV_INVERT_ANGULAR'):
+        ang = -ang
+    return lin, ang
 
 
 def _limits() -> Tuple[float, float, int]:
@@ -258,6 +287,9 @@ def _twist_msg(linear_x: float = 0.0, angular_z: float = 0.0) -> dict:
 
 
 def publish_cmd_vel(linear_x: float = 0.0, angular_z: float = 0.0) -> Dict[str, Any]:
+    # Single choke-point for ROS drive: UI ros2 T:1/T:13 mapping, AI ros_drive,
+    # and stop all pass through here so UGV_INVERT_* flips physical direction once.
+    linear_x, angular_z = apply_drive_inverts(linear_x, angular_z)
     topic = cmd_vel_topic()
     msg_type = os.environ.get('UGV_CMD_VEL_TYPE') or 'geometry_msgs/msg/Twist'
     msg = _twist_msg(linear_x, angular_z)
