@@ -813,7 +813,7 @@ def _grab_jpeg_bytes(max_width=640, quality=70):
 _AI_SYSTEM_PROMPT = (
     "You are a helpful vision assistant on a Waveshare UGV rover. "
     "When an image is attached, describe what you see clearly and briefly. "
-    "You do not control motors yet — only describe and advise."
+    "Use tools when they are available to you."
 )
 
 # Toggle tree: groups + leaf tools. Persisted under ugv_rpi/.ai_capabilities.json
