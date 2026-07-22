@@ -106,6 +106,8 @@
                 <div style="display: flex; gap: 10px; margin: 10px 0; justify-content: center; flex-wrap: wrap;">
                     <button id="rtsp-toggle-btn" class="normal_btn" onclick="toggleRTSP()" style="padding: 6px 12px; font-size: 12px; background: #222; color: #ff5555; border: 1px solid #555; border-radius: 4px; cursor: pointer;">RTSP Stream: OFF</button>
                     <button id="motor-toggle-btn" class="normal_btn" onclick="toggleMotors()" style="padding: 6px 12px; font-size: 12px; background: #222; color: #5b8cff; border: 1px solid #555; border-radius: 4px; cursor: pointer;" title="Toggle routing for chassis + pan/tilt: Direct serial (UART) or ROS 2 relay (rosbridge).">Control: ROS 2 relay</button>
+                    <button id="esp32-wifi-btn" class="normal_btn" onclick="toggleEsp32Wifi()" style="padding: 6px 12px; font-size: 12px; background: #222; color: #ffaa55; border: 1px solid #555; border-radius: 4px; cursor: pointer;" title="Session-only: send serial T:408 to stop ESP32 WiFi (SoftAP UGV). Does NOT change boot config — AP returns after ESP32 reboot. Never uses T:401 (persistent off).">ESP32 WiFi: on?</button>
+                    <button type="button" id="ops-log-btn" class="normal_btn" onclick="toggleOpsLogPane()" style="padding: 6px 12px; font-size: 12px; background: #222; color: #c4b5fd; border: 1px solid #555; border-radius: 4px; cursor: pointer;" title="Show operational app log (control mode, WiFi, AI motion, errors).">App log</button>
                     <button type="button" id="ai-open-btn" class="normal_btn" style="padding: 6px 14px; font-size: 12px; background: #1a3a2a; color: #3dd68c; border: 1px solid #3dd68c; border-radius: 4px; cursor: pointer; font-weight: 700;">AI Vision Chat ▾</button>
                     <a href="/ai" target="_blank" class="normal_btn" style="padding: 6px 12px; font-size: 12px; background: #222; color: #5b8cff; border: 1px solid #5b8cff; border-radius: 4px; text-decoration: none;">Full AI page ↗</a>
                 </div>
@@ -316,8 +318,42 @@
         </div>
     </main>
 
-    <!-- AI Vision chat drawer (main :5000 UI) -->
+    <!-- Ops log drawer + AI Vision chat drawer -->
     <style>
+      #ops-log-drawer {
+        position: fixed; right: 12px; bottom: 52px; z-index: 9998;
+        width: min(480px, calc(100vw - 24px)); max-height: 50vh;
+        display: none; flex-direction: column;
+        background: #12151d; border: 1px solid #6d5bd0;
+        border-radius: 10px; box-shadow: 0 12px 40px rgba(0,0,0,.55);
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        color: #e8eaef;
+      }
+      #ops-log-drawer.open { display: flex; }
+      #ops-log-header {
+        display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+        padding: 8px 10px; background: #1a1d27; border-bottom: 1px solid #2a2f3d;
+        border-radius: 10px 10px 0 0; font-size: 12px; font-weight: 600;
+      }
+      #ops-log-header select, #ops-log-header button {
+        font: inherit; font-size: 11px; border-radius: 6px; border: 1px solid #3a4155;
+        background: #0f1117; color: #e8eaef; padding: 4px 8px; cursor: pointer;
+      }
+      #ops-log-header button:hover { border-color: #6d5bd0; }
+      #ops-log-body {
+        flex: 1; overflow-y: auto; min-height: 160px; max-height: 40vh;
+        padding: 8px 10px; font-size: 11px; line-height: 1.45;
+      }
+      #ops-log-body .ol-row { margin: 0 0 6px; white-space: pre-wrap; word-break: break-word; }
+      #ops-log-body .ol-ts { color: #6b7280; }
+      #ops-log-body .ol-info { color: #a5b4fc; }
+      #ops-log-body .ol-warn { color: #fbbf24; }
+      #ops-log-body .ol-error { color: #f87171; }
+      #ops-log-body .ol-debug { color: #6b7280; }
+      #ops-log-body .ol-event { color: #c4b5fd; font-weight: 700; }
+      #ops-log-body .ol-msg { color: #e8eaef; }
+      #ops-log-body .ol-fields { color: #9aa3b2; }
+      #ops-log-empty { color: #6b7280; font-style: italic; padding: 12px 4px; }
       #ai-drawer {
         position: fixed; left: 0; right: 0; bottom: 0; z-index: 9999;
         max-height: 55vh; display: flex; flex-direction: column;
@@ -379,6 +415,24 @@
       #ai-meta label { display: flex; align-items: center; gap: 4px; cursor: pointer; }
       #ai-thumb { width: 72px; height: 48px; object-fit: cover; border-radius: 4px; border: 1px solid #2a2f3d; background: #000; }
     </style>
+    <div id="ops-log-drawer" aria-label="Application operations log">
+      <div id="ops-log-header">
+        <span style="color:#c4b5fd">📋 App log</span>
+        <select id="ops-log-level" title="Minimum level">
+          <option value="debug">debug+</option>
+          <option value="info" selected>info+</option>
+          <option value="warn">warn+</option>
+          <option value="error">error only</option>
+        </select>
+        <label style="font-weight:500;color:#9aa3b2;display:flex;align-items:center;gap:4px;cursor:pointer;">
+          <input type="checkbox" id="ops-log-follow" checked /> follow
+        </label>
+        <button type="button" id="ops-log-refresh" title="Refresh now">↻</button>
+        <button type="button" id="ops-log-clear" title="Clear buffer on server">clear</button>
+        <button type="button" id="ops-log-close" title="Close" style="margin-left:auto">✕</button>
+      </div>
+      <div id="ops-log-body"><div class="ol-empty" id="ops-log-empty">No events yet…</div></div>
+    </div>
     <div id="ai-drawer">
       <div id="ai-drawer-handle" title="Toggle AI chat">
         <div>🤖 AI Vision <span class="badge" id="ai-model-badge">…</span></div>

@@ -1434,11 +1434,221 @@ function toggleMotors() {
     .then(res => res.json())
     .then(data => {
         updateControlModeBtn(data.control_mode || (data.enable_motor_control ? 'direct' : 'ros2'));
+        if (window.refreshOpsLog) window.refreshOpsLog(true);
     })
     .catch(function (e) { console.warn('control_mode toggle failed', e); });
 }
 
-// Sync label with server on load
+function updateEsp32WifiBtn(stopped) {
+    var btn = document.getElementById('esp32-wifi-btn');
+    if (!btn) return;
+    if (stopped) {
+        btn.innerHTML = 'ESP32 WiFi: OFF (session)';
+        btn.style.color = '#ff5555';
+        btn.title = 'Session stop was sent (T:408). Click to re-enable SoftAP for this power cycle (T:402). Boot config unchanged — UGV AP returns after ESP32 reboot.';
+    } else {
+        btn.innerHTML = 'ESP32 WiFi: stop (session)';
+        btn.style.color = '#ffaa55';
+        btn.title = 'Click to send serial T:408 CMD_WIFI_STOP. Runtime only — does NOT persist. AP SSID returns after ESP32 power cycle. Never uses T:401.';
+    }
+}
+
+function toggleEsp32Wifi() {
+    var btn = document.getElementById('esp32-wifi-btn');
+    var wantStop = !(btn && /OFF \(session\)/i.test(btn.innerHTML));
+    var action = wantStop ? 'stop' : 'start_ap';
+    if (wantStop && !confirm(
+        'Stop ESP32 WiFi for this power cycle only?\n\n' +
+        'Sends {"T":408} over serial (CMD_WIFI_STOP).\n' +
+        'Does NOT change boot settings — SoftAP "UGV" comes back after ESP32 reboot.\n\n' +
+        'Continue?'
+    )) {
+        return;
+    }
+    fetch('/api/esp32_wifi', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({action: action})
+    })
+    .then(function (res) { return res.json(); })
+    .then(function (data) {
+        if (!data.success) {
+            alert('ESP32 WiFi ' + action + ' failed: ' + (data.error || 'unknown'));
+            return;
+        }
+        updateEsp32WifiBtn(!!data.stopped);
+        if (window.refreshOpsLog) window.refreshOpsLog(true);
+    })
+    .catch(function (e) { console.warn('esp32_wifi failed', e); });
+}
+
+// ---- Ops log pane (server ring buffer) ----
+var _opsLogState = {
+    open: false,
+    sinceId: 0,
+    knownIds: {},
+    timer: null,
+    pollMs: 1500
+};
+
+function toggleOpsLogPane(force) {
+    var drawer = document.getElementById('ops-log-drawer');
+    var btn = document.getElementById('ops-log-btn');
+    if (!drawer) return;
+    if (typeof force === 'boolean') {
+        _opsLogState.open = force;
+    } else {
+        _opsLogState.open = !_opsLogState.open;
+    }
+    if (_opsLogState.open) {
+        drawer.classList.add('open');
+        if (btn) { btn.style.color = '#a78bfa'; btn.innerHTML = 'App log ▴'; }
+        refreshOpsLog(true);
+        startOpsLogPoll();
+    } else {
+        drawer.classList.remove('open');
+        if (btn) { btn.style.color = '#c4b5fd'; btn.innerHTML = 'App log'; }
+        stopOpsLogPoll();
+    }
+}
+
+function startOpsLogPoll() {
+    stopOpsLogPoll();
+    _opsLogState.timer = setInterval(function () {
+        if (_opsLogState.open) refreshOpsLog(false);
+    }, _opsLogState.pollMs);
+}
+
+function stopOpsLogPoll() {
+    if (_opsLogState.timer) {
+        clearInterval(_opsLogState.timer);
+        _opsLogState.timer = null;
+    }
+}
+
+function _opsEsc(s) {
+    return String(s == null ? '' : s)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function _opsFormatFields(fields) {
+    if (!fields || typeof fields !== 'object') return '';
+    var keys = Object.keys(fields);
+    if (!keys.length) return '';
+    return keys.slice(0, 10).map(function (k) {
+        var v = fields[k];
+        if (typeof v === 'object') {
+            try { v = JSON.stringify(v); } catch (e) { v = String(v); }
+        }
+        return k + '=' + v;
+    }).join(' ');
+}
+
+function _opsRenderEntry(e) {
+    var lvl = (e.level || 'info').toLowerCase();
+    var cls = 'ol-' + (lvl === 'warning' ? 'warn' : lvl);
+    if (['info', 'warn', 'error', 'debug'].indexOf(cls.replace('ol-', '')) < 0) cls = 'ol-info';
+    var ts = (e.iso || '').replace('T', ' ').replace('Z', '');
+    if (ts.length > 19) ts = ts.slice(11, 23); // HH:MM:SS.mmm
+    var fields = _opsFormatFields(e.fields);
+    var msg = e.msg || e.event || '';
+    if (msg === e.event) msg = '';
+    return (
+        '<div class="ol-row ' + cls + '" data-id="' + e.id + '">' +
+        '<span class="ol-ts">' + _opsEsc(ts) + '</span> ' +
+        '<span class="' + cls + '">[' + _opsEsc((e.level || '').toUpperCase()) + ']</span> ' +
+        '<span class="ol-event">' + _opsEsc(e.event || '') + '</span>' +
+        (msg ? ' <span class="ol-msg">' + _opsEsc(msg) + '</span>' : '') +
+        (fields ? ' <span class="ol-fields">' + _opsEsc(fields) + '</span>' : '') +
+        '</div>'
+    );
+}
+
+function refreshOpsLog(full) {
+    var body = document.getElementById('ops-log-body');
+    var levelEl = document.getElementById('ops-log-level');
+    if (!body) return;
+    var minLevel = (levelEl && levelEl.value) || 'info';
+    var since = full ? 0 : (_opsLogState.sinceId || 0);
+    var url = '/api/logs?since_id=' + since + '&limit=' + (full ? 250 : 80) +
+        '&min_level=' + encodeURIComponent(minLevel);
+    fetch(url)
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+            if (!d.success) return;
+            var entries = d.entries || [];
+            if (full) {
+                _opsLogState.knownIds = {};
+                if (!entries.length) {
+                    body.innerHTML = '<div id="ops-log-empty" class="ol-empty">No events yet…</div>';
+                } else {
+                    body.innerHTML = entries.map(_opsRenderEntry).join('');
+                    entries.forEach(function (e) { _opsLogState.knownIds[e.id] = true; });
+                }
+            } else if (entries.length) {
+                var empty = document.getElementById('ops-log-empty');
+                if (empty) empty.remove();
+                var html = '';
+                entries.forEach(function (e) {
+                    if (_opsLogState.knownIds[e.id]) return;
+                    _opsLogState.knownIds[e.id] = true;
+                    html += _opsRenderEntry(e);
+                });
+                if (html) body.insertAdjacentHTML('beforeend', html);
+            }
+            if (entries.length) {
+                _opsLogState.sinceId = Math.max(
+                    _opsLogState.sinceId || 0,
+                    entries[entries.length - 1].id
+                );
+            }
+            var follow = document.getElementById('ops-log-follow');
+            if (follow && follow.checked) {
+                body.scrollTop = body.scrollHeight;
+            }
+            var btn = document.getElementById('ops-log-btn');
+            if (btn && d.last_id != null && !_opsLogState.open) {
+                // subtle unread hint via title
+                btn.title = 'App log · last id ' + d.last_id;
+            }
+        })
+        .catch(function (e) { console.warn('ops log fetch failed', e); });
+}
+window.refreshOpsLog = refreshOpsLog;
+
+function clearOpsLog() {
+    if (!confirm('Clear the server ops log buffer?')) return;
+    fetch('/api/logs', {method: 'DELETE'})
+        .then(function (r) { return r.json(); })
+        .then(function () {
+            _opsLogState.sinceId = 0;
+            _opsLogState.knownIds = {};
+            refreshOpsLog(true);
+        })
+        .catch(function (e) { console.warn('ops log clear failed', e); });
+}
+
+// Wire ops log controls once DOM ready
+(function initOpsLogUi() {
+    function bind() {
+        var close = document.getElementById('ops-log-close');
+        var refresh = document.getElementById('ops-log-refresh');
+        var clearBtn = document.getElementById('ops-log-clear');
+        var levelEl = document.getElementById('ops-log-level');
+        if (close) close.onclick = function () { toggleOpsLogPane(false); };
+        if (refresh) refresh.onclick = function () { refreshOpsLog(true); };
+        if (clearBtn) clearBtn.onclick = clearOpsLog;
+        if (levelEl) levelEl.onchange = function () { refreshOpsLog(true); };
+    }
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', bind);
+    } else {
+        bind();
+    }
+})();
+
+// Sync labels with server on load
 fetch('/api/status').then(function (r) { return r.json(); }).then(function (d) {
     updateControlModeBtn(d.control_mode || (d.enable_motor_control ? 'direct' : 'ros2'));
+    updateEsp32WifiBtn(!!d.esp32_wifi_stopped);
 }).catch(function () {});

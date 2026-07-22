@@ -57,10 +57,11 @@ import uuid
 import asyncio
 import time
 import logging
-import logging
 import cv_ctrl
 import audio_ctrl
 import os_info
+import app_log
+from app_log import app_log as olog
 
 # Get system info
 UPLOAD_FOLDER = thisPath + '/sounds/others'
@@ -133,7 +134,7 @@ def get_control_mode():
         return _control_mode
 
 
-def set_control_mode(mode):
+def set_control_mode(mode, *, source='api'):
     """Set 'direct' (serial) or 'ros2' (rosbridge). Syncs chassis bypass flag."""
     global _control_mode
     mode = (mode or '').strip().lower()
@@ -144,19 +145,48 @@ def set_control_mode(mode):
     if mode not in ('direct', 'ros2'):
         raise ValueError("mode must be 'direct' or 'ros2'")
     with _control_mode_lock:
+        prev = _control_mode
         _control_mode = mode
         # direct: Flask may drive wheels on serial; ros2: bypass chassis T:1/T:13
         base.enable_motor_control = (mode == 'direct')
     _save_control_mode()
-    print(f'[app.py] control_mode={mode} (chassis_serial={"on" if mode == "direct" else "bypassed"})')
+    fields = {
+        'mode': mode,
+        'prev_mode': prev,
+        'chassis_serial': 'on' if mode == 'direct' else 'bypassed',
+        'source': source,
+    }
+    if mode == 'ros2':
+        try:
+            import ros_motion
+            br = ros_motion.rosbridge_status()
+            fields['rosbridge_ok'] = bool(br.get('ok'))
+            if br.get('url'):
+                fields['rosbridge_url'] = br.get('url')
+            if br.get('error'):
+                fields['rosbridge_error'] = br.get('error')
+        except Exception as e:
+            fields['rosbridge_ok'] = False
+            fields['rosbridge_error'] = str(e)
+    if prev != mode:
+        olog.info(
+            'control_mode',
+            f'Control mode → {mode} (chassis serial {"on" if mode == "direct" else "bypassed"})',
+            **fields,
+        )
     return mode
 
 
 _load_control_mode()
 # Apply side effects for loaded mode
 base.enable_motor_control = (get_control_mode() == 'direct')
-print(f'[app.py] control_mode={get_control_mode()} '
-      f'(chassis_serial={"on" if base.enable_motor_control else "bypassed for ROS 2"})')
+olog.info(
+    'startup',
+    f'control_mode={get_control_mode()} '
+    f'(chassis_serial={"on" if base.enable_motor_control else "bypassed for ROS 2"})',
+    control_mode=get_control_mode(),
+    chassis_serial='on' if base.enable_motor_control else 'bypassed',
+)
 
 # Set to keep track of RTCPeerConnection instances
 active_pcs = {}
@@ -257,13 +287,15 @@ def api_status():
         'enable_motor_control': base.enable_motor_control,
         'control_mode': mode,  # 'direct' | 'ros2'
         'control_mode_label': 'Direct serial' if mode == 'direct' else 'ROS 2 relay',
+        'esp32_wifi_stopped': bool(_esp32_wifi_session.get('stopped')),
     })
 
 @app.route('/api/toggle_rtsp', methods=['POST'])
 def api_toggle_rtsp():
     global enable_rtsp_stream
     enable_rtsp_stream = not enable_rtsp_stream
-    print(f"[app.py] RTSP Stream toggle: {enable_rtsp_stream}")
+    olog.info('rtsp_toggle', f'RTSP stream {"ON" if enable_rtsp_stream else "OFF"}',
+              enable_rtsp_stream=enable_rtsp_stream)
     return jsonify({'success': True, 'enable_rtsp_stream': enable_rtsp_stream})
 
 @app.route('/api/control_mode', methods=['GET', 'POST'])
@@ -290,7 +322,7 @@ def api_control_mode():
     if not mode:
         return jsonify({'success': False, 'error': "provide mode: 'direct' or 'ros2'"}), 400
     try:
-        mode = set_control_mode(mode)
+        mode = set_control_mode(mode, source='api')
     except ValueError as e:
         return jsonify({'success': False, 'error': str(e)}), 400
     bridge = {}
@@ -311,12 +343,221 @@ def api_control_mode():
 def api_toggle_motors():
     """Legacy: flip between direct serial and ROS 2 relay (same as control_mode toggle)."""
     mode = 'direct' if get_control_mode() == 'ros2' else 'ros2'
-    mode = set_control_mode(mode)
+    mode = set_control_mode(mode, source='ui_toggle')
     return jsonify({
         'success': True,
         'enable_motor_control': base.enable_motor_control,
         'control_mode': mode,
     })
+
+
+# ---------------------------------------------------------------------------
+# ESP32 WiFi (lower computer SoftAP "UGV" etc.)
+#
+# Safe for boot AP behavior:
+#   {"T":408}  CMD_WIFI_STOP  → runtime disconnect only (wifiStop() in firmware).
+#   Does NOT write LittleFS /wifiConfig.json. Next power-on still uses boot mode.
+#
+# Do NOT use for temporary off:
+#   {"T":401,"cmd":0}  CMD_WIFI_ON_BOOT → configWifiModeOnBoot() PERSISTS off to
+#   wifiConfig.json. That would stop the AP advertising on every future boot.
+# ---------------------------------------------------------------------------
+_esp32_wifi_session = {
+    'stopped': False,   # True after we sent T:408 this Flask process lifetime
+    'last_action': None,
+    'last_error': None,
+}
+
+
+def _esp32_wifi_stop_session(*, source='api'):
+    """Runtime WiFi stop on ESP32. Non-persistent. Returns result dict."""
+    try:
+        base.base_json_ctrl({'T': 408})
+        _esp32_wifi_session['stopped'] = True
+        _esp32_wifi_session['last_action'] = 'stop'
+        _esp32_wifi_session['last_error'] = None
+        olog.info(
+            'esp32_wifi',
+            'ESP32 WiFi STOP (T:408) — session only; boot AP config unchanged',
+            action='stop', T=408, persistent=False, source=source, success=True,
+        )
+        return {
+            'success': True,
+            'action': 'stop',
+            'command': {'T': 408},
+            'persistent': False,
+            'stopped': True,
+            'note': (
+                'Sent CMD_WIFI_STOP (T:408). Runtime only — does not change '
+                'wifi_mode_on_boot / wifiConfig.json. AP should return after ESP32 reboot.'
+            ),
+        }
+    except Exception as e:
+        _esp32_wifi_session['last_error'] = str(e)
+        olog.error('esp32_wifi', f'ESP32 WiFi STOP failed: {e}',
+                   action='stop', T=408, persistent=False, source=source, success=False, error=str(e))
+        return {'success': False, 'action': 'stop', 'error': str(e), 'persistent': False}
+
+
+def _esp32_wifi_start_ap_session(ssid=None, password=None, *, source='api'):
+    """Re-enable SoftAP for this power cycle only (T:402). Does not write boot config."""
+    ssid = ssid or os.environ.get('UGV_ESP32_AP_SSID') or 'UGV'
+    password = password or os.environ.get('UGV_ESP32_AP_PASSWORD') or '12345678'
+    try:
+        cmd = {'T': 402, 'ssid': ssid, 'password': password}
+        base.base_json_ctrl(cmd)
+        _esp32_wifi_session['stopped'] = False
+        _esp32_wifi_session['last_action'] = 'start_ap'
+        _esp32_wifi_session['last_error'] = None
+        olog.info(
+            'esp32_wifi',
+            f'ESP32 WiFi START AP (T:402 ssid={ssid!r}) — session only',
+            action='start_ap', T=402, ssid=ssid, persistent=False, source=source, success=True,
+        )
+        return {
+            'success': True,
+            'action': 'start_ap',
+            'command': {'T': 402, 'ssid': ssid},
+            'persistent': False,
+            'stopped': False,
+            'note': (
+                'Sent CMD_SET_AP (T:402). Runtime SoftAP only — does not rewrite '
+                'wifiConfig.json boot settings.'
+            ),
+        }
+    except Exception as e:
+        _esp32_wifi_session['last_error'] = str(e)
+        olog.error('esp32_wifi', f'ESP32 WiFi START AP failed: {e}',
+                   action='start_ap', T=402, source=source, success=False, error=str(e))
+        return {'success': False, 'action': 'start_ap', 'error': str(e), 'persistent': False}
+
+
+@app.route('/api/esp32_wifi', methods=['GET', 'POST'])
+def api_esp32_wifi():
+    """Session-only ESP32 WiFi control over serial (never persists boot-off).
+
+    GET  → last known session state (Flask-side; ESP32 not polled by default)
+    POST {"action":"stop"}     → T:408 disconnect (safe; non-persistent)
+    POST {"action":"start_ap"} → T:402 SoftAP for this power cycle
+    POST {"action":"info"}     → T:405 request WiFi info on serial (debug)
+
+    Never exposes T:401 (wifi_mode_on_boot) — that writes LittleFS and would
+    kill the boot AP permanently until reconfigured.
+    """
+    if request.method == 'GET':
+        return jsonify({
+            'success': True,
+            'stopped': bool(_esp32_wifi_session.get('stopped')),
+            'last_action': _esp32_wifi_session.get('last_action'),
+            'last_error': _esp32_wifi_session.get('last_error'),
+            'persistent': False,
+            'safe_commands': {
+                'stop': {'T': 408},
+                'start_ap': {'T': 402, 'ssid': 'UGV', 'password': '(default or env)'},
+                'info': {'T': 405},
+            },
+            'danger_do_not_use_for_session_off': {
+                'wifi_on_boot_off': {'T': 401, 'cmd': 0},
+                'why': 'Writes wifiConfig.json; AP stays off across reboots.',
+            },
+            'note': (
+                'Stop uses firmware wifiStop() only. Boot AP (SSID UGV) returns '
+                'after ESP32 power cycle / reboot.'
+            ),
+        })
+
+    data = request.get_json(silent=True) or {}
+    action = (data.get('action') or data.get('cmd') or '').strip().lower()
+    if action in ('stop', 'off', 'disable'):
+        result = _esp32_wifi_stop_session(source='api')
+        return jsonify(result), (200 if result.get('success') else 500)
+    if action in ('start_ap', 'start', 'on', 'enable', 'ap'):
+        result = _esp32_wifi_start_ap_session(
+            ssid=data.get('ssid'),
+            password=data.get('password'),
+            source='api',
+        )
+        return jsonify(result), (200 if result.get('success') else 500)
+    if action in ('info', 'status_query'):
+        try:
+            base.base_json_ctrl({'T': 405})
+            olog.info('esp32_wifi', 'ESP32 WiFi INFO requested (T:405)', action='info', T=405)
+            return jsonify({
+                'success': True,
+                'action': 'info',
+                'command': {'T': 405},
+                'persistent': False,
+                'note': 'CMD_WIFI_INFO sent; response prints on ESP32 serial if echo/debug on.',
+            })
+        except Exception as e:
+            olog.error('esp32_wifi', f'ESP32 WiFi INFO failed: {e}', action='info', error=str(e))
+            return jsonify({'success': False, 'action': 'info', 'error': str(e)}), 500
+    if action in ('on_boot', 'persist', '401'):
+        olog.warn(
+            'esp32_wifi',
+            'Refused persistent WiFi-off (T:401) — would kill boot AP',
+            action=action, refused_T=401,
+        )
+        return jsonify({
+            'success': False,
+            'error': (
+                'Refusing CMD_WIFI_ON_BOOT (T:401). It writes wifiConfig.json and '
+                'changes boot WiFi permanently. Use action=stop (T:408) for session-only off.'
+            ),
+        }), 400
+    return jsonify({
+        'success': False,
+        'error': "action must be 'stop', 'start_ap', or 'info'",
+    }), 400
+
+
+@app.route('/api/logs', methods=['GET', 'POST', 'DELETE'])
+def api_logs():
+    """In-app ops log ring buffer.
+
+    GET  ?since_id=0&limit=200&min_level=info
+    POST {"level","event","msg", ...fields}  — allow UI to note client events
+    DELETE — clear buffer
+    """
+    if request.method == 'DELETE':
+        n = olog.clear()
+        olog.info('app_log', f'Log cleared ({n} entries removed)', cleared=n, source='api')
+        return jsonify({'success': True, 'cleared': n, **olog.stats()})
+    if request.method == 'POST':
+        data = request.get_json(silent=True) or {}
+        level = data.get('level') or 'info'
+        event = (data.get('event') or 'client').strip() or 'client'
+        # Only allow a few client events to avoid spam
+        allowed = {
+            'ui', 'client', 'gamepad', 'ui_error', 'ui_warn',
+            'esp32_wifi', 'control_mode', 'rtsp_toggle',
+        }
+        if event not in allowed:
+            event = 'client'
+        msg = data.get('msg') or data.get('message')
+        fields = {k: v for k, v in data.items()
+                  if k not in ('level', 'event', 'msg', 'message') and not str(k).startswith('_')}
+        fields['source'] = fields.get('source') or 'browser'
+        entry = olog.log(level, event, msg, **fields)
+        return jsonify({'success': True, 'entry': entry, **olog.stats()})
+    since_id = request.args.get('since_id', 0, type=int) or 0
+    limit = request.args.get('limit', 200, type=int) or 200
+    min_level = request.args.get('min_level') or request.args.get('level') or 'debug'
+    event = request.args.get('event') or None
+    entries = olog.get(since_id=since_id, limit=limit, min_level=min_level, event=event)
+    return jsonify({
+        'success': True,
+        'entries': entries,
+        **olog.stats(),
+    })
+
+
+# Optional: kill ESP32 SoftAP once Flask is up (session only). Boot AP still returns next power-on.
+if os.environ.get('UGV_ESP32_WIFI_STOP_ON_START', '').lower() in ('1', 'true', 'yes'):
+    try:
+        _esp32_wifi_stop_session(source='env_on_start')
+    except Exception as e:
+        olog.error('esp32_wifi', f'UGV_ESP32_WIFI_STOP_ON_START failed: {e}', error=str(e))
 
 # ---------- AI agent (local OpenAI-compatible LLM + camera vision) ----------
 _snapshot_lock = threading.Lock()
@@ -997,9 +1238,16 @@ def _execute_agent_tool(name, arguments):
     catalog = {t['name']: t for t in _ai_tools_catalog()}
     entry = catalog.get(name)
     if entry and entry.get('status') != 'active':
+        reason = entry.get('reason') or entry.get('status')
+        olog.warn(
+            'ai_tool_blocked',
+            f'AI tool blocked: {name} ({reason})',
+            tool=name, status=entry.get('status'), reason=reason,
+            control_mode=get_control_mode(),
+        )
         return {
             'ok': False,
-            'error': f'tool unavailable: {entry.get("reason") or entry.get("status")}',
+            'error': f'tool unavailable: {reason}',
             'tool': name,
         }
 
@@ -1056,11 +1304,22 @@ def _execute_motion_via_mode(name, args):
     """AI motion tools follow the same control_mode as UI sticks."""
     mode = get_control_mode()
     args = args or {}
+    level = 'warn' if name == 'stop_motors' else 'info'
+
     if mode == 'ros2':
         import ros_motion
         result = ros_motion.execute_motion_tool(name, args)
         if isinstance(result, dict):
             result.setdefault('control_mode', mode)
+            ok = bool(result.get('ok', True)) and not result.get('error')
+            olog.log(
+                'error' if not ok else level,
+                'ai_motion',
+                f'AI tool {name} via ros2' + (f' — {result.get("error")}' if not ok else ''),
+                tool=name, control_mode=mode, path='ros2', ok=ok,
+                **{k: args.get(k) for k in ('linear_x', 'angular_z', 'duration_ms', 'pan_rad', 'tilt_rad') if k in args},
+                error=result.get('error'),
+            )
         return result
 
     # ---- direct serial (ESP32 UART) ----
@@ -1077,6 +1336,8 @@ def _execute_motion_via_mode(name, args):
     if name == 'stop_motors':
         base.base_json_ctrl({'T': 13, 'X': 0, 'Z': 0})
         base.base_json_ctrl({'T': 1, 'L': 0, 'R': 0})
+        olog.warn('ai_motion', 'AI stop_motors via direct serial',
+                  tool=name, control_mode=mode, path='serial', ok=True)
         return {'ok': True, 'backend': 'direct', 'control_mode': mode, 'path': 'serial'}
 
     if name == 'send_motor_command':
@@ -1093,6 +1354,12 @@ def _execute_motion_via_mode(name, args):
             _time.sleep(dur / 1000.0)
             base.base_json_ctrl({'T': 13, 'X': 0, 'Z': 0})
             stopped = True
+        olog.info(
+            'ai_motion',
+            f'AI drive lin={lin:.3f} ang={ang:.3f} dur={dur}ms (direct)',
+            tool=name, control_mode=mode, path='serial', ok=True,
+            linear_x=lin, angular_z=ang, duration_ms=dur, stopped=stopped,
+        )
         return {
             'ok': True,
             'backend': 'direct',
@@ -1116,6 +1383,12 @@ def _execute_motion_via_mode(name, args):
             cvf.tilt_angle = -y_deg
         except Exception:
             pass
+        olog.info(
+            'ai_motion',
+            f'AI gimbal pan={pan:.3f} tilt={tilt:.3f} rad (direct)',
+            tool=name, control_mode=mode, path='serial', ok=True,
+            pan_rad=pan, tilt_rad=tilt, x_deg=round(x_deg, 2), y_deg=round(y_deg, 2),
+        )
         return {
             'ok': True,
             'backend': 'direct',
@@ -1127,6 +1400,7 @@ def _execute_motion_via_mode(name, args):
             'y_deg': y_deg,
         }
 
+    olog.warn('ai_motion', f'Unknown motion tool: {name}', tool=name, control_mode=mode, ok=False)
     return {'ok': False, 'error': f'unknown motion tool: {name}', 'control_mode': mode}
 
 
@@ -1496,6 +1770,11 @@ def api_ai_chat():
     try:
         content, raw, used_cfg, tool_trace = _run_agent_loop(messages)
     except Exception as e:
+        olog.error(
+            'ai_chat', f'AI chat failed: {e}',
+            control_mode=mode, error=str(e)[:300],
+            tokens_est=est.get('tokens_est'),
+        )
         return jsonify({
             'success': False,
             'error': str(e),
@@ -1503,6 +1782,17 @@ def api_ai_chat():
             'motion_backend': backend,
         }), 502
 
+    olog.info(
+        'ai_chat',
+        f'AI chat ok · tools={len(tool_trace or [])} · ~{est.get("tokens_est")} tok',
+        control_mode=mode,
+        model=used_cfg.get('model'),
+        snapshot_attached=bool(snapshot_data_url),
+        snapshot_bytes=snapshot_bytes or 0,
+        tokens_est=est.get('tokens_est'),
+        tool_count=len(tool_trace or []),
+        tools=','.join(t.get('name', '') for t in (tool_trace or [])[:8]) or None,
+    )
     return jsonify({
         'success': True,
         'reply': content,
@@ -1923,7 +2213,11 @@ def _route_json_command(cmd):
                     pass
                 return {'path': 'ros2', 'ok': bool(result.get('ok')), 'mode': mode, 'result': result}
             except Exception as e:
-                print(f'[app.py] ROS2 gimbal failed: {e}')
+                olog.error(
+                    'motion_route', f'ROS2 gimbal failed: {e}',
+                    path='ros2', T=t, mode=mode, error=str(e),
+                    throttle_s=3.0, throttle_key='ros2_gimbal_fail',
+                )
                 return {'path': 'ros2', 'ok': False, 'mode': mode, 'error': str(e)}
         base.base_json_ctrl(cmd)
         return {'path': 'direct', 'ok': True, 'mode': mode}
@@ -1946,12 +2240,23 @@ def _route_json_command(cmd):
                 result = ros_motion.publish_cmd_vel(lin, ang)
                 return {'path': 'ros2', 'ok': bool(result.get('ok')), 'mode': mode, 'result': result}
             except Exception as e:
-                print(f'[app.py] ROS2 chassis failed: {e}')
+                olog.error(
+                    'motion_route', f'ROS2 chassis failed: {e}',
+                    path='ros2', T=t, mode=mode, error=str(e),
+                    throttle_s=3.0, throttle_key='ros2_chassis_fail',
+                )
                 return {'path': 'ros2', 'ok': False, 'mode': mode, 'error': str(e)}
         base.base_json_ctrl(cmd)
         return {'path': 'direct', 'ok': True, 'mode': mode}
 
     # Non-motion JSON always serial (lights, module select, etc.)
+    # Log interesting T codes only (not high-rate noise)
+    try:
+        t_int = int(t) if t is not None else None
+    except (TypeError, ValueError):
+        t_int = None
+    if t_int is not None and t_int in (4, 132, 136, 137, 401, 402, 403, 404, 405, 406, 407, 408, 600, 604, 900):
+        olog.info('serial_cmd', f'Serial JSON T:{t_int}', T=t_int, path='serial', mode=mode)
     base.base_json_ctrl(cmd)
     return {'path': 'serial', 'ok': True, 'mode': mode}
 
@@ -1962,13 +2267,42 @@ def handle_socket_json(json_data):
     try:
         _route_json_command(json_data)
     except Exception as e:
-        print("Error handling JSON data:", e)
+        olog.error('socket_json', f'Error handling JSON data: {e}', error=str(e))
         return
+
+# Battery low edge (log once when crossing below threshold, again when recovered)
+_battery_low_active = False
+_BATTERY_LOW_V = float(os.environ.get('UGV_BATTERY_LOW_V') or 9.5)
+
+
+def _check_battery_edge():
+    global _battery_low_active
+    try:
+        bd = base.base_data if isinstance(getattr(base, 'base_data', None), dict) else {}
+        v = bd.get('v')
+        if v is None:
+            return
+        voltage = float(v)
+        # Waveshare often reports raw ADC-ish values; if > 30 treat as raw and skip
+        if voltage > 30:
+            return
+        if voltage <= _BATTERY_LOW_V and not _battery_low_active:
+            _battery_low_active = True
+            olog.warn('battery', f'Battery low: {voltage:.2f} V (≤ {_BATTERY_LOW_V} V)',
+                      voltage_v=voltage, threshold=_BATTERY_LOW_V)
+        elif voltage > (_BATTERY_LOW_V + 0.3) and _battery_low_active:
+            _battery_low_active = False
+            olog.info('battery', f'Battery recovered: {voltage:.2f} V',
+                      voltage_v=voltage, threshold=_BATTERY_LOW_V)
+    except Exception:
+        pass
+
 
 # info update single
 def update_data_websocket_single():
     # {'T':1001,'L':0,'R':0,'r':0,'p':0,'v': 11,'pan':0,'tilt':0}
     try:
+        _check_battery_edge()
         socket_data = {
             f['fb']['picture_size']:si.pictures_size,
             f['fb']['video_size']:  si.videos_size,
@@ -2100,7 +2434,18 @@ if __name__ == "__main__":
     cmd_on_boot()
 
     # run the main web app
-    port = int(os.environ.get('UGV_PORT', '5000'))
+    port = int(os.environ.get('UGV_PORT') or os.environ.get('PORT') or 5000)
+    olog.info(
+        'startup',
+        f'UGV app ready on :{port}',
+        port=port,
+        control_mode=get_control_mode(),
+        serial_open=bool(getattr(base, 'ser', None)),
+        module_type=f['base_config'].get('module_type'),
+        main_type=f['base_config'].get('main_type'),
+        hot_reload=bool(_HOT_RELOAD),
+        esp32_wifi_stop_on_start=os.environ.get('UGV_ESP32_WIFI_STOP_ON_START', '0'),
+    )
     # HTML/JS/CSS: browser refresh is enough (TEMPLATES_AUTO_RELOAD + no-store headers).
     # Python process restart is opt-in via UGV_RELOADER=1 (re-inits serial/camera).
     if _HOT_RELOAD:

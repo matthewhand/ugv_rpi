@@ -138,6 +138,12 @@ class BaseController:
 			self.ser = serial.Serial(uart_dev_set, buad_set, timeout=1)
 		except Exception as e:
 			print(f"[base_ctrl] Serial port {uart_dev_set} error: {e}")
+			try:
+				from app_log import app_log as olog
+				olog.error('serial', f'Serial port {uart_dev_set} open failed',
+				           port=uart_dev_set, baud=buad_set, error=str(e))
+			except Exception:
+				pass
 			self.ser = None
 		self.rl = ReadLine(self.ser)
 		self.command_queue = queue.Queue()
@@ -157,6 +163,7 @@ class BaseController:
 		# Gimbal T:133 / T:141 always pass through when serial is open.
 		self.enable_motor_control = True  # Default ON; disable via /api/toggle_motors or UGV_MOTOR_BYPASS
 		self._chassis_bypass_types = {1, 13, "1", "13"}
+		self._bypass_log_last = 0.0
 		
 
 	def feedback_data(self):
@@ -170,6 +177,17 @@ class BaseController:
 					self.data_buffer = None
 					if self.base_data["T"] == 1003:
 						print(self.base_data)
+						try:
+							from app_log import app_log as olog
+							bd = self.base_data
+							olog.info(
+								'esp_now',
+								f'ESP-NOW T:1003 from {bd.get("mac", "?")}',
+								T=1003, mac=bd.get('mac'),
+								megs=str(bd.get('megs', ''))[:120],
+							)
+						except Exception:
+							pass
 						return self.base_data
 			self.rl.clear_buffer()
 			self.data_buffer = json.loads(self.rl.readline().decode('utf-8'))
@@ -190,7 +208,20 @@ class BaseController:
 	def send_command(self, data):
 		if not self.enable_motor_control and isinstance(data, dict):
 			if data.get("T") in self._chassis_bypass_types:
-				print("[base_ctrl] Chassis command bypassed (enable_motor_control=False; gimbal T:133/141 still allowed)")
+				# Throttle: stick heartbeats would flood the ops log
+				now = time.time()
+				if now - getattr(self, '_bypass_log_last', 0) > 5.0:
+					self._bypass_log_last = now
+					print("[base_ctrl] Chassis command bypassed (enable_motor_control=False; gimbal T:133/141 still allowed)")
+					try:
+						from app_log import app_log as olog
+						olog.warn(
+							'chassis_bypass',
+							'Chassis serial bypassed (ROS 2 mode owns wheels; PT free)',
+							T=data.get('T'), enable_motor_control=False,
+						)
+					except Exception:
+						pass
 				return
 		self.command_queue.put(data)
 
