@@ -150,28 +150,30 @@ class RosbridgeClient:
         self._advertised = {k for k in self._advertised if k[0] != topic}
 
 
-# Persistent client for stick-rate pan/tilt (avoid open/close every move)
-_pt_client: Optional[RosbridgeClient] = None
+# Persistent client for stick-rate pan/tilt (avoid open/close every move).
+# NOTE: do not name the global the same as the accessor function (that shadows
+# the function after first call → "'RosbridgeClient' object is not callable").
+_pt_ws: Optional[RosbridgeClient] = None
 _pt_client_lock = threading.Lock()
 _pt_last_pub = 0.0
 _PT_MIN_INTERVAL = 0.04  # ~25 Hz max
 
 
-def _pt_client() -> RosbridgeClient:
-    global _pt_client
+def _get_pt_client() -> RosbridgeClient:
+    global _pt_ws
     with _pt_client_lock:
-        if _pt_client is None:
-            _pt_client = RosbridgeClient(timeout=2.0)
+        if _pt_ws is None:
+            _pt_ws = RosbridgeClient(timeout=2.0)
         try:
-            _pt_client.ensure()
+            _pt_ws.ensure()
         except Exception:
             try:
-                _pt_client.close()
+                _pt_ws.close()
             except Exception:
                 pass
-            _pt_client = RosbridgeClient(timeout=2.0)
-            _pt_client.ensure()
-        return _pt_client
+            _pt_ws = RosbridgeClient(timeout=2.0)
+            _pt_ws.ensure()
+        return _pt_ws
 
 
 def _twist_msg(linear_x: float = 0.0, angular_z: float = 0.0) -> dict:
@@ -241,7 +243,7 @@ def publish_gimbal(pan_rad: float, tilt_rad: float, throttle: bool = True) -> Di
     cmd_type = os.environ.get('UGV_PT_JOINT_TYPE') or 'std_msgs/msg/Float64MultiArray'
     cmd_msg = {'data': [pan_rad, tilt_rad]}
 
-    client = _pt_client()
+    client = _get_pt_client()
     with _pt_client_lock:
         client.publish(js_topic, joint_msg, js_type)
         client.publish(cmd_topic, cmd_msg, cmd_type)
