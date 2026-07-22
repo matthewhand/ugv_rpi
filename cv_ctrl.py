@@ -276,8 +276,19 @@ class OpencvFuncs():
                 cv2.imwrite(photo_filename, input_frame)
                 self.picture_capture_flag = False
                 print(photo_filename)
-            except:
-                pass
+                try:
+                    from app_log import app_log as olog
+                    olog.info('photo', f'Photo saved {os.path.basename(photo_filename)}',
+                              path=photo_filename, source='capture')
+                except Exception:
+                    pass
+            except Exception as e:
+                self.picture_capture_flag = False
+                try:
+                    from app_log import app_log as olog
+                    olog.error('photo', f'Photo save failed: {e}', error=str(e))
+                except Exception:
+                    pass
 
         # record video
         if not self.set_video_record_flag and not self.video_record_status_flag:
@@ -287,12 +298,26 @@ class OpencvFuncs():
             video_filename = f'{self.video_path}video_{current_time}.mp4'
             self.writer = imageio.get_writer(video_filename, fps=30)
             self.video_record_status_flag = True
+            self._last_video_filename = video_filename
+            try:
+                from app_log import app_log as olog
+                olog.info('video', f'Video record START {os.path.basename(video_filename)}',
+                          path=video_filename, recording=True)
+            except Exception:
+                pass
         elif self.set_video_record_flag and self.video_record_status_flag:
             cv2.circle(input_frame, (15, 15), 5, (64, 64, 255), -1)
             self.writer.append_data(np.array(cv2.cvtColor(input_frame, cv2.COLOR_BGRA2RGB)))
         elif not self.set_video_record_flag and self.video_record_status_flag:
             self.video_record_status_flag = False
             self.writer.close()
+            try:
+                from app_log import app_log as olog
+                vf = getattr(self, '_last_video_filename', None)
+                olog.info('video', f'Video record STOP{(" " + os.path.basename(vf)) if vf else ""}',
+                          path=vf, recording=False)
+            except Exception:
+                pass
 
         # frame scale
         if self.scale_rate == 1:
@@ -388,15 +413,43 @@ class OpencvFuncs():
         else:
             self.video_quality = int(input_quality)
 
+    def _code_label(self, code_val):
+        try:
+            for name, val in (f.get('code') or {}).items():
+                if val == code_val:
+                    return name
+        except Exception:
+            pass
+        return str(code_val)
+
     def set_cv_mode(self, input_mode):
+        prev = getattr(self, 'cv_mode', None)
         self.cv_mode = input_mode
         if self.cv_mode == f['code']['cv_none']:
             self.set_video_record_flag = False
+        label = self._code_label(input_mode)
+        level = 'warn' if input_mode == f['code'].get('cv_auto') else 'info'
+        try:
+            from app_log import app_log as olog
+            olog.log(
+                level, 'cv_mode',
+                f'CV mode → {label}',
+                cv_mode=input_mode, label=label, prev=prev,
+            )
+        except Exception:
+            pass
 
     def set_detection_reaction(self, input_reaction):
         self.detection_reaction_mode = input_reaction
         if self.detection_reaction_mode == f['code']['re_none']:
             self.set_video_record_flag = False
+        label = self._code_label(input_reaction)
+        try:
+            from app_log import app_log as olog
+            olog.info('cv_reaction', f'Detection reaction → {label}',
+                      reaction=input_reaction, label=label)
+        except Exception:
+            pass
 
 
 
@@ -1023,11 +1076,19 @@ class OpencvFuncs():
             self.cv_movtion_lock = False
             self.pan_angle = 0
             self.tilt_angle = 0
+            locked = False
         else:
             self.cv_movtion_lock = True
-
-
-
+            locked = True
+        try:
+            from app_log import app_log as olog
+            olog.info(
+                'motion_lock',
+                f'Motion lock {"ON" if locked else "OFF (tracking free)"}',
+                locked=locked,
+            )
+        except Exception:
+            pass
 
     def change_target_color(self, lc, uc):
         self.color_lower = np.array([lc[0], lc[1], lc[2]])
@@ -1065,9 +1126,21 @@ class OpencvFuncs():
 
     def timelapse(self, input_speed, input_time, input_interval, input_loop_times):
         self.mission_flag = True
+        try:
+            from app_log import app_log as olog
+            olog.info(
+                'timelapse',
+                f'Timelapse START loops={input_loop_times} speed={input_speed}',
+                speed=input_speed, move_time=input_time,
+                interval=input_interval, loops=input_loop_times,
+            )
+        except Exception:
+            pass
+        aborted = False
         for i in range(0, input_loop_times):
             if not self.mission_flag:
                 self.mission_flag = False
+                aborted = True
                 break
             self.base_ctrl.base_json_ctrl({"T":1,"L":input_speed,"R":input_speed})
             time.sleep(input_time)
@@ -1080,7 +1153,23 @@ class OpencvFuncs():
             time.sleep(input_interval/2)
             if not self.mission_flag:
                 self.mission_flag = False
+                aborted = True
                 break
+        try:
+            from app_log import app_log as olog
+            if aborted:
+                olog.warn('timelapse', 'Timelapse aborted', loops=input_loop_times)
+            else:
+                olog.info('timelapse', 'Timelapse finished', loops=input_loop_times)
+        except Exception:
+            pass
 
     def mission_stop(self):
+        was = bool(getattr(self, 'mission_flag', False))
         self.mission_flag = False
+        if was:
+            try:
+                from app_log import app_log as olog
+                olog.warn('timelapse', 'Timelapse STOP requested')
+            except Exception:
+                pass

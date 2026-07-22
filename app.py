@@ -833,6 +833,7 @@ def _apply_toggle(name, enabled, state):
 
 def _set_capabilities(updates):
     with _ai_capabilities_lock:
+        prev = dict(_ai_capabilities)
         state = dict(_ai_capabilities)
         for k, v in (updates or {}).items():
             if k in state:
@@ -841,6 +842,15 @@ def _set_capabilities(updates):
         _ai_capabilities.update(state)
         snap = dict(_ai_capabilities)
     _save_ai_capabilities()
+    changed = {k: snap[k] for k in snap if prev.get(k) != snap.get(k)}
+    if changed:
+        parts = [f'{k}={"on" if v else "off"}' for k, v in list(changed.items())[:8]]
+        olog.info(
+            'ai_capabilities',
+            'AI tools toggled: ' + ', '.join(parts),
+            changed=','.join(changed.keys()),
+            motion_tools_on=any(snap.get(n, False) for n in _MOTION_TOOLS),
+        )
     return snap
 
 
@@ -1638,8 +1648,10 @@ def api_ai_compress():
         summary_msg, _raw, used_cfg = _openai_chat(compress_messages, max_tokens=320, temperature=0.2)
         summary = _message_text_content(summary_msg)
         if not summary:
+            olog.error('ai_compress', 'Compress produced empty summary')
             return jsonify({'success': False, 'error': 'compress produced empty summary'}), 502
     except Exception as e:
+        olog.error('ai_compress', f'Compress failed: {e}', error=str(e)[:200])
         return jsonify({'success': False, 'error': str(e)}), 502
 
     new_history = [
@@ -1654,6 +1666,15 @@ def api_ai_compress():
     ] + recent
     after_msgs = [{'role': 'system', 'content': _AI_SYSTEM_PROMPT}] + new_history
     after = _estimate_messages_tokens(after_msgs)
+    saved = max(0, before['tokens_est'] - after['tokens_est'])
+    olog.info(
+        'ai_compress',
+        f'Chat compressed ~{before["tokens_est"]}→{after["tokens_est"]} tok (saved ~{saved})',
+        before_tokens=before['tokens_est'],
+        after_tokens=after['tokens_est'],
+        saved_tokens_est=saved,
+        model=used_cfg.get('model'),
+    )
     return jsonify({
         'success': True,
         'compressed': True,
@@ -1664,7 +1685,7 @@ def api_ai_compress():
         'after': after,
         'label_before': f"~{before['tokens_est']} tokens ({before['method']})",
         'label_after': f"~{after['tokens_est']} tokens ({after['method']})",
-        'saved_tokens_est': max(0, before['tokens_est'] - after['tokens_est']),
+        'saved_tokens_est': saved,
     })
 
 @app.route('/api/snapshot', methods=['GET'])
@@ -1877,9 +1898,10 @@ def delete_photo():
     filename = request.form.get('filename')
     try:
         os.remove(os.path.join(thisPath + '/templates/pictures', filename))
+        olog.info('media_delete', f'Deleted photo {filename}', kind='photo', filename=filename, success=True)
         return jsonify(success=True)
     except Exception as e:
-        print(e)
+        olog.error('media_delete', f'Photo delete failed: {e}', kind='photo', filename=filename, error=str(e))
         return jsonify(success=False)
 
 @app.route('/videos/<path:filename>')
@@ -1900,9 +1922,10 @@ def delete_video():
     filename = request.form.get('filename')
     try:
         os.remove(os.path.join(thisPath + '/templates/videos', filename))
+        olog.info('media_delete', f'Deleted video {filename}', kind='video', filename=filename, success=True)
         return jsonify(success=True)
     except Exception as e:
-        print(e)
+        olog.error('media_delete', f'Video delete failed: {e}', kind='video', filename=filename, error=str(e))
         return jsonify(success=False)
 
 
@@ -1955,6 +1978,11 @@ def offer():
 # set product version
 def set_version(input_main, input_module):
     base.base_json_ctrl({"T":900,"main":input_main,"module":input_module})
+    olog.info(
+        'product_version',
+        f'Set chassis main={input_main} module={input_module}',
+        main_type=input_main, module_type=input_module, T=900,
+    )
     if input_main == 1:
         cvf.info_update("RaspRover", (0,255,255), 0.36)
     elif input_main == 2:
@@ -1976,7 +2004,14 @@ def cmdline_ctrl(args_string):
     # base -c {"T":1,"L":0.5,"R":0.5}
     if args[0] == 'base':
         if args[1] == '-c' or args[1] == '--cmd':
-            base.base_json_ctrl(json.loads(args[2]))
+            payload = json.loads(args[2])
+            t_code = payload.get('T') if isinstance(payload, dict) else None
+            olog.info(
+                'cli',
+                f'CLI base -c T:{t_code}',
+                command=args_string[:200], T=t_code, source='cli',
+            )
+            base.base_json_ctrl(payload)
         elif args[1] == '-r' or args[1] == '--recv':
             if args[2] == 'on':
                 cvf.show_recv_info(True)
@@ -1985,10 +2020,13 @@ def cmdline_ctrl(args_string):
 
     elif args[0] == 'audio':
         if args[1] == '-s' or args[1] == '--say':
-            audio_ctrl.play_speech_thread(' '.join(args[2:]))
+            text = ' '.join(args[2:])
+            olog.info('audio', f'TTS: {text[:80]}', kind='tts', text=text[:120])
+            audio_ctrl.play_speech_thread(text)
         elif args[1] == '-v' or args[1] == '--volume':
             audio_ctrl.set_audio_volume(args[2])
         elif args[1] == '-p' or args[1] == '--play_file':
+            olog.info('audio', f'Play file {args[2]}', kind='file', file=args[2])
             audio_ctrl.play_file(args[2])
 
     elif args[0] == 'send':
@@ -2116,6 +2154,12 @@ def cmdline_ctrl(args_string):
         f['base_config']['module_type'] = module_type
         with open(thisPath + '/config.yaml', "w") as yaml_file:
             yaml.dump(f, yaml_file)
+        olog.warn(
+            'config_write',
+            f'Wrote config.yaml robot type main={main_type} module={module_type}',
+            main_type=main_type, module_type=module_type,
+            robot_name=f['base_config'].get('robot_name'),
+        )
         set_version(main_type, module_type)
 
     elif args[0] == 'test':
@@ -2136,11 +2180,12 @@ def video_feed():
 def handle_command():
     command = request.form['command']
     print("Received command:", command)
+    olog.info('cli', f'Web CLI: {command[:160]}', command=command[:200], source='web')
     cvf.info_update("CMD:" + command, (0,255,255), 0.36)
     try:
         cmdline_ctrl(command)
     except Exception as e:
-        print(f"[app.handle_command] error: {e}")
+        olog.error('cli', f'Web CLI error: {e}', command=command[:200], error=str(e))
     return jsonify({"status": "success", "message": "Command received"})
 
 @app.route('/getAudioFiles', methods=['GET'])
@@ -2164,12 +2209,14 @@ def upload_audio():
 def play_audio():
     audio_file = request.form['audio_file']
     print(thisPath + '/sounds/others/' + audio_file)
+    olog.info('audio', f'Play {audio_file}', kind='file', file=audio_file, source='ui')
     audio_ctrl.play_audio_thread(thisPath + '/sounds/others/' + audio_file)
     return jsonify({'success': 'Audio is playing'})
 
 @app.route('/stop_audio', methods=['POST'])
 def audio_stop():
     audio_ctrl.stop()
+    olog.info('audio', 'Audio stop', kind='stop', source='ui')
     return jsonify({'success': 'Audio stop'})
 
 @app.route('/settings/<path:filename>')
@@ -2372,10 +2419,34 @@ def handle_socket_cmd(message):
     try:
         json_data = json.loads(message)
     except json.JSONDecodeError:
-        print("Error decoding JSON.[app.handle_socket_cmd]")
+        olog.warn('socket_cmd', 'JSON decode error on /ctrl', source='socket')
         return
     cmd_a = float(json_data.get("A", 0))
     if cmd_a in cmd_actions:
+        # Log safety-relevant UI codes (CV / motion lock / capture) — not every zoom click
+        try:
+            codes = f.get('code') or {}
+            interesting = {
+                codes.get('cv_none'), codes.get('cv_moti'), codes.get('cv_face'),
+                codes.get('cv_objs'), codes.get('cv_clor'), codes.get('mp_hand'),
+                codes.get('cv_auto'), codes.get('mp_face'), codes.get('mp_pose'),
+                codes.get('re_none'), codes.get('re_capt'), codes.get('re_reco'),
+                codes.get('mc_lock'), codes.get('mc_unlo'),
+                codes.get('pic_cap'), codes.get('vid_sta'), codes.get('vid_end'),
+                codes.get('release'), codes.get('s_panid'), codes.get('s_tilid'),
+                codes.get('set_mid'),
+            }
+            if cmd_a in interesting:
+                label = None
+                for k, v in codes.items():
+                    if v == cmd_a:
+                        label = k
+                        break
+                level = 'warn' if label in ('cv_auto', 'release', 's_panid', 's_tilid', 'set_mid') else 'info'
+                olog.log(level, 'ui_cmd', f'UI cmd {label or cmd_a}',
+                         cmd_a=cmd_a, label=label or str(cmd_a), source='socket')
+        except Exception:
+            pass
         cmd_actions[cmd_a]()
     else:
         pass
