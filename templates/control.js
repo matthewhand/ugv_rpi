@@ -1409,14 +1409,15 @@ function updateControlModeBtn(mode) {
     var btn = document.getElementById('motor-toggle-btn');
     if (!btn) return;
     // Unified: both chassis + PTZ route via this mode (see app._route_json_command).
+    // ros2 also RELEASES the UART so ugv_bringup can open /dev/ttyAMA0.
     if (mode === 'direct') {
         btn.innerHTML = 'Control: Direct serial';
         btn.style.color = '#55ff55';
-        btn.title = 'Flask → ESP32 UART for wheels + pan/tilt. Click to use ROS 2 relay.';
+        btn.title = 'Flask owns UART → ESP32 (wheels + pan/tilt). Click for ROS 2 (releases UART to ugv_bringup).';
     } else {
         btn.innerHTML = 'Control: ROS 2 relay';
         btn.style.color = '#5b8cff';
-        btn.title = 'Flask → rosbridge → ugv_bringup → ESP32. Click for direct serial.';
+        btn.title = 'Flask releases UART; sticks → rosbridge → ugv_bringup → ESP32. Click to reclaim serial.';
     }
 }
 

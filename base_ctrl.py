@@ -61,7 +61,14 @@ class ReadLine:
 				self.buf.extend(data)
 
 	def clear_buffer(self):
-		self.s.reset_input_buffer()
+		if not self.s:
+			self.buf = bytearray()
+			return
+		try:
+			self.s.reset_input_buffer()
+		except Exception:
+			pass
+		self.buf = bytearray()
 
 	def read_sensor_data(self):
 		if self.sensor_data_ser == None:
@@ -134,6 +141,11 @@ class ReadLine:
 class BaseController:
 
 	def __init__(self, uart_dev_set, buad_set):
+		self.uart_dev = uart_dev_set
+		self.baud = buad_set
+		self._ser_lock = threading.Lock()
+		# True when Flask intentionally released UART for ROS (ugv_bringup).
+		self.serial_released_for_ros = False
 		try:
 			self.ser = serial.Serial(uart_dev_set, buad_set, timeout=1)
 		except Exception as e:
@@ -158,13 +170,83 @@ class BaseController:
 
 		self.use_lidar = f['base_config']['use_lidar']
 		self.extra_sensor = f['base_config']['extra_sensor']
-		# When False (ROS 2 owns chassis): drop wheel cmds only so pan/tilt still works from Flask UI.
-		# Wheel/chassis T codes: 1 = differential drive, 13 = X/Z velocity (ugv_bringup style).
-		# Gimbal T:133 / T:141 always pass through when serial is open.
-		self.enable_motor_control = True  # Default ON; disable via /api/toggle_motors or UGV_MOTOR_BYPASS
+		# When False: drop wheel T:1/T:13 on serial (legacy). Full ROS mode also
+		# releases the port via release_serial_for_ros().
+		self.enable_motor_control = True
 		self._chassis_bypass_types = {1, 13, "1", "13"}
 		self._bypass_log_last = 0.0
-		
+		self._release_log_last = 0.0
+
+	def serial_is_open(self):
+		with self._ser_lock:
+			return bool(self.ser and getattr(self.ser, 'is_open', False))
+
+	def release_serial_for_ros(self):
+		"""Close UART so ugv_bringup / ROS can own /dev/ttyAMA0 (or serial0)."""
+		with self._ser_lock:
+			if self.ser is not None:
+				try:
+					self.ser.close()
+				except Exception as e:
+					print(f"[base_ctrl] serial close: {e}")
+				self.ser = None
+			self.rl.s = None
+			self.rl.buf = bytearray()
+			self.serial_released_for_ros = True
+		# Drain pending writes so they don't fire after reclaim
+		try:
+			while True:
+				self.command_queue.get_nowait()
+		except queue.Empty:
+			pass
+		print(f"[base_ctrl] Serial RELEASED for ROS ({self.uart_dev})")
+		try:
+			from app_log import app_log as olog
+			olog.info(
+				'serial',
+				f'Serial released for ROS 2 ({self.uart_dev}) — ugv_bringup may open UART',
+				port=self.uart_dev, owner='ros2',
+			)
+		except Exception:
+			pass
+		return True
+
+	def claim_serial_for_flask(self):
+		"""Re-open UART for Flask direct serial control."""
+		with self._ser_lock:
+			if self.ser is not None and getattr(self.ser, 'is_open', False):
+				self.serial_released_for_ros = False
+				return True
+			try:
+				self.ser = serial.Serial(self.uart_dev, self.baud, timeout=1)
+				self.rl.s = self.ser
+				self.rl.buf = bytearray()
+				self.serial_released_for_ros = False
+			except Exception as e:
+				self.ser = None
+				self.rl.s = None
+				print(f"[base_ctrl] Serial reclaim failed {self.uart_dev}: {e}")
+				try:
+					from app_log import app_log as olog
+					olog.error(
+						'serial',
+						f'Serial reclaim failed ({self.uart_dev}): {e}',
+						port=self.uart_dev, error=str(e), owner='flask',
+					)
+				except Exception:
+					pass
+				return False
+		print(f"[base_ctrl] Serial CLAIMED by Flask ({self.uart_dev})")
+		try:
+			from app_log import app_log as olog
+			olog.info(
+				'serial',
+				f'Serial claimed by Flask ({self.uart_dev}) — direct path active',
+				port=self.uart_dev, owner='flask',
+			)
+		except Exception:
+			pass
+		return True
 
 	def feedback_data(self):
 		try:
@@ -194,8 +276,13 @@ class BaseController:
 			self.base_data = self.data_buffer
 			return self.base_data
 		except Exception as e:
-			self.rl.clear_buffer()
-			print(f"[base_ctrl.feedback_data] error: {e}")
+			try:
+				self.rl.clear_buffer()
+			except Exception:
+				pass
+			# Quiet when port intentionally released for ROS
+			if not self.serial_released_for_ros:
+				print(f"[base_ctrl.feedback_data] error: {e}")
 
 
 	def on_data_received(self):
@@ -206,6 +293,23 @@ class BaseController:
 
 
 	def send_command(self, data):
+		if self.serial_released_for_ros or not self.ser:
+			now = time.time()
+			if now - getattr(self, '_release_log_last', 0) > 8.0:
+				self._release_log_last = now
+				print("[base_ctrl] Serial not owned by Flask (ROS mode) — drop serial cmd")
+				try:
+					from app_log import app_log as olog
+					olog.warn(
+						'serial',
+						'Dropped serial cmd — UART released for ROS 2',
+						T=(data.get('T') if isinstance(data, dict) else None),
+						owner='ros2',
+						throttle_s=8.0,
+					)
+				except Exception:
+					pass
+			return
 		if not self.enable_motor_control and isinstance(data, dict):
 			if data.get("T") in self._chassis_bypass_types:
 				# Throttle: stick heartbeats would flood the ops log
@@ -229,8 +333,13 @@ class BaseController:
 	def process_commands(self):
 		while True:
 			data = self.command_queue.get()
-			if self.ser:
-				self.ser.write((json.dumps(data) + '\n').encode("utf-8"))
+			with self._ser_lock:
+				ser = self.ser
+				if ser and getattr(ser, 'is_open', False):
+					try:
+						ser.write((json.dumps(data) + '\n').encode("utf-8"))
+					except Exception as e:
+						print(f"[base_ctrl.process_commands] write error: {e}")
 
 
 	def base_json_ctrl(self, input_json):
@@ -300,7 +409,7 @@ class BaseController:
 		self.lights_ctrl(self.base_light_status, self.head_light_status)
 
 	def gimbal_dev_close(self):
-		self.ser.close()
+		self.release_serial_for_ros()
 
 	def breath_light(self, input_time):
 		breath_start_time = time.time()

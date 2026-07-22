@@ -138,7 +138,11 @@ def get_control_mode():
 
 
 def set_control_mode(mode, *, source='api'):
-    """Set 'direct' (serial) or 'ros2' (rosbridge). Syncs chassis bypass flag."""
+    """Set 'direct' (Flask owns UART) or 'ros2' (release UART for ugv_bringup).
+
+    ros2: close /dev/ttyAMA0 so ROS can open it; motion goes via rosbridge.
+    direct: reclaim UART; motion JSON goes serial.
+    """
     global _control_mode
     mode = (mode or '').strip().lower()
     if mode in ('serial', 'raw'):
@@ -150,14 +154,25 @@ def set_control_mode(mode, *, source='api'):
     with _control_mode_lock:
         prev = _control_mode
         _control_mode = mode
-        # direct: Flask may drive wheels on serial; ros2: bypass chassis T:1/T:13
+        # Legacy flag; full ROS mode also releases the port entirely.
         base.enable_motor_control = (mode == 'direct')
+
+    # Port ownership: only one of Flask or ROS may hold the UART.
+    serial_ok = True
+    if mode == 'ros2':
+        serial_ok = bool(base.release_serial_for_ros())
+    else:
+        serial_ok = bool(base.claim_serial_for_flask())
+
     _save_control_mode()
     fields = {
         'mode': mode,
         'prev_mode': prev,
-        'chassis_serial': 'on' if mode == 'direct' else 'bypassed',
+        'uart_owner': 'flask' if mode == 'direct' else 'ros2',
+        'serial_open': base.serial_is_open(),
+        'serial_released_for_ros': bool(getattr(base, 'serial_released_for_ros', False)),
         'source': source,
+        'serial_ok': serial_ok,
     }
     if mode == 'ros2':
         try:
@@ -174,21 +189,29 @@ def set_control_mode(mode, *, source='api'):
     if prev != mode:
         olog.info(
             'control_mode',
-            f'Control mode → {mode} (chassis serial {"on" if mode == "direct" else "bypassed"})',
+            f'Control mode → {mode} (UART owner: {fields["uart_owner"]}, '
+            f'serial_open={fields["serial_open"]})',
             **fields,
         )
     return mode
 
 
 _load_control_mode()
-# Apply side effects for loaded mode
-base.enable_motor_control = (get_control_mode() == 'direct')
+# Apply side effects for loaded mode (including UART ownership)
+if get_control_mode() == 'ros2':
+    base.enable_motor_control = False
+    base.release_serial_for_ros()
+else:
+    base.enable_motor_control = True
+    base.claim_serial_for_flask()
 olog.info(
     'startup',
     f'control_mode={get_control_mode()} '
-    f'(chassis_serial={"on" if base.enable_motor_control else "bypassed for ROS 2"})',
+    f'(uart_owner={"flask" if get_control_mode() == "direct" else "ros2"}, '
+    f'serial_open={base.serial_is_open()})',
     control_mode=get_control_mode(),
-    chassis_serial='on' if base.enable_motor_control else 'bypassed',
+    uart_owner='flask' if get_control_mode() == 'direct' else 'ros2',
+    serial_open=base.serial_is_open(),
 )
 
 # Set to keep track of RTCPeerConnection instances
@@ -290,6 +313,9 @@ def api_status():
         'enable_motor_control': base.enable_motor_control,
         'control_mode': mode,  # 'direct' | 'ros2'
         'control_mode_label': 'Direct serial' if mode == 'direct' else 'ROS 2 relay',
+        'uart_owner': 'flask' if mode == 'direct' else 'ros2',
+        'serial_open': base.serial_is_open() if hasattr(base, 'serial_is_open') else bool(getattr(base, 'ser', None)),
+        'serial_released_for_ros': bool(getattr(base, 'serial_released_for_ros', False)),
         'esp32_wifi_stopped': bool(_esp32_wifi_session.get('stopped')),
     })
 
@@ -316,6 +342,9 @@ def api_control_mode():
             'success': True,
             'control_mode': mode,
             'enable_motor_control': base.enable_motor_control,
+            'uart_owner': 'flask' if mode == 'direct' else 'ros2',
+            'serial_open': base.serial_is_open() if hasattr(base, 'serial_is_open') else bool(getattr(base, 'ser', None)),
+            'serial_released_for_ros': bool(getattr(base, 'serial_released_for_ros', False)),
             'rosbridge': bridge,
         })
     data = request.get_json(silent=True) or {}
@@ -339,6 +368,9 @@ def api_control_mode():
         'success': True,
         'control_mode': mode,
         'enable_motor_control': base.enable_motor_control,
+        'uart_owner': 'flask' if mode == 'direct' else 'ros2',
+        'serial_open': base.serial_is_open() if hasattr(base, 'serial_is_open') else bool(getattr(base, 'ser', None)),
+        'serial_released_for_ros': bool(getattr(base, 'serial_released_for_ros', False)),
         'rosbridge': bridge,
     })
 
@@ -351,6 +383,8 @@ def api_toggle_motors():
         'success': True,
         'enable_motor_control': base.enable_motor_control,
         'control_mode': mode,
+        'uart_owner': 'flask' if mode == 'direct' else 'ros2',
+        'serial_open': base.serial_is_open() if hasattr(base, 'serial_is_open') else bool(getattr(base, 'ser', None)),
     })
 
 
@@ -551,23 +585,34 @@ def api_ptz():
             y = float(data.get('y', data.get('Y', data.get('tilt', 0))) or 0)
         spd = float(data.get('spd', data.get('SPD', 0)) or 0)
         acc = float(data.get('acc', data.get('ACC', 0)) or 0)
-        # Always send serial for diagnostics (independent of control_mode routing)
         cmd = {'T': 133, 'X': x, 'Y': y, 'SPD': spd, 'ACC': acc}
+        mode = get_control_mode()
+        path = 'serial'
         try:
-            base.base_json_ctrl({'T': 4, 'cmd': 2})  # gimbal module
-            base.base_json_ctrl(cmd)
+            if mode == 'ros2' or getattr(base, 'serial_released_for_ros', False):
+                # UART released — drive via rosbridge (same as stick)
+                import ros_motion
+                result = ros_motion.publish_gimbal_from_ui(x, y, throttle=False)
+                path = 'ros2'
+                olog.info('ptz_cmd', f'PTZ goto X={x} Y={y} (ros2)', X=x, Y=y, path='ros2', ok=result.get('ok'))
+                if not result.get('ok'):
+                    return jsonify({'success': False, 'error': result.get('error'), 'command': cmd, 'path': path}), 500
+            else:
+                base.base_json_ctrl({'T': 4, 'cmd': 2})  # gimbal module
+                base.base_json_ctrl(cmd)
+                olog.info('ptz_cmd', f'PTZ goto X={x} Y={y} (serial T:133)', X=x, Y=y, path='serial')
             try:
                 cvf.pan_angle = x
                 cvf.tilt_angle = -y
             except Exception:
                 pass
-            olog.info('ptz_cmd', f'PTZ goto X={x} Y={y} (serial T:133)', X=x, Y=y, path='serial')
         except Exception as e:
             olog.error('ptz_cmd', f'PTZ goto failed: {e}', error=str(e))
             return jsonify({'success': False, 'error': str(e), 'command': cmd}), 500
         time.sleep(float(data.get('wait_s', 0.6) or 0.6))
-        snap = _ptz_status_snapshot(request_feedback=True)
+        snap = _ptz_status_snapshot(request_feedback=(path == 'serial'))
         snap['command_sent'] = cmd
+        snap['path'] = path
         return jsonify(snap)
     return jsonify({'success': False, 'error': "action must be status|goto|center|feedback"}), 400
 
@@ -1261,7 +1306,8 @@ def _get_telemetry_payload():
 
 def _ptz_status_snapshot(request_feedback=True, wait_s=0.35):
     """Read pan/tilt: request ESP32 feedback (T:130) and return last base_data + ROS if any."""
-    if request_feedback:
+    serial_open = base.serial_is_open() if hasattr(base, 'serial_is_open') else bool(getattr(base, 'ser', None))
+    if request_feedback and serial_open:
         try:
             # Ensure gimbal module + feedback flow, then one-shot feedback
             base.base_json_ctrl({'T': 4, 'cmd': int(f['base_config'].get('module_type') or 2)})
@@ -1284,7 +1330,9 @@ def _ptz_status_snapshot(request_feedback=True, wait_s=0.35):
         'success': True,
         'control_mode': get_control_mode(),
         'module_type_cfg': f['base_config'].get('module_type'),
-        'serial_open': bool(getattr(base, 'ser', None)),
+        'serial_open': serial_open,
+        'uart_owner': 'flask' if serial_open else 'ros2_or_none',
+        'serial_released_for_ros': bool(getattr(base, 'serial_released_for_ros', False)),
         'commanded': {
             'pan_deg': getattr(cvf, 'pan_angle', None),
             'tilt_deg': getattr(cvf, 'tilt_angle', None),
