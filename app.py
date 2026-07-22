@@ -790,26 +790,23 @@ def _ai_env_config():
     }
 
 def _grab_jpeg_bytes(max_width=640, quality=70):
-    """Capture one JPEG from the live camera pipeline (thread-safe-ish)."""
-    with _snapshot_lock:
-        frame = cvf.frame_process()
-    if not frame:
-        raise RuntimeError('empty frame from camera')
-    # frame_process already returns JPEG bytes when successful
-    if isinstance(frame, (bytes, bytearray)) and frame[:2] == b'\xff\xd8':
-        return bytes(frame)
-    # Fallback: raw ndarray path (unlikely with current cv_ctrl)
+    """Capture one clean JPEG for AI/snapshot (no HUD, no failure placeholders).
+
+    Uses grab_bgr_frame() so camera-unavailable placeholders from frame_process
+    (human MJPEG feed) are never treated as real snapshots.
+    """
     import cv2
-    import numpy as np
-    if isinstance(frame, np.ndarray):
-        h, w = frame.shape[:2]
-        if w > max_width:
-            frame = cv2.resize(frame, (max_width, int(h * max_width / w)))
-        ok, buf = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), quality])
-        if not ok:
-            raise RuntimeError('jpeg encode failed')
-        return buf.tobytes()
-    raise RuntimeError(f'unexpected frame type: {type(frame)}')
+    with _snapshot_lock:
+        frame = cvf.grab_bgr_frame()
+    if frame is None:
+        raise RuntimeError('camera frame unavailable')
+    h, w = frame.shape[:2]
+    if w > max_width:
+        frame = cv2.resize(frame, (max_width, int(h * max_width / w)))
+    ok, buf = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), quality])
+    if not ok:
+        raise RuntimeError('jpeg encode failed')
+    return buf.tobytes()
 
 _AI_SYSTEM_PROMPT = (
     "You are a helpful vision assistant on a Waveshare UGV rover. "

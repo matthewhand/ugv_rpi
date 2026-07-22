@@ -623,7 +623,12 @@ class OpencvFuncs():
         return out
 
     def grab_bgr_frame(self):
-        """Capture one BGR frame from the active camera (no HUD)."""
+        """Capture one real BGR frame from the active camera (no HUD).
+
+        Returns None when no camera is available or the read fails — never a
+        placeholder image. Use this for AI/snapshot paths; frame_process may
+        still return a white 'camera read failed' JPEG for the human MJPEG feed.
+        """
         try:
             if self.usb_camera_connected:
                 success, frame = self.camera.read()
