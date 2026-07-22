@@ -1426,6 +1426,97 @@ function updateMotorToggleBtn(enable_motor_control) {
     updateControlModeBtn(enable_motor_control ? 'direct' : 'ros2');
 }
 
+var _modeRestartState = {
+    target: 'ugv_ros2',
+    visible: false
+};
+
+function showModeRestartBanner(data) {
+    var banner = document.getElementById('mode-restart-banner');
+    if (!banner || !data) return;
+    var required = data.restart_required;
+    // Always show after an explicit toggle response that includes advice
+    if (!required && !data.mode_changed && !data.restart_reason) {
+        return;
+    }
+    _modeRestartState.target = data.restart_target || 'ugv_ros2';
+    _modeRestartState.visible = true;
+    banner.style.display = 'block';
+    var title = document.getElementById('mode-restart-title');
+    var reason = document.getElementById('mode-restart-reason');
+    var detail = document.getElementById('mode-restart-detail');
+    var status = document.getElementById('mode-restart-status');
+    var btn = document.getElementById('mode-restart-btn');
+    var mode = data.control_mode || '?';
+    var prev = data.prev_mode;
+    if (title) {
+        title.textContent = (prev && prev !== mode)
+            ? ('⚠ Mode → ' + mode + ' — restart recommended')
+            : '⚠ Restart recommended for UART exclusivity';
+    }
+    if (reason) reason.textContent = data.restart_reason || '';
+    if (detail) detail.textContent = data.restart_detail || '';
+    if (status) {
+        status.textContent = 'UART owner: ' + (data.uart_owner || '?') +
+            ' · serial_open=' + String(data.serial_open) +
+            (data.restart_allowed === false ? ' · auto-restart disabled on server' : '');
+    }
+    if (btn) {
+        btn.textContent = data.restart_button_label || ('Restart ' + _modeRestartState.target);
+        btn.disabled = data.restart_allowed === false;
+        btn.style.opacity = btn.disabled ? '0.5' : '1';
+    }
+}
+
+function dismissModeRestartBanner() {
+    var banner = document.getElementById('mode-restart-banner');
+    if (banner) banner.style.display = 'none';
+    _modeRestartState.visible = false;
+    var status = document.getElementById('mode-restart-status');
+    if (status) status.textContent = '';
+}
+
+function runStackRestart() {
+    var btn = document.getElementById('mode-restart-btn');
+    var status = document.getElementById('mode-restart-status');
+    var target = _modeRestartState.target || 'ugv_ros2';
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = 'Restarting…';
+    }
+    if (status) status.textContent = 'Running docker restart ' + target + '…';
+    fetch('/api/stack_restart', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({target: target})
+    })
+    .then(function (r) { return r.json().then(function (d) { return {ok: r.ok, d: d}; }); })
+    .then(function (res) {
+        var d = res.d || {};
+        if (status) {
+            status.textContent = (d.success ? '✓ ' : '✗ ') + (d.message || d.note || 'done') +
+                (d.note ? (' — ' + d.note) : '');
+            status.style.color = d.success ? '#3dd68c' : '#f87171';
+        }
+        if (btn) {
+            btn.disabled = false;
+            btn.textContent = 'Restart ' + target;
+        }
+        if (window.refreshOpsLog) window.refreshOpsLog(true);
+        // Keep banner visible with result; user can dismiss
+    })
+    .catch(function (e) {
+        if (status) {
+            status.textContent = 'Restart request failed: ' + e;
+            status.style.color = '#f87171';
+        }
+        if (btn) {
+            btn.disabled = false;
+            btn.textContent = 'Restart ' + target;
+        }
+    });
+}
+
 function toggleMotors() {
     fetch('/api/control_mode', {
         method: 'POST',
@@ -1435,6 +1526,7 @@ function toggleMotors() {
     .then(res => res.json())
     .then(data => {
         updateControlModeBtn(data.control_mode || (data.enable_motor_control ? 'direct' : 'ros2'));
+        showModeRestartBanner(data);
         if (window.refreshOpsLog) window.refreshOpsLog(true);
     })
     .catch(function (e) { console.warn('control_mode toggle failed', e); });

@@ -327,36 +327,9 @@ def api_toggle_rtsp():
               enable_rtsp_stream=enable_rtsp_stream)
     return jsonify({'success': True, 'enable_rtsp_stream': enable_rtsp_stream})
 
-@app.route('/api/control_mode', methods=['GET', 'POST'])
-def api_control_mode():
-    """Get or set unified routing: direct (serial) vs ros2 (rosbridge)."""
-    if request.method == 'GET':
-        mode = get_control_mode()
-        bridge = {}
-        try:
-            import ros_motion
-            bridge = ros_motion.rosbridge_status() if mode == 'ros2' else {}
-        except Exception as e:
-            bridge = {'ok': False, 'error': str(e)}
-        return jsonify({
-            'success': True,
-            'control_mode': mode,
-            'enable_motor_control': base.enable_motor_control,
-            'uart_owner': 'flask' if mode == 'direct' else 'ros2',
-            'serial_open': base.serial_is_open() if hasattr(base, 'serial_is_open') else bool(getattr(base, 'ser', None)),
-            'serial_released_for_ros': bool(getattr(base, 'serial_released_for_ros', False)),
-            'rosbridge': bridge,
-        })
-    data = request.get_json(silent=True) or {}
-    mode = data.get('mode') or data.get('control_mode')
-    if not mode and data.get('toggle'):
-        mode = 'direct' if get_control_mode() == 'ros2' else 'ros2'
-    if not mode:
-        return jsonify({'success': False, 'error': "provide mode: 'direct' or 'ros2'"}), 400
-    try:
-        mode = set_control_mode(mode, source='api')
-    except ValueError as e:
-        return jsonify({'success': False, 'error': str(e)}), 400
+def _control_mode_payload(mode=None, *, mode_changed=False, prev_mode=None):
+    """Shared status + restart guidance after control_mode changes."""
+    mode = mode or get_control_mode()
     bridge = {}
     if mode == 'ros2':
         try:
@@ -364,28 +337,161 @@ def api_control_mode():
             bridge = ros_motion.rosbridge_status()
         except Exception as e:
             bridge = {'ok': False, 'error': str(e)}
-    return jsonify({
+    advice = _uart_restart_advice(mode, prev_mode=prev_mode, mode_changed=mode_changed)
+    return {
         'success': True,
         'control_mode': mode,
+        'control_mode_label': 'Direct serial' if mode == 'direct' else 'ROS 2 relay',
         'enable_motor_control': base.enable_motor_control,
         'uart_owner': 'flask' if mode == 'direct' else 'ros2',
         'serial_open': base.serial_is_open() if hasattr(base, 'serial_is_open') else bool(getattr(base, 'ser', None)),
         'serial_released_for_ros': bool(getattr(base, 'serial_released_for_ros', False)),
         'rosbridge': bridge,
-    })
+        **advice,
+    }
+
+
+def _uart_restart_advice(mode, *, prev_mode=None, mode_changed=False):
+    """Explain that peer stack may need restart to re-open /dev/ttyAMA0 exclusively."""
+    container = (os.environ.get('UGV_ROS_CONTAINER') or 'ugv_ros2').strip() or 'ugv_ros2'
+    allow = os.environ.get('UGV_ALLOW_DOCKER_RESTART', '1').lower() in ('1', 'true', 'yes')
+    # Always recommend after a live mode change; mild hint on GET when ros2 + serial free
+    if mode == 'ros2':
+        reason = (
+            'Flask released /dev/ttyAMA0. Restart the ROS container (or re-launch ugv_bringup) '
+            'so it can open the UART exclusively for chassis + PTZ.'
+        )
+        label = f'Restart {container}'
+        detail = (
+            f'docker restart {container}  — then ensure bringup + rosbridge are running inside it. '
+            'Device node is already mounted; restart is for process re-open, not remount.'
+        )
+    else:
+        reason = (
+            'Flask reclaimed /dev/ttyAMA0. If ROS/bringup still holds the port, restart or stop '
+            f'{container} so Direct serial can work alone.'
+        )
+        label = f'Restart {container}'
+        detail = (
+            f'docker restart {container}  frees serial if bringup had it open. '
+            'Flask does not need a restart for UART reclaim.'
+        )
+    return {
+        'restart_required': bool(mode_changed) or (mode == 'ros2' and not base.serial_is_open()),
+        'restart_reason': reason,
+        'restart_detail': detail,
+        'restart_button_label': label,
+        'restart_target': container,
+        'restart_allowed': allow,
+        'mode_changed': bool(mode_changed),
+        'prev_mode': prev_mode,
+    }
+
+
+def _docker_restart_container(name):
+    """Restart a docker container by name. Returns (ok, message, detail)."""
+    allow = os.environ.get('UGV_ALLOW_DOCKER_RESTART', '1').lower() in ('1', 'true', 'yes')
+    if not allow:
+        return False, 'Docker restart disabled (set UGV_ALLOW_DOCKER_RESTART=1)', {}
+    name = (name or '').strip()
+    # only allow simple container names
+    if not name or not all(c.isalnum() or c in '-_' for c in name):
+        return False, 'invalid container name', {}
+    allowed = {
+        (os.environ.get('UGV_ROS_CONTAINER') or 'ugv_ros2').strip(),
+        'ugv_ros2',
+        'ugv_rpi_ui',
+    }
+    if name not in allowed:
+        return False, f'container {name!r} not in allow-list {sorted(allowed)}', {}
+    import subprocess
+    try:
+        proc = subprocess.run(
+            ['docker', 'restart', name],
+            capture_output=True, text=True, timeout=120,
+        )
+        out = (proc.stdout or '').strip()
+        err = (proc.stderr or '').strip()
+        ok = proc.returncode == 0
+        msg = out or err or (f'restart {name} exit {proc.returncode}')
+        olog.log(
+            'info' if ok else 'error',
+            'stack_restart',
+            f'docker restart {name}: {"ok" if ok else "failed"} — {msg[:200]}',
+            container=name, returncode=proc.returncode, ok=ok,
+        )
+        return ok, msg, {'stdout': out, 'stderr': err, 'returncode': proc.returncode}
+    except FileNotFoundError:
+        return False, 'docker CLI not found on Flask host', {}
+    except subprocess.TimeoutExpired:
+        return False, f'docker restart {name} timed out', {}
+    except Exception as e:
+        return False, str(e), {}
+
+
+@app.route('/api/control_mode', methods=['GET', 'POST'])
+def api_control_mode():
+    """Get or set unified routing: direct (serial) vs ros2 (rosbridge)."""
+    if request.method == 'GET':
+        return jsonify(_control_mode_payload(mode_changed=False))
+    data = request.get_json(silent=True) or {}
+    mode = data.get('mode') or data.get('control_mode')
+    if not mode and data.get('toggle'):
+        mode = 'direct' if get_control_mode() == 'ros2' else 'ros2'
+    if not mode:
+        return jsonify({'success': False, 'error': "provide mode: 'direct' or 'ros2'"}), 400
+    prev = get_control_mode()
+    try:
+        mode = set_control_mode(mode, source='api')
+    except ValueError as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+    payload = _control_mode_payload(mode, mode_changed=(prev != mode), prev_mode=prev)
+    # Force banner after any explicit set (even if same mode re-applied)
+    if data.get('toggle') or data.get('force_restart_hint') or prev != mode:
+        payload['restart_required'] = True
+        payload['mode_changed'] = prev != mode
+        payload['prev_mode'] = prev
+    return jsonify(payload)
 
 @app.route('/api/toggle_motors', methods=['POST'])
 def api_toggle_motors():
     """Legacy: flip between direct serial and ROS 2 relay (same as control_mode toggle)."""
-    mode = 'direct' if get_control_mode() == 'ros2' else 'ros2'
+    prev = get_control_mode()
+    mode = 'direct' if prev == 'ros2' else 'ros2'
     mode = set_control_mode(mode, source='ui_toggle')
+    payload = _control_mode_payload(mode, mode_changed=True, prev_mode=prev)
+    payload['restart_required'] = True
+    return jsonify(payload)
+
+
+@app.route('/api/stack_restart', methods=['POST'])
+def api_stack_restart():
+    """Restart ROS docker container so it re-opens UART after control_mode change.
+
+    Body: {"target": "ugv_ros2"}  (default from UGV_ROS_CONTAINER)
+    Requires docker CLI access for the Flask user (group docker).
+    """
+    data = request.get_json(silent=True) or {}
+    target = (data.get('target') or data.get('container')
+              or os.environ.get('UGV_ROS_CONTAINER') or 'ugv_ros2')
+    ok, msg, detail = _docker_restart_container(target)
+    mode = get_control_mode()
     return jsonify({
-        'success': True,
-        'enable_motor_control': base.enable_motor_control,
+        'success': ok,
+        'target': target,
+        'message': msg,
+        'detail': detail,
         'control_mode': mode,
-        'uart_owner': 'flask' if mode == 'direct' else 'ros2',
-        'serial_open': base.serial_is_open() if hasattr(base, 'serial_is_open') else bool(getattr(base, 'ser', None)),
-    })
+        'serial_open': base.serial_is_open() if hasattr(base, 'serial_is_open') else None,
+        'serial_released_for_ros': bool(getattr(base, 'serial_released_for_ros', False)),
+        'note': (
+            'After restart, re-launch ugv_bringup + rosbridge inside the container if they '
+            'are not started by the container entrypoint.'
+            if ok and mode == 'ros2' else
+            ('ROS container restarted; UART should be free for Flask direct mode.'
+             if ok else msg)
+        ),
+    }), (200 if ok else 500)
 
 
 # ---------------------------------------------------------------------------

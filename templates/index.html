@@ -111,6 +111,20 @@
                     <button type="button" id="ai-open-btn" class="normal_btn" style="padding: 6px 14px; font-size: 12px; background: #1a3a2a; color: #3dd68c; border: 1px solid #3dd68c; border-radius: 4px; cursor: pointer; font-weight: 700;">AI Vision Chat ▾</button>
                     <a href="/ai" target="_blank" class="normal_btn" style="padding: 6px 12px; font-size: 12px; background: #222; color: #5b8cff; border: 1px solid #5b8cff; border-radius: 4px; text-decoration: none;">Full AI page ↗</a>
                 </div>
+                <div id="mode-restart-banner" style="display:none; margin: 0 10px 10px; padding: 10px 12px; border-radius: 8px; border: 1px solid #e0b35a; background: #2a2210; color: #f5e6c8; font-size: 12px; line-height: 1.45; max-width: 720px; margin-left: auto; margin-right: auto;">
+                    <div style="display:flex; gap:10px; align-items:flex-start; flex-wrap:wrap;">
+                        <div style="flex:1; min-width:200px;">
+                            <strong id="mode-restart-title" style="color:#fbbf24;">⚠ Restart recommended</strong>
+                            <div id="mode-restart-reason" style="margin-top:4px;"></div>
+                            <div id="mode-restart-detail" style="margin-top:4px; color:#c4b59a; font-size:11px;"></div>
+                            <div id="mode-restart-status" style="margin-top:6px; color:#9aa3b2; font-size:11px;"></div>
+                        </div>
+                        <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+                            <button type="button" id="mode-restart-btn" class="normal_btn" onclick="runStackRestart()" style="padding: 8px 12px; font-size: 12px; background: #3d2e0a; color: #fbbf24; border: 1px solid #e0b35a; border-radius: 4px; cursor: pointer; font-weight: 700;">Restart ROS container</button>
+                            <button type="button" class="normal_btn" onclick="dismissModeRestartBanner()" style="padding: 8px 12px; font-size: 12px; background: #222; color: #9aa3b2; border: 1px solid #555; border-radius: 4px; cursor: pointer;">Dismiss</button>
+                        </div>
+                    </div>
+                </div>
                 <div>
                     <div class="controller">
                         <div class="ctl9_middle">
