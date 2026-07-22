@@ -1,3 +1,8 @@
+import serial
+import sys
+import mpl_toolkits
+mpl_toolkits.__path__ = [p for p in mpl_toolkits.__path__ if 'dist-packages' not in p]
+
 # import base_ctrl library
 from base_ctrl import BaseController
 import threading
@@ -145,11 +150,38 @@ def generate_frames():
 
 
 
+# Feature Toggles (Default OFF)
+enable_rtsp_stream = False
+
+@app.route('/api/status')
+def api_status():
+    return jsonify({
+        'enable_rtsp_stream': enable_rtsp_stream,
+        'enable_motor_control': base.enable_motor_control
+    })
+
+@app.route('/api/toggle_rtsp', methods=['POST'])
+def api_toggle_rtsp():
+    global enable_rtsp_stream
+    enable_rtsp_stream = not enable_rtsp_stream
+    print(f"[app.py] RTSP Stream toggle: {enable_rtsp_stream}")
+    return jsonify({'success': True, 'enable_rtsp_stream': enable_rtsp_stream})
+
+@app.route('/api/toggle_motors', methods=['POST'])
+def api_toggle_motors():
+    base.enable_motor_control = not base.enable_motor_control
+    print(f"[app.py] Motor Control toggle: {base.enable_motor_control}")
+    return jsonify({'success': True, 'enable_motor_control': base.enable_motor_control})
+
 # Route to render the HTML template
 @app.route('/')
 def index():
     audio_ctrl.play_random_audio("connected", False)
     return render_template('index.html')
+
+@app.route('/3d')
+def digital_twin_3d():
+    return render_template('3d_twin.html')
 
 @app.route('/config')
 def get_config():
@@ -157,7 +189,8 @@ def get_config():
         yaml_content = file.read()
     return yaml_content
 
-# get pictures and videos.
+# Catch-all: serve any file from templates/ (photo.html, video.html, settings.html, JS, CSS, etc.)
+# Flask routes are matched most-specific first, so /api/* and /config etc. take priority.
 @app.route('/<path:filename>')
 def serve_static(filename):
     return send_from_directory('templates', filename)
@@ -499,7 +532,7 @@ def update_data_websocket_single():
             f['fb']['detect_react']:cvf.detection_reaction_mode,
             f['fb']['pan_angle']:   cvf.pan_angle,
             f['fb']['tilt_angle']:  cvf.tilt_angle,
-            f['fb']['base_voltage']:base.base_data['v'],
+            f['fb']['base_voltage']:base.base_data['v'] if (base.base_data and isinstance(base.base_data, dict) and 'v' in base.base_data) else 0,
             f['fb']['video_fps']:   cvf.video_fps,
             f['fb']['cv_movtion_mode']: cvf.cv_movtion_lock,
             f['fb']['base_light']:  base.base_light_status

@@ -19,6 +19,17 @@ This is a Raspberry Pi example for the [Waveshare](https://www.waveshare.com/) U
 - `feedback_data` and `on_data_received` return early / skip reset if serial is None
 - `ReadLine` returns empty bytes immediately when `s` is None rather than blocking
 
+### ROS 2 motor bypass mode (`base_ctrl.py`, `app.py`, `templates/`)
+
+`BaseController` gains an `enable_motor_control` flag (default `True`). When set to `False`, wheel and gimbal commands (`T:1`, `T:133`, `T:141`) are dropped silently so ROS 2 can own `/dev/serial0` without collision from `app.py`.
+
+Toggled at runtime — no restart required:
+
+- **Web UI:** "Motors: Direct ON / ROS 2 Bypass" button in the dashboard
+- **API:** `POST /api/toggle_motors`, `GET /api/status`
+
+All non-motion serial commands (lights, servo config, settings) pass through regardless of the flag.
+
 ## Basic Description
 The Waveshare UGV robots utilize both an upper computer and a lower computer. This repository contains the program running on the upper computer, which is typically a Raspberry Pi in this setup.  
 

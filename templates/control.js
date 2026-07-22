@@ -12,9 +12,9 @@ var head_ct, base_ct;
 var s_panid, release, set_mid, s_tilid;
 var armZ, armR, armE;
 
-var detect_type, led_mode, detect_react, picture_size, video_size, cpu_load;
-var cpu_temp, ram_usage, pan_angle, tilt_angle, wifi_rssi, base_voltage, video_fps;
-var cv_movtion_mode, base_light;
+var detect_type = 101, led_mode = 102, detect_react = 103, picture_size = 104, video_size = 105, cpu_load = 106;
+var cpu_temp = 107, ram_usage = 108, pan_angle = 109, tilt_angle = 110, wifi_rssi = 111, base_voltage = 112, video_fps = 113;
+var cv_movtion_mode = 114, base_light = 115;
 
 fetch('/config')
   .then(response => response.text())
@@ -593,11 +593,6 @@ socket.emit('request_data');
 var light_mode = 0;
 var cv_heartbeat_stop_flag = false;
 socket.on('update', function(data) {
-    if (data[base_voltage] != 0) {
-        // console.log(data[detect_react]);
-    } else {
-        return;
-    }
     try {
         var baseBtn = document.getElementById("base_led_ctrl_btn");
         var BButtons = baseBtn.getElementsByTagName("button");
@@ -694,11 +689,17 @@ socket.on('update', function(data) {
             lbuttons[2].classList.add("ctl_btn_active");
         }
 
-        document.getElementById("CPU").innerHTML = data[cpu_load] + "%";
-        document.getElementById("tem").innerHTML = data[cpu_temp].toFixed(1) + " ℃";
-        document.getElementById("RAM").innerHTML = data[ram_usage] + "%";
-        document.getElementById("rssi").innerHTML = data[wifi_rssi] + " dBm";
-        document.getElementById("fps").innerHTML = data[video_fps].toFixed(1);
+        var cpuVal = data[cpu_load] !== undefined ? data[cpu_load] : 0;
+        var tempVal = (data[cpu_temp] !== undefined && data[cpu_temp] !== null) ? Number(data[cpu_temp]).toFixed(1) : "0.0";
+        var ramVal = data[ram_usage] !== undefined ? data[ram_usage] : 0;
+        var rssiVal = data[wifi_rssi] !== undefined ? data[wifi_rssi] : 0;
+        var fpsVal = (data[video_fps] !== undefined && data[video_fps] !== null) ? Number(data[video_fps]).toFixed(1) : "0.0";
+
+        document.getElementById("CPU").innerHTML = cpuVal + "%";
+        document.getElementById("tem").innerHTML = tempVal + " ℃";
+        document.getElementById("RAM").innerHTML = ramVal + "%";
+        document.getElementById("rssi").innerHTML = rssiVal + " dBm";
+        document.getElementById("fps").innerHTML = fpsVal;
         
         document.getElementById("photos-size").innerHTML = data[picture_size] + " MB";
         document.getElementById("videos-size").innerHTML = data[video_size] + " MB";
@@ -1388,3 +1389,33 @@ document.getElementById('open_jupyter').addEventListener('click', function() {
     var newUrl = currentUrl.replace(/:(\d+)/, ':8888');
     window.open(newUrl, '_blank');
 });
+
+function toggleRTSP() {
+    fetch('/api/toggle_rtsp', {method: 'POST'})
+    .then(res => res.json())
+    .then(data => {
+        var btn = document.getElementById('rtsp-toggle-btn');
+        if (data.enable_rtsp_stream) {
+            btn.innerHTML = 'RTSP Stream: ON';
+            btn.style.color = '#55ff55';
+        } else {
+            btn.innerHTML = 'RTSP Stream: OFF';
+            btn.style.color = '#ff5555';
+        }
+    });
+}
+
+function toggleMotors() {
+    fetch('/api/toggle_motors', {method: 'POST'})
+    .then(res => res.json())
+    .then(data => {
+        var btn = document.getElementById('motor-toggle-btn');
+        if (data.enable_motor_control) {
+            btn.innerHTML = 'Motors: Direct ON';
+            btn.style.color = '#55ff55';
+        } else {
+            btn.innerHTML = 'Motors: ROS 2 Bypass (OFF)';
+            btn.style.color = '#ff5555';
+        }
+    });
+}
