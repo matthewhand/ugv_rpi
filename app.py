@@ -1,5 +1,6 @@
 import serial
 import sys
+import math
 import mpl_toolkits
 mpl_toolkits.__path__ = [p for p in mpl_toolkits.__path__ if 'dist-packages' not in p]
 
