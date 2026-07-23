@@ -2993,7 +2993,12 @@ _SEEK_VIEW_PANS = (
     ('straight', 0),
     ('right', 70),
 )
-_SEEK_NAV_SETTLE_S = 0.55
+# Wait for HW pan feedback after each aim (not a blind sleep-only “settle”)
+_SEEK_PAN_TOL_DEG = 10.0       # |hw_pan - target| within this → arrived
+_SEEK_PAN_WAIT_MAX_S = 2.8     # give up waiting and still snap (note pan_settled=false)
+_SEEK_PAN_POLL_S = 0.08
+_SEEK_PAN_POST_ARRIVE_S = 0.12  # brief damp after arrival before shutter
+_SEEK_PAN_FALLBACK_SLEEP_S = 0.55  # if no HW pan feedback at all
 _SEEK_DRIVE_MS = 1100
 
 
@@ -3004,12 +3009,91 @@ def _seek_pan_deg_to_rad(pan_deg, tilt_deg=0.0):
     return {'pan_rad': round(pan_rad, 4), 'tilt_rad': round(tilt_rad, 4)}
 
 
-def _seek_look_deg(pan_deg, tilt_deg=0.0, settle_s=None):
-    """Point gimbal (degrees) and wait for settle."""
+def _seek_read_hw_pan_tilt(request_feedback=True):
+    """Best-effort hardware pan/tilt degrees from ESP32 feedback."""
+    try:
+        snap = _ptz_status_snapshot(request_feedback=request_feedback, wait_s=0.08)
+        hw = (snap or {}).get('hardware') or {}
+        return hw.get('pan_deg'), hw.get('tilt_deg'), snap
+    except Exception:
+        return None, None, None
+
+
+def _seek_wait_pan_arrived(target_pan_deg, tol_deg=None, max_s=None, should_stop=None):
+    """Poll HW pan until near target_pan_deg (T:133 X convention) or timeout.
+
+    Returns dict: settled, hw_pan, err_deg, waited_s, samples, reason.
+    """
+    tol = float(tol_deg if tol_deg is not None else _SEEK_PAN_TOL_DEG)
+    max_s = float(max_s if max_s is not None else _SEEK_PAN_WAIT_MAX_S)
+    t0 = time.time()
+    samples = 0
+    last_pan = None
+    saw_feedback = False
+    while (time.time() - t0) < max_s:
+        if should_stop and should_stop():
+            return {
+                'settled': False,
+                'hw_pan': last_pan,
+                'err_deg': None,
+                'waited_s': round(time.time() - t0, 3),
+                'samples': samples,
+                'reason': 'stop_requested',
+            }
+        pan, _tilt, _snap = _seek_read_hw_pan_tilt(request_feedback=True)
+        samples += 1
+        if pan is not None:
+            saw_feedback = True
+            last_pan = float(pan)
+            err = abs(last_pan - float(target_pan_deg))
+            if err <= tol:
+                time.sleep(_SEEK_PAN_POST_ARRIVE_S)
+                return {
+                    'settled': True,
+                    'hw_pan': last_pan,
+                    'err_deg': round(err, 2),
+                    'waited_s': round(time.time() - t0, 3),
+                    'samples': samples,
+                    'reason': 'within_tol',
+                }
+        time.sleep(_SEEK_PAN_POLL_S)
+    # Timeout
+    err = None
+    if last_pan is not None:
+        err = round(abs(last_pan - float(target_pan_deg)), 2)
+    return {
+        'settled': False,
+        'hw_pan': last_pan,
+        'err_deg': err,
+        'waited_s': round(time.time() - t0, 3),
+        'samples': samples,
+        'reason': 'timeout_no_feedback' if not saw_feedback else 'timeout_not_within_tol',
+    }
+
+
+def _seek_look_deg(pan_deg, tilt_deg=0.0, settle_s=None, wait_hw=True, should_stop=None):
+    """Point gimbal (degrees), optionally wait until HW pan confirms arrival, then return.
+
+    Sequence: command → (confirm pan completed | timeout) → ready for photo.
+    settle_s only used as blind fallback when wait_hw is False.
+    """
     look = _seek_pan_deg_to_rad(pan_deg, tilt_deg)
     res = _execute_agent_tool('send_gimbal_command', look)
-    time.sleep(settle_s if settle_s is not None else _SEEK_NAV_SETTLE_S)
-    return look, res
+    arrival = None
+    if wait_hw:
+        arrival = _seek_wait_pan_arrived(
+            float(pan_deg),
+            should_stop=should_stop,
+        )
+        # If firmware never reports pan, still give a minimal settle so we don't snap mid-command
+        if arrival.get('reason') == 'timeout_no_feedback':
+            time.sleep(
+                settle_s if settle_s is not None else _SEEK_PAN_FALLBACK_SLEEP_S
+            )
+    else:
+        time.sleep(settle_s if settle_s is not None else _SEEK_PAN_FALLBACK_SLEEP_S)
+        arrival = {'settled': False, 'reason': 'wait_hw_disabled', 'hw_pan': None}
+    return look, res, arrival
 
 
 def _seek_grab_jpeg():
@@ -3020,7 +3104,10 @@ def _seek_grab_jpeg():
 
 
 def _seek_capture_triple_views(ctrl, step, steps_label):
-    """Pan left → straight → right, capture one JPEG each. Returns list of view dicts."""
+    """For each view: pan → confirm pan completed → take photo. Then re-center.
+
+    Order: left → straight → right. Never captures until aim step finished (or timed out).
+    """
     views = []
     for i, (name, pan_deg) in enumerate(_SEEK_VIEW_PANS, start=1):
         if ctrl.should_stop():
@@ -3028,24 +3115,62 @@ def _seek_capture_triple_views(ctrl, step, steps_label):
         ctrl.update(
             seek_phase='triple_scan',
             message=(
-                f'Step {step}/{steps_label}: capturing {name} view '
-                f'({i}/{len(_SEEK_VIEW_PANS)}, pan≈{pan_deg}°)…'
+                f'Step {step}/{steps_label}: pan {name} ({i}/{len(_SEEK_VIEW_PANS)}, '
+                f'target≈{pan_deg}°) — waiting for pan complete…'
             ),
-            phase_meta={'view': name, 'pan_deg': pan_deg, 'index': i, 'total': len(_SEEK_VIEW_PANS)},
+            phase_meta={
+                'view': name, 'pan_deg': pan_deg, 'index': i,
+                'total': len(_SEEK_VIEW_PANS), 'sub': 'aim_wait',
+            },
         )
-        look, gres = _seek_look_deg(pan_deg, 0.0)
+        look, gres, arrival = _seek_look_deg(
+            pan_deg, 0.0, wait_hw=True, should_stop=ctrl.should_stop,
+        )
+        settled = bool(arrival and arrival.get('settled'))
+        ctrl.update(
+            message=(
+                f'Step {step}/{steps_label}: photo {name} '
+                f'(pan settled={settled}, hw={arrival.get("hw_pan") if arrival else "?"}°)…'
+            ),
+            phase_meta={
+                'view': name, 'pan_deg': pan_deg, 'index': i,
+                'total': len(_SEEK_VIEW_PANS), 'sub': 'shutter',
+                'pan_settled': settled,
+                'hw_pan': arrival.get('hw_pan') if arrival else None,
+                'pan_wait_s': arrival.get('waited_s') if arrival else None,
+                'pan_wait_reason': arrival.get('reason') if arrival else None,
+            },
+        )
         jpeg = _seek_grab_jpeg()
         views.append({
             'name': name,
             'pan_deg': pan_deg,
             'look': look,
             'gimbal_ok': bool(isinstance(gres, dict) and gres.get('ok', True)),
+            'pan_settled': settled,
+            'hw_pan': arrival.get('hw_pan') if arrival else None,
+            'pan_err_deg': arrival.get('err_deg') if arrival else None,
+            'pan_wait_s': arrival.get('waited_s') if arrival else None,
+            'pan_wait_reason': arrival.get('reason') if arrival else None,
             'jpeg': jpeg,
             'bytes': len(jpeg) if jpeg else 0,
         })
-    # Re-center for drive / next goal check
+        olog.info(
+            'ai_seek',
+            f'Triple view {name}: target={pan_deg} settled={settled} '
+            f'hw_pan={arrival.get("hw_pan") if arrival else None} '
+            f'wait={arrival.get("waited_s") if arrival else None}s '
+            f'reason={arrival.get("reason") if arrival else None}',
+            view=name, pan_deg=pan_deg, settled=settled,
+        )
+    # Re-center for drive / next goal check (also wait for pan complete)
     try:
-        _seek_look_deg(0.0, 0.0, settle_s=0.35)
+        ctrl.update(
+            seek_phase='triple_scan',
+            message=f'Step {step}/{steps_label}: re-center pan before drive…',
+            phase_meta={'view': 'center', 'sub': 'aim_wait'},
+        )
+        _seek_look_deg(0.0, 0.0, wait_hw=True, should_stop=ctrl.should_stop)
     except Exception:
         pass
     return views
@@ -3259,7 +3384,13 @@ def _seek_loop(ctrl, label, conf, max_steps, timeout_s):
                 seek_phase='nav_decide',
                 message=f'Step {step}/{steps_label}: LLM comparing L/straight/R views…',
                 last_views=[{
-                    'name': v['name'], 'pan_deg': v['pan_deg'], 'bytes': v['bytes'],
+                    'name': v['name'],
+                    'pan_deg': v['pan_deg'],
+                    'bytes': v['bytes'],
+                    'pan_settled': v.get('pan_settled'),
+                    'hw_pan': v.get('hw_pan'),
+                    'pan_wait_s': v.get('pan_wait_s'),
+                    'pan_wait_reason': v.get('pan_wait_reason'),
                 } for v in views],
             )
             nav = _seek_nav_decide(
