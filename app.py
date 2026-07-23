@@ -3201,11 +3201,12 @@ def _seek_capture_triple_views(ctrl, step, steps_label, goal_label=None, conf_th
             b64 = base64.b64encode(jpeg).decode('ascii')
             data_url = f'data:image/jpeg;base64,{b64}'
             if goal_label:
-                chk = seek_goal_check(goal_label, referee=referee, conf_threshold=conf_threshold, jpeg=jpeg)
+                chk = seek_goal_check(goal_label, referee=REFEREE_DETECTOR, conf_threshold=conf_threshold, jpeg=jpeg)
                 if chk.get('found'):
                     has_target = True
-                    found_check = chk
-                    found_check['found_view'] = name
+                    if not found_check:
+                        found_check = chk
+                        found_check['found_view'] = name
                 det_labels = chk.get('labels_found') or []
 
         views.append({
@@ -3230,6 +3231,17 @@ def _seek_capture_triple_views(ctrl, step, steps_label, goal_label=None, conf_th
             f'Triple view {name}: target={pan_deg} settled={settled} has_target={has_target}',
             view=name, pan_deg=pan_deg, settled=settled, has_target=has_target,
         )
+        partial_pano = _stitch_panorama_views(views)
+        if partial_pano:
+            b64_p = base64.b64encode(partial_pano).decode('ascii')
+            ctrl.update(
+                panorama_data_url=f'data:image/jpeg;base64,{b64_p}',
+                last_views=[{
+                    'name': v['name'], 'pan_deg': v['pan_deg'], 'bytes': v['bytes'],
+                    'data_url': v.get('data_url'), 'has_target': v.get('has_target'),
+                    'detected_labels': v.get('detected_labels', []),
+                } for v in views]
+            )
     # Re-center
     try:
         ctrl.update(
@@ -3614,9 +3626,10 @@ def _seek_loop(ctrl, label, conf, max_steps, timeout_s):
                         ctrl, step, steps_label, goal_label=label, conf_threshold=conf, referee=referee
                     )
                     
-                    if referee == REFEREE_DETECTOR and found_det and found_det.get('found'):
+                    if found_det and found_det.get('found'):
+                        found_v = found_det.get('found_view', 'scan')
                         _seek_run_on_found(ctrl, label)
-                        _halt('found', message=f'Found {label} via detector at step {step}', step=step, last_detection=found_det)
+                        _halt('found', message=f'Found {label} via detector at step {step} ({found_v} view)', step=step, last_detection=found_det)
                         return
 
                     stitched_jpeg = _stitch_panorama_views(views_to_analyze)

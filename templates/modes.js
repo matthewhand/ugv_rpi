@@ -330,14 +330,9 @@
       hasTarget = true;
     }
 
-    if (imgEl) {
-      if (dataUrl) {
-        imgEl.src = dataUrl;
-        imgEl.style.display = 'block';
-      } else {
-        imgEl.removeAttribute('src');
-        imgEl.style.display = 'none';
-      }
+    if (imgEl && dataUrl) {
+      imgEl.src = dataUrl;
+      imgEl.style.display = 'block';
     }
     if (cardEl) {
       if (hasTarget) {
