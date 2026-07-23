@@ -478,8 +478,8 @@
     var onFound = getSeekOnFound();
     var onFoundTts = getSeekOnFoundTts();
     var llmSceneNav = $('seek-llm-scene-nav') ? $('seek-llm-scene-nav').checked : true;
-    var llmNavInterval = parseInt(($('seek-llm-nav-interval') && $('seek-llm-nav-interval').value) || '1', 10);
-    if (isNaN(llmNavInterval) || llmNavInterval < 1) llmNavInterval = 1;
+    var llmNavInterval = parseInt(($('seek-llm-nav-interval') && $('seek-llm-nav-interval').value) || '10', 10);
+    if (isNaN(llmNavInterval) || llmNavInterval < 1) llmNavInterval = 10;
     lastSeekCheckSeq = 0;
     lastSeekStep = -1;
     seekLog(

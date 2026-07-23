@@ -63,7 +63,7 @@ VALID_ON_FOUND = frozenset({ON_FOUND_NONE, ON_FOUND_TTS})
 DEFAULT_ON_FOUND = ON_FOUND_TTS
 DEFAULT_ON_FOUND_TTS = 'I have found the {goal}.'
 DEFAULT_LLM_SCENE_NAV = True
-DEFAULT_LLM_NAV_INTERVAL = 1
+DEFAULT_LLM_NAV_INTERVAL = 10
 
 
 def parse_on_found(value: str) -> str:
