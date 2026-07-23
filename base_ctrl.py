@@ -292,6 +292,48 @@ class BaseController:
 		return data_read
 
 
+	def _apply_chassis_inverts(self, data):
+		"""Optionally flip wheel/linear signs for camera-forward alignment.
+
+		UGV_INVERT_LINEAR=1  → negate T:1 L/R and T:13 X
+		UGV_INVERT_ANGULAR=1 → negate T:13 Z (yaw)
+
+		Use when stock "positive = forward" is opposite the camera-facing
+		direction on a given chassis. Applied once at serial egress for all
+		UI / AI / CLI paths that use base_json_ctrl.
+		"""
+		if not isinstance(data, dict):
+			return data
+		try:
+			t = data.get('T')
+		except Exception:
+			return data
+		inv_lin = (os.environ.get('UGV_INVERT_LINEAR') or '').strip().lower() in (
+			'1', 'true', 'yes', 'on'
+		)
+		inv_ang = (os.environ.get('UGV_INVERT_ANGULAR') or '').strip().lower() in (
+			'1', 'true', 'yes', 'on'
+		)
+		if not inv_lin and not inv_ang:
+			return data
+		out = dict(data)
+		try:
+			if t in (1, '1') and inv_lin:
+				if 'L' in out:
+					out['L'] = -float(out.get('L') or 0)
+				if 'R' in out:
+					out['R'] = -float(out.get('R') or 0)
+			elif t in (13, '13'):
+				if inv_lin and ('X' in out or 'x' in out):
+					key = 'X' if 'X' in out else 'x'
+					out[key] = -float(out.get(key) or 0)
+				if inv_ang and ('Z' in out or 'z' in out):
+					key = 'Z' if 'Z' in out else 'z'
+					out[key] = -float(out.get(key) or 0)
+		except (TypeError, ValueError):
+			return data
+		return out
+
 	def send_command(self, data):
 		if self.serial_released_for_ros or not self.ser:
 			now = time.time()
@@ -327,6 +369,8 @@ class BaseController:
 					except Exception:
 						pass
 				return
+		# Align software "forward" with camera-forward when env invert is set
+		data = self._apply_chassis_inverts(data)
 		self.command_queue.put(data)
 
 
