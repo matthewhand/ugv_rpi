@@ -383,15 +383,31 @@
         <div class="ugv-seek-layout">
           <div class="ugv-panel-card">
             <h2>Live camera</h2>
-            <p class="hint">Seek uses OpenCV (MobileNet-SSD) to decide if the goal is met. LLM only steers.</p>
+            <p class="hint" id="seek-hint-camera">Referee decides “found”. Pilot LLM only steers motion.</p>
             <img class="ugv-preview-img" id="seek-live-preview" src="/video_feed" alt="Live feed" />
             <div class="ugv-seek-status" id="seek-status">Phase: <span class="phase-idle">idle</span></div>
           </div>
           <div class="ugv-panel-card">
             <h2>Seek mode</h2>
-            <p class="hint">Type a detector class (e.g. dog, person, chair) and press Seek. Stop anytime.</p>
-            <div class="ugv-seek-form">
-              <input type="text" id="seek-goal" placeholder="dog" value="dog" autocomplete="off" />
+            <p class="hint" id="seek-hint-form">
+              <strong>Detector</strong>: closed class list (MobileNet-SSD). 
+              <strong>LLM vision</strong>: free-text goal; model returns JSON <code>found: true|false</code>.
+            </p>
+            <div class="ugv-seek-referee" role="radiogroup" aria-label="Seek referee">
+              <label class="ugv-seek-radio">
+                <input type="radio" name="seek-referee" value="detector" id="seek-referee-detector" checked />
+                Detector (dropdown)
+              </label>
+              <label class="ugv-seek-radio">
+                <input type="radio" name="seek-referee" value="llm" id="seek-referee-llm" />
+                LLM vision (free text)
+              </label>
+            </div>
+            <div class="ugv-seek-form" id="seek-goal-detector-wrap">
+              <select id="seek-goal-select" aria-label="Detector goal class"></select>
+            </div>
+            <div class="ugv-seek-form" id="seek-goal-llm-wrap" hidden>
+              <input type="text" id="seek-goal-text" placeholder="e.g. red fire extinguisher by the door" autocomplete="off" />
             </div>
             <div class="ugv-row-actions">
               <button type="button" id="seek-start-btn">Seek</button>

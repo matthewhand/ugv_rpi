@@ -169,6 +169,7 @@
 
   // ---------- Seek panel ----------
   var seekPollTimer = null;
+  var SEEK_REFEREE_KEY = 'ugv_seek_referee';
 
   function seekLog(msg) {
     var log = $('seek-log');
@@ -180,27 +181,79 @@
     log.scrollTop = log.scrollHeight;
   }
 
+  function getSeekReferee() {
+    var llm = $('seek-referee-llm');
+    if (llm && llm.checked) return 'llm';
+    return 'detector';
+  }
+
+  function getSeekGoal() {
+    if (getSeekReferee() === 'llm') {
+      var t = $('seek-goal-text');
+      return (t && t.value) || '';
+    }
+    var s = $('seek-goal-select');
+    return (s && s.value) || '';
+  }
+
+  function syncSeekRefereeUI() {
+    var ref = getSeekReferee();
+    var detWrap = $('seek-goal-detector-wrap');
+    var llmWrap = $('seek-goal-llm-wrap');
+    if (detWrap) detWrap.hidden = ref !== 'detector';
+    if (llmWrap) llmWrap.hidden = ref !== 'llm';
+    try {
+      localStorage.setItem(SEEK_REFEREE_KEY, ref);
+    } catch (e) {}
+  }
+
+  function populateDetectorLabels(labels) {
+    var sel = $('seek-goal-select');
+    if (!sel) return;
+    var preferred = 'dog';
+    sel.innerHTML = '';
+    (labels || []).forEach(function (lab) {
+      var opt = document.createElement('option');
+      opt.value = lab;
+      opt.textContent = lab;
+      if (lab === preferred) opt.selected = true;
+      sel.appendChild(opt);
+    });
+    if (!sel.value && sel.options.length) sel.selectedIndex = 0;
+  }
+
   function renderSeekStatus(st) {
     var el = $('seek-status');
     if (!el || !st) return;
     var phase = st.phase || 'idle';
     var cls = 'phase-' + phase;
     var det = st.last_detection || {};
+    var ref = st.referee || det.referee || '—';
     var lines = [
       'Phase: ' + phase,
+      'Referee: ' + ref,
       'Goal: ' + (st.goal_label || st.goal_text || '—'),
       'Step: ' + (st.step || 0) + ' / ' + (st.max_steps || '—'),
       'Message: ' + (st.message || ''),
     ];
-    if (det && typeof det === 'object') {
-      lines.push(
-        'OpenCV found: ' +
-          !!det.found +
-          ' | labels: ' +
-          JSON.stringify(det.labels_found || []) +
-          ' | matches: ' +
-          (det.match_count || 0)
-      );
+    if (det && typeof det === 'object' && Object.keys(det).length) {
+      if (ref === 'llm' || det.referee === 'llm') {
+        lines.push(
+          'Judge found: ' +
+            !!det.found +
+            (det.reason ? ' — ' + det.reason : '') +
+            (det.response_format ? ' [' + det.response_format + ']' : '')
+        );
+      } else {
+        lines.push(
+          'Detector found: ' +
+            !!det.found +
+            ' | labels: ' +
+            JSON.stringify(det.labels_found || []) +
+            ' | matches: ' +
+            (det.match_count || 0)
+        );
+      }
     }
     if (st.error) lines.push('Error: ' + st.error);
     el.innerHTML =
@@ -230,13 +283,13 @@
   }
 
   function seekStart() {
-    var goalEl = $('seek-goal');
-    var goal = (goalEl && goalEl.value) || '';
-    seekLog('Starting seek for: ' + goal);
+    var goal = getSeekGoal();
+    var referee = getSeekReferee();
+    seekLog('Starting seek (' + referee + ') for: ' + goal);
     fetch('/api/ai/seek/start', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ goal: goal, max_steps: 12, timeout_s: 180 }),
+      body: JSON.stringify({ goal: goal, referee: referee, max_steps: 12, timeout_s: 180 }),
     })
       .then(function (r) {
         return r.json();
@@ -270,12 +323,12 @@
   }
 
   function seekCheckOnce() {
-    var goalEl = $('seek-goal');
-    var goal = (goalEl && goalEl.value) || '';
+    var goal = getSeekGoal();
+    var referee = getSeekReferee();
     fetch('/api/ai/seek/check', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ goal: goal }),
+      body: JSON.stringify({ goal: goal, referee: referee }),
     })
       .then(function (r) {
         return r.json();
@@ -286,16 +339,27 @@
           return;
         }
         var c = d.check || {};
-        seekLog(
-          'Check ' +
-            d.goal_label +
-            ': found=' +
-            !!c.found +
-            ' labels=' +
-            JSON.stringify(c.labels_found || []) +
-            ' matches=' +
-            (c.match_count || 0)
-        );
+        if ((d.referee || referee) === 'llm') {
+          seekLog(
+            'LLM judge ' +
+              JSON.stringify(d.goal_label) +
+              ': found=' +
+              !!c.found +
+              (c.reason ? ' — ' + c.reason : '') +
+              (c.response_format ? ' [' + c.response_format + ']' : '')
+          );
+        } else {
+          seekLog(
+            'Detector ' +
+              d.goal_label +
+              ': found=' +
+              !!c.found +
+              ' labels=' +
+              JSON.stringify(c.labels_found || []) +
+              ' matches=' +
+              (c.match_count || 0)
+          );
+        }
       })
       .catch(function (e) {
         seekLog(String(e.message || e));
@@ -309,7 +373,38 @@
     if (start) start.addEventListener('click', seekStart);
     if (stop) stop.addEventListener('click', seekStop);
     if (check) check.addEventListener('click', seekCheckOnce);
-    seekLog('Seek mode ready. OpenCV judges success; LLM only steers.');
+
+    var radios = document.querySelectorAll('input[name="seek-referee"]');
+    radios.forEach(function (r) {
+      r.addEventListener('change', syncSeekRefereeUI);
+    });
+    try {
+      var saved = localStorage.getItem(SEEK_REFEREE_KEY);
+      if (saved === 'llm' && $('seek-referee-llm')) $('seek-referee-llm').checked = true;
+      if (saved === 'detector' && $('seek-referee-detector')) $('seek-referee-detector').checked = true;
+    } catch (e) {}
+    syncSeekRefereeUI();
+
+    // Default labels if API slow/unavailable
+    populateDetectorLabels([
+      'aeroplane', 'bicycle', 'bird', 'boat', 'bottle', 'bus', 'car', 'cat', 'chair',
+      'cow', 'diningtable', 'dog', 'horse', 'motorbike', 'person', 'pottedplant',
+      'sheep', 'sofa', 'train', 'tvmonitor',
+    ]);
+    fetch('/api/ai/seek/labels')
+      .then(function (r) {
+        return r.json();
+      })
+      .then(function (d) {
+        if (d && d.success && Array.isArray(d.detector_labels)) {
+          populateDetectorLabels(d.detector_labels);
+        }
+      })
+      .catch(function () {});
+
+    seekLog(
+      'Seek ready. Detector = closed class list; LLM vision = free-text + JSON found true/false.'
+    );
   }
 
   function boot() {

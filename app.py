@@ -1434,11 +1434,12 @@ def _build_chat_messages(history, user_msg, attach_snapshot=False, jpeg_bytes=No
     messages.append({'role': 'user', 'content': user_msg})
     return messages, None, 0
 
-def _openai_chat(messages, max_tokens=512, temperature=0.4, tools=None):
+def _openai_chat(messages, max_tokens=512, temperature=0.4, tools=None, response_format=None):
     """Chat Completions via OpenAI-compatible HTTP API. Settings from env/.env only.
 
     Returns (assistant_message_dict, raw_body, cfg).
     assistant_message_dict may include content and/or tool_calls.
+    Optional response_format enables JSON mode / json_schema when the server supports it.
     """
     cfg = _ai_env_config()
     if not cfg['api_key']:
@@ -1454,6 +1455,8 @@ def _openai_chat(messages, max_tokens=512, temperature=0.4, tools=None):
     if tools:
         payload['tools'] = tools
         payload['tool_choice'] = 'auto'
+    if response_format:
+        payload['response_format'] = response_format
     req = urllib.request.Request(
         url,
         data=json.dumps(payload).encode('utf-8'),
@@ -2362,33 +2365,84 @@ def api_ai_chat():
     })
 
 
-# ---------- Seek mode: LLM steers, OpenCV judges goal ----------
+# ---------- Seek mode: pilot LLM steers; referee is detector OR vision LLM JSON ----------
 from ai_seek import (
     seek_controller,
     parse_seek_goal,
+    parse_llm_goal,
+    parse_seek_referee,
+    parse_llm_found_payload,
     evaluate_goal_detections,
+    detector_labels,
+    REFEREE_DETECTOR,
+    REFEREE_LLM,
     DEFAULT_SEEK_MAX_STEPS,
     DEFAULT_SEEK_TIMEOUT_S,
     DEFAULT_SEEK_CONF,
     DEFAULT_SEEK_STEP_PAUSE_S,
 )
 
-_SEEK_SYSTEM = (
+_SEEK_PILOT_DETECTOR = (
     "You are a seek pilot on a UGV rover. Move the robot so the forward camera can see the target class. "
-    "OpenCV (not you) decides when the target is found — never claim success. "
+    "OpenCV MobileNet-SSD (not you) is the success oracle — never claim the target is found or that the mission is done. "
+    "IMPORTANT: You are inside a multi-step outer loop. If you receive another user message, that means "
+    "the detector still has NOT matched the goal class. Prior drives did not finish the task; keep searching. "
     "CRITICAL: You MUST call tools on every turn. Prefer function/tool calls over prose. "
-    "Each turn: call send_motor_command and optionally send_gimbal_command, then one short line of plan. "
+    "Each turn: call send_motor_command and optionally send_gimbal_command, then one short line of next-step plan. "
     "Prefer short timed drives (duration_ms 800–1500, linear_x 0.12–0.18). "
     "If the path looks open, drive forward; otherwise turn slightly (angular_z ±0.4). "
     "Do not write long analysis. Do not invent detections."
 )
 
+_SEEK_PILOT_LLM = (
+    "You are a seek pilot on a UGV rover. Move the robot so the forward camera can see the described target. "
+    "A separate vision-judge LLM (not you) decides when the target is found via JSON found=true/false. "
+    "IMPORTANT: You are inside a multi-step outer loop. Another user message means the judge still said found=false. "
+    "Prior drives did not finish the task; keep searching. Never claim success yourself. "
+    "CRITICAL: You MUST call tools on every turn. Prefer function/tool calls over prose. "
+    "Each turn: call send_motor_command and optionally send_gimbal_command, then one short line of next-step plan. "
+    "Prefer short timed drives (duration_ms 800–1500, linear_x 0.12–0.18). "
+    "If the path looks open, drive forward; otherwise turn slightly (angular_z ±0.4). "
+    "Do not write long analysis."
+)
+
+_SEEK_JUDGE_SYSTEM = (
+    "You are a visual goal referee for a robot camera. "
+    "Look only at the provided image. Decide if the described target is clearly visible. "
+    "Reply with JSON only — no markdown, no extra keys beyond the schema. "
+    "found must be a boolean: true only if the target is clearly present in the image; "
+    "false if absent, uncertain, occluded, or too small to be sure. "
+    "reason is one short sentence."
+)
+
+_SEEK_FOUND_JSON_SCHEMA = {
+    'type': 'json_schema',
+    'json_schema': {
+        'name': 'seek_found',
+        'strict': True,
+        'schema': {
+            'type': 'object',
+            'properties': {
+                'found': {
+                    'type': 'boolean',
+                    'description': 'True only if the target is clearly visible in the image.',
+                },
+                'reason': {
+                    'type': 'string',
+                    'description': 'One short sentence explaining the decision.',
+                },
+            },
+            'required': ['found', 'reason'],
+            'additionalProperties': False,
+        },
+    },
+}
+
+_SEEK_FOUND_JSON_OBJECT = {'type': 'json_object'}
+
 
 def opencv_goal_check(goal_label, conf_threshold=DEFAULT_SEEK_CONF, frame=None):
-    """Shipped OpenCV goal oracle used by Seek (and tests).
-
-    Runs MobileNet-SSD on a live or provided BGR frame, then evaluate_goal_detections.
-    """
+    """On-device detector oracle (MobileNet-SSD). Closed class list only."""
     if frame is None:
         frame = cvf.grab_bgr_frame()
     dets = []
@@ -2398,11 +2452,114 @@ def opencv_goal_check(goal_label, conf_threshold=DEFAULT_SEEK_CONF, frame=None):
         dets = list(getattr(cvf, 'last_detections', []) or [])
     result = evaluate_goal_detections(dets, goal_label, conf_threshold=conf_threshold)
     result['frame_ok'] = frame is not None
+    result['referee'] = REFEREE_DETECTOR
     return result
 
 
+def llm_goal_check(goal_text):
+    """Vision LLM oracle: snapshot + structured JSON {found: bool, reason: str}.
+
+    Uses response_format json_schema when the server accepts it; falls back to
+    json_object, then plain completion + robust parse. found defaults false on
+    parse failure so Seek does not end on garbage.
+    """
+    goal = (goal_text or '').strip()
+    jpeg = _grab_jpeg_bytes(max_width=640, quality=70)
+    if not jpeg:
+        return {
+            'found': False,
+            'goal_label': goal,
+            'referee': REFEREE_LLM,
+            'frame_ok': False,
+            'reason': 'no camera frame',
+            'parse_ok': False,
+            'labels_found': [],
+            'match_count': 0,
+            'all_count': 0,
+        }
+    b64 = base64.b64encode(jpeg).decode('ascii')
+    data_url = f'data:image/jpeg;base64,{b64}'
+    user_content = [
+        {
+            'type': 'text',
+            'text': (
+                f'Target to find: {goal}\n'
+                'Is this target clearly visible in the image? '
+                'Respond with JSON: {"found": true|false, "reason": "..."}. '
+                'found=true only if clearly present.'
+            ),
+        },
+        {'type': 'image_url', 'image_url': {'url': data_url}},
+    ]
+    messages = [
+        {'role': 'system', 'content': _SEEK_JUDGE_SYSTEM},
+        {'role': 'user', 'content': user_content},
+    ]
+    content = ''
+    format_used = None
+    last_err = None
+    for fmt_name, fmt in (
+        ('json_schema', _SEEK_FOUND_JSON_SCHEMA),
+        ('json_object', _SEEK_FOUND_JSON_OBJECT),
+        ('plain', None),
+    ):
+        try:
+            msg, _body, _cfg = _openai_chat(
+                messages,
+                max_tokens=80,
+                temperature=0.0,
+                tools=None,
+                response_format=fmt,
+            )
+            content = _message_text_content(msg) or ''
+            format_used = fmt_name
+            last_err = None
+            break
+        except Exception as e:
+            last_err = e
+            # Schema often unsupported on local OpenAI-compat servers — try next.
+            continue
+    if last_err and not content:
+        return {
+            'found': False,
+            'goal_label': goal,
+            'referee': REFEREE_LLM,
+            'frame_ok': True,
+            'reason': f'judge LLM failed: {last_err}'[:300],
+            'parse_ok': False,
+            'error': str(last_err)[:300],
+            'labels_found': [],
+            'match_count': 0,
+            'all_count': 0,
+        }
+    parsed = parse_llm_found_payload(content)
+    found = bool(parsed.get('found'))
+    return {
+        'found': found,
+        'goal_label': goal,
+        'referee': REFEREE_LLM,
+        'frame_ok': True,
+        'reason': parsed.get('reason') or '',
+        'parse_ok': bool(parsed.get('parse_ok')),
+        'response_format': format_used,
+        'raw_reply': (content or '')[:400],
+        'labels_found': [goal] if found else [],
+        'match_count': 1 if found else 0,
+        'all_count': 1 if found else 0,
+        'best': {'label': goal, 'confidence': 1.0 if found else 0.0} if found else None,
+    }
+
+
+def seek_goal_check(goal, referee=REFEREE_DETECTOR, conf_threshold=DEFAULT_SEEK_CONF):
+    """Dispatch to detector or LLM vision referee."""
+    ref = parse_seek_referee(referee)
+    if ref == REFEREE_LLM:
+        return llm_goal_check(goal)
+    return opencv_goal_check(goal, conf_threshold=conf_threshold)
+
+
 def _seek_force_tools_on():
-    """Ensure CV + motion tools are offered during Seek."""
+    """Ensure CV + motion tools are offered during Seek pilot turns."""
     try:
         _set_capabilities({
             'group_computer_vision': True,
@@ -2418,7 +2575,7 @@ def _seek_force_tools_on():
 
 
 def _seek_fallback_drive(reason=''):
-    """Deterministic short move when LLM is down or skipped tools."""
+    """Deterministic short move when pilot LLM is down or skipped tools."""
     args = {'linear_x': 0.15, 'angular_z': 0.35 if (int(time.time()) % 2) else -0.35, 'duration_ms': 900}
     try:
         res = _execute_agent_tool('send_motor_command', args)
@@ -2432,8 +2589,9 @@ def _seek_fallback_drive(reason=''):
 
 
 def _seek_loop(ctrl, label, conf, max_steps, timeout_s):
-    """Background Seek loop: detect → maybe found → LLM motion step → repeat."""
+    """Background Seek loop: referee check → maybe found → pilot motion → repeat."""
     t0 = time.time()
+    referee = ctrl.referee()
 
     def _halt(phase, message, step=0, **kwargs):
         try:
@@ -2445,6 +2603,7 @@ def _seek_loop(ctrl, label, conf, max_steps, timeout_s):
     try:
         _seek_force_tools_on()
         history = []
+        pilot_system = _SEEK_PILOT_LLM if referee == REFEREE_LLM else _SEEK_PILOT_DETECTOR
         for step in range(1, int(max_steps) + 1):
             if ctrl.should_stop():
                 _halt('stopped', 'Stopped by user', step=step - 1)
@@ -2453,45 +2612,71 @@ def _seek_loop(ctrl, label, conf, max_steps, timeout_s):
                 _halt('timeout', f'Timeout after {timeout_s}s', step=step - 1)
                 return
 
-            # OpenCV goal check (authority)
-            check = opencv_goal_check(label, conf_threshold=conf)
+            # Referee (authority): detector class list OR LLM JSON found bool
+            check = seek_goal_check(label, referee=referee, conf_threshold=conf)
             ctrl.update(
                 step=step,
                 last_detection=check,
-                message=f'Step {step}/{max_steps}: scanning for {label}…',
+                message=f'Step {step}/{max_steps}: scanning ({referee}) for {label}…',
             )
             if check.get('found'):
+                reason = check.get('reason') or ''
                 best = check.get('best') or {}
+                conf_s = best.get('confidence', '?')
                 _halt(
                     'found',
                     message=(
-                        f'Found {label} (conf={best.get("confidence", "?")}) '
-                        f'at step {step}'
+                        f'Found {label} via {referee}'
+                        + (f' (conf={conf_s})' if referee == REFEREE_DETECTOR else '')
+                        + (f' — {reason}' if reason else '')
+                        + f' at step {step}'
                     ),
                     step=step,
                     last_detection=check,
                 )
-                olog.info('ai_seek', f'Seek found {label} at step {step}', goal=label, step=step)
+                olog.info(
+                    'ai_seek',
+                    f'Seek found {label} via {referee} at step {step}',
+                    goal=label, step=step, referee=referee,
+                )
                 return
 
-            # LLM one tool-using turn (steer only)
-            det_summary = {
-                'goal': label,
-                'step': step,
-                'max_steps': max_steps,
-                'labels_seen': check.get('labels_found') or [],
-                'all_count': check.get('all_count', 0),
-                'note': 'Target not found yet by OpenCV. Issue a short drive or look.',
-            }
-            user_line = (
-                f"Seeking class '{label}'. OpenCV has NOT found it yet. "
-                f"Detections summary: {json.dumps(det_summary)}. "
-                f"MUST call send_motor_command now (optional send_gimbal_command), then one-line plan."
-            )
+            # Pilot LLM: motion only (not the success oracle)
+            if referee == REFEREE_LLM:
+                det_summary = {
+                    'goal': label,
+                    'step': step,
+                    'max_steps': max_steps,
+                    'referee': referee,
+                    'judge_found': False,
+                    'judge_reason': check.get('reason') or '',
+                    'note': 'Vision judge said found=false. Keep searching.',
+                }
+                user_line = (
+                    f"Loop continues: vision judge still has NOT confirmed goal '{label}' "
+                    f"(step {step}/{max_steps}, found=false). You have not finished — keep moving. "
+                    f"Judge note: {json.dumps(det_summary)}. "
+                    f"MUST call send_motor_command now (optional send_gimbal_command), then one-line next plan."
+                )
+            else:
+                det_summary = {
+                    'goal': label,
+                    'step': step,
+                    'max_steps': max_steps,
+                    'referee': referee,
+                    'labels_seen': check.get('labels_found') or [],
+                    'all_count': check.get('all_count', 0),
+                    'note': 'Detector has not matched goal class yet.',
+                }
+                user_line = (
+                    f"Loop continues: detector still has NOT found class '{label}' "
+                    f"(step {step}/{max_steps}). You have not finished — keep moving to search. "
+                    f"Detections summary: {json.dumps(det_summary)}. "
+                    f"MUST call send_motor_command now (optional send_gimbal_command), then one-line next plan."
+                )
             messages = [
-                {'role': 'system', 'content': _SEEK_SYSTEM},
+                {'role': 'system', 'content': pilot_system},
             ]
-            # Keep short history; long monologues poison the next turn
             for h in history[-4:]:
                 hh = dict(h)
                 if isinstance(hh.get('content'), str) and len(hh['content']) > 400:
@@ -2505,13 +2690,12 @@ def _seek_loop(ctrl, label, conf, max_steps, timeout_s):
                 reply = (content or '')[:500]
                 tool_trace = tool_trace or []
             except Exception as e:
-                olog.warn('ai_seek', f'LLM step failed: {e}', error=str(e)[:200], step=step)
+                olog.warn('ai_seek', f'LLM pilot step failed: {e}', error=str(e)[:200], step=step)
                 tool_trace, reply = _seek_fallback_drive(str(e)[:80])
                 if not tool_trace:
                     _halt('failed', f'LLM and fallback failed: {reply}', step=step, error=reply[:300])
                     return
 
-            # Honor stop ASAP after blocking LLM call
             if ctrl.should_stop():
                 _halt('stopped', 'Stopped by user', step=step, last_llm_reply=reply[:500], last_tools=tool_trace)
                 return
@@ -2528,27 +2712,25 @@ def _seek_loop(ctrl, label, conf, max_steps, timeout_s):
                 message=f'Step {step}/{max_steps}: moved; re-scanning…',
                 history=list(history[-6:]),
             )
-            # Cooperative cancel during pause
             for _ in range(int(DEFAULT_SEEK_STEP_PAUSE_S / 0.1) or 1):
                 if ctrl.should_stop():
                     _halt('stopped', 'Stopped by user', step=step)
                     return
                 time.sleep(0.1)
 
-        # Final detection after last step
-        check = opencv_goal_check(label, conf_threshold=conf)
+        check = seek_goal_check(label, referee=referee, conf_threshold=conf)
         if check.get('found'):
-            best = check.get('best') or {}
+            reason = check.get('reason') or ''
             _halt(
                 'found',
-                message=f'Found {label} after final step (conf={best.get("confidence", "?")})',
+                message=f'Found {label} via {referee} after final step' + (f' — {reason}' if reason else ''),
                 step=max_steps,
                 last_detection=check,
             )
         else:
             _halt(
                 'timeout',
-                message=f'Gave up after {max_steps} steps without OpenCV match for {label}',
+                message=f'Gave up after {max_steps} steps without {referee} match for {label}',
                 step=max_steps,
                 last_detection=check,
             )
@@ -2561,10 +2743,26 @@ def _seek_loop(ctrl, label, conf, max_steps, timeout_s):
         ctrl.finish('failed', message=str(e)[:300], error=str(e)[:300])
 
 
+@app.route('/api/ai/seek/labels', methods=['GET'])
+def api_ai_seek_labels():
+    """Closed vocabulary for on-device detector referee (dropdown)."""
+    return jsonify({
+        'success': True,
+        'referee_modes': [REFEREE_DETECTOR, REFEREE_LLM],
+        'detector_labels': detector_labels(),
+        'detector_backend': 'mobilenet-ssd',
+        'note': (
+            'detector mode only accepts these labels; '
+            'llm mode accepts free-text goals and uses vision JSON found:true|false'
+        ),
+    })
+
+
 @app.route('/api/ai/seek/start', methods=['POST'])
 def api_ai_seek_start():
     data = request.get_json(silent=True) or {}
     goal = data.get('goal') or data.get('target') or data.get('label') or ''
+    referee = parse_seek_referee(data.get('referee') or data.get('mode') or REFEREE_DETECTOR)
     max_steps = int(data.get('max_steps') or DEFAULT_SEEK_MAX_STEPS)
     max_steps = max(1, min(40, max_steps))
     timeout_s = float(data.get('timeout_s') or DEFAULT_SEEK_TIMEOUT_S)
@@ -2577,10 +2775,15 @@ def api_ai_seek_start():
         max_steps=max_steps,
         timeout_s=timeout_s,
         conf_threshold=conf,
+        referee=referee,
     )
     code = 200 if result.get('success') else 400
     if result.get('success'):
-        olog.info('ai_seek', f'Seek started for {result.get("status", {}).get("goal_label")}', goal=goal)
+        olog.info(
+            'ai_seek',
+            f'Seek started ({referee}) for {result.get("status", {}).get("goal_label")}',
+            goal=goal, referee=referee,
+        )
     return jsonify(result), code
 
 
@@ -2598,15 +2801,19 @@ def api_ai_seek_stop():
 
 @app.route('/api/ai/seek/check', methods=['POST'])
 def api_ai_seek_check():
-    """One-shot OpenCV goal check (no motion). Body: {goal|label, conf_threshold?}."""
+    """One-shot goal check (no motion). Body: {goal, referee?, conf_threshold?}."""
     data = request.get_json(silent=True) or {}
     goal = data.get('goal') or data.get('label') or ''
-    label, err = parse_seek_goal(goal)
+    referee = parse_seek_referee(data.get('referee') or data.get('mode') or REFEREE_DETECTOR)
+    if referee == REFEREE_LLM:
+        label, err = parse_llm_goal(goal)
+    else:
+        label, err = parse_seek_goal(goal)
     if err:
         return jsonify({'success': False, 'error': err}), 400
     conf = float(data.get('conf_threshold') or DEFAULT_SEEK_CONF)
-    check = opencv_goal_check(label, conf_threshold=conf)
-    return jsonify({'success': True, 'goal_label': label, 'check': check})
+    check = seek_goal_check(label, referee=referee, conf_threshold=conf)
+    return jsonify({'success': True, 'goal_label': label, 'referee': referee, 'check': check})
 
 
 @app.route('/api/ai/motion_status', methods=['GET'])

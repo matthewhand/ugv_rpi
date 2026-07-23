@@ -15,6 +15,12 @@ from ai_seek import (  # noqa: E402
     evaluate_goal_detections,
     enrich_detections,
     parse_seek_goal,
+    parse_llm_goal,
+    parse_llm_found_payload,
+    parse_seek_referee,
+    detector_labels,
+    REFEREE_DETECTOR,
+    REFEREE_LLM,
 )
 
 
@@ -81,12 +87,68 @@ class TestEvaluateGoal(unittest.TestCase):
         self.assertAlmostEqual(out[0]['offset_x'], 0.0)
 
 
+class TestRefereeAndLlmParse(unittest.TestCase):
+    def test_detector_labels_no_background(self):
+        labs = detector_labels()
+        self.assertIn('dog', labs)
+        self.assertNotIn('background', labs)
+
+    def test_parse_referee(self):
+        self.assertEqual(parse_seek_referee('opencv'), REFEREE_DETECTOR)
+        self.assertEqual(parse_seek_referee('llm'), REFEREE_LLM)
+        self.assertEqual(parse_seek_referee('vision'), REFEREE_LLM)
+
+    def test_llm_goal_free_text(self):
+        lab, err = parse_llm_goal('red fire extinguisher')
+        self.assertEqual(lab, 'red fire extinguisher')
+        self.assertIsNone(err)
+        lab, err = parse_llm_goal('  ')
+        self.assertIsNone(lab)
+        self.assertIsNotNone(err)
+
+    def test_parse_found_json_object(self):
+        r = parse_llm_found_payload('{"found": true, "reason": "dog in view"}')
+        self.assertTrue(r['found'])
+        self.assertTrue(r['parse_ok'])
+        self.assertIn('dog', r['reason'])
+
+    def test_parse_found_false_and_garbage(self):
+        r = parse_llm_found_payload('{"found": false, "reason": "empty hallway"}')
+        self.assertFalse(r['found'])
+        g = parse_llm_found_payload('I think maybe yes there is something')
+        self.assertFalse(g['found'])
+        self.assertFalse(g['parse_ok'])
+
+    def test_parse_found_dict(self):
+        r = parse_llm_found_payload({'found': True, 'reason': 'ok'})
+        self.assertTrue(r['found'])
+
+
 class TestSeekController(unittest.TestCase):
     def test_bad_goal_rejected(self):
         ctrl = SeekController()
         r = ctrl.start('notaclass', loop_fn=lambda *a: None)
         self.assertFalse(r['success'])
         self.assertIn('unknown', r.get('error', ''))
+
+    def test_llm_referee_accepts_free_text(self):
+        ctrl = SeekController()
+
+        def loop(c, label, conf, max_steps, timeout_s):
+            c.finish('timeout', message='done', step=0)
+
+        r = ctrl.start(
+            'yellow sticky note on the wall',
+            loop_fn=loop,
+            referee=REFEREE_LLM,
+            max_steps=1,
+            timeout_s=5,
+        )
+        self.assertTrue(r['success'])
+        self.assertEqual(r['status']['referee'], REFEREE_LLM)
+        deadline = time.time() + 2.0
+        while time.time() < deadline and ctrl.is_running():
+            time.sleep(0.02)
 
     def test_stop_cancels_running(self):
         ctrl = SeekController()
