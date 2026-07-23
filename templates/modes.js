@@ -325,8 +325,14 @@
       var imgEl = $('seek-thumb-img-' + name);
       var cardEl = $('seek-thumb-card-' + name);
       var badgeEl = $('seek-badge-' + name);
-      if (imgEl && v.data_url) {
-        imgEl.src = v.data_url;
+      if (imgEl) {
+        if (v.data_url) {
+          imgEl.src = v.data_url;
+          imgEl.style.display = 'block';
+        } else {
+          imgEl.removeAttribute('src');
+          imgEl.style.display = 'none';
+        }
       }
       if (cardEl) {
         if (v.has_target) {

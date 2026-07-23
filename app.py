@@ -3415,14 +3415,41 @@ def _seek_unified_llm_analysis(current_views, prev_forward_jpeg, goal_label):
     except Exception as e:
         olog.warn('ai_seek', f'Unified LLM analysis error: {e}')
 
+def _seek_execute_nav_action(action, drive_distance='medium'):
+    """Execute body move after nav decision; duration from drive_distance tier."""
+    try:
+        _seek_look_deg(0.0, 0.0, wait_hw=True)
+    except Exception:
+        try:
+            _seek_look_deg(0.0, 0.0, wait_hw=False, settle_s=0.25)
+        except Exception:
+            pass
+    action = (action or 'forward').strip().lower()
+    dist = (drive_distance or 'medium').strip().lower()
+    if dist not in _SEEK_DRIVE_MS_BY_DIST:
+        dist = 'medium'
+    if action in ('turn_left', 'left'):
+        dur = _SEEK_TURN_MS_BY_DIST.get(dist, 900)
+        args = {'linear_x': 0.08, 'angular_z': 0.5, 'duration_ms': dur}
+    elif action in ('turn_right', 'right'):
+        dur = _SEEK_TURN_MS_BY_DIST.get(dist, 900)
+        args = {'linear_x': 0.08, 'angular_z': -0.5, 'duration_ms': dur}
+    elif action in ('backward', 'back', 'drive_backward'):
+        dur = _SEEK_DRIVE_MS_BY_DIST.get(dist, _SEEK_DRIVE_MS)
+        lin = -abs(_SEEK_DRIVE_LIN_BY_DIST.get(dist, 0.15))
+        args = {'linear_x': lin, 'angular_z': 0.0, 'duration_ms': dur}
+    else:
+        dur = _SEEK_DRIVE_MS_BY_DIST.get(dist, _SEEK_DRIVE_MS)
+        lin = _SEEK_DRIVE_LIN_BY_DIST.get(dist, 0.15)
+        args = {'linear_x': lin, 'angular_z': 0.0, 'duration_ms': dur}
+    res = _execute_agent_tool('send_motor_command', args)
+    time.sleep(float(args['duration_ms']) / 1000.0 + 0.3)
     return {
-        'goal_found': False,
-        'goal_found_view': None,
-        'path_forward_clear': True,
-        'is_identical_to_previous': False,
-        'recommended_direction': 'forward',
-        'drive_distance': 'short',
-        'reason': 'fallback forward short'
+        'name': 'send_motor_command',
+        'arguments': args,
+        'result': res,
+        'drive_distance': dist,
+        'action': action,
     }
 
 
