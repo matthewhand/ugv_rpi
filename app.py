@@ -702,6 +702,9 @@ def api_ptz():
         cmd = {'T': 133, 'X': x, 'Y': y, 'SPD': spd, 'ACC': acc}
         mode = get_control_mode()
         path = 'serial'
+        before = _ptz_status_snapshot(request_feedback=(mode == 'direct'))
+        before_pan = (before.get('hardware') or {}).get('pan_deg')
+        before_tilt = (before.get('hardware') or {}).get('tilt_deg')
         try:
             if mode == 'ros2' or getattr(base, 'serial_released_for_ros', False):
                 # UART released — drive via rosbridge (same as stick)
@@ -725,8 +728,34 @@ def api_ptz():
             return jsonify({'success': False, 'error': str(e), 'command': cmd}), 500
         time.sleep(float(data.get('wait_s', 0.6) or 0.6))
         snap = _ptz_status_snapshot(request_feedback=(path == 'serial'))
+        after_pan = (snap.get('hardware') or {}).get('pan_deg')
+        after_tilt = (snap.get('hardware') or {}).get('tilt_deg')
+        def _delta(a, b):
+            try:
+                return abs(float(a) - float(b))
+            except (TypeError, ValueError):
+                return None
+        d_pan = _delta(before_pan, after_pan)
+        d_tilt = _delta(before_tilt, after_tilt)
+        # Command accepted ≠ servos moved. Flag no-op for hardware debug.
+        moved = bool((d_pan is not None and d_pan > 2.0) or (d_tilt is not None and d_tilt > 2.0))
         snap['command_sent'] = cmd
         snap['path'] = path
+        snap['before'] = {'pan_deg': before_pan, 'tilt_deg': before_tilt}
+        snap['delta_deg'] = {'pan': d_pan, 'tilt': d_tilt}
+        snap['moved'] = moved
+        if not moved:
+            snap['warning'] = (
+                'Command was sent on the software path but hardware pan/tilt feedback '
+                'did not change >2°. Check bus-servo power, wiring, IDs, and that the '
+                'PT module is fitted; pan stuck at one LSB often means no servo reply.'
+            )
+            olog.warn(
+                'ptz_cmd',
+                f'PTZ goto X={x} Y={y} sent but no HW movement (pan {before_pan}→{after_pan})',
+                X=x, Y=y, path=path, before_pan=before_pan, after_pan=after_pan,
+                before_tilt=before_tilt, after_tilt=after_tilt, moved=False,
+            )
         return jsonify(snap)
     return jsonify({'success': False, 'error': "action must be status|goto|center|feedback"}), 400
 
