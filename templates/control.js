@@ -1777,6 +1777,137 @@ function clearOpsLog() {
     }
 })();
 
+function runPtzSelfTest() {
+    var btn = document.getElementById('ptz-selftest-btn');
+    var box = document.getElementById('ptz-selftest-result');
+    if (!box) return;
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = 'Testing… (~15s)';
+    }
+    box.style.display = 'block';
+    box.innerHTML = '<span style="color:#9aa3b2">Running pan L/R + tilt up/down with camera stills…</span>';
+    fetch('/api/ptz/self_test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ wait_s: 1.8, pan_deg: 35, tilt_deg: 30, include_photos: true }),
+    })
+        .then(function (r) {
+            return r.json();
+        })
+        .then(function (d) {
+            if (!d.success) {
+                box.innerHTML =
+                    '<span style="color:#f87171">Self-test failed: ' +
+                    (d.error || 'unknown') +
+                    '</span>';
+                return;
+            }
+            var v = d.verdict || {};
+            var pan = v.pan || {};
+            var tilt = v.tilt || {};
+            var okColor = '#3dd68c';
+            var failColor = '#f87171';
+            var panColor = pan.result === 'pass' ? okColor : failColor;
+            var tiltColor = tilt.result === 'pass' ? okColor : failColor;
+            var html = '';
+            html +=
+                '<div style="font-weight:700;margin-bottom:6px;color:' +
+                (v.overall === 'both_axes_ok' ? okColor : failColor) +
+                '">' +
+                (v.summary || v.overall || '') +
+                '</div>';
+            html +=
+                '<div style="margin-bottom:6px">Pan: <b style="color:' +
+                panColor +
+                '">' +
+                (pan.result || '?') +
+                '</b> · HW span ' +
+                (pan.hw_span_deg != null ? pan.hw_span_deg : '?') +
+                '° · photo ' +
+                (pan.photo_changed ? 'changed' : 'same') +
+                '</div>';
+            html +=
+                '<div style="margin-bottom:8px">Tilt: <b style="color:' +
+                tiltColor +
+                '">' +
+                (tilt.result || '?') +
+                '</b> · HW span ' +
+                (tilt.hw_span_deg != null ? tilt.hw_span_deg : '?') +
+                '° · photo ' +
+                (tilt.photo_changed ? 'changed' : 'same') +
+                '</div>';
+            html +=
+                '<div style="color:#6b7280;margin-bottom:8px">mode=' +
+                (v.control_mode || '?') +
+                ' · ' +
+                (v.elapsed_s != null ? v.elapsed_s + 's' : '') +
+                '</div>';
+            var steps = d.steps || [];
+            steps.forEach(function (s) {
+                if (!s || !s.name) return;
+                var cmp = s.photo_compare || {};
+                html +=
+                    '<div style="border-top:1px solid #2a2f3d;padding:6px 0">' +
+                    '<div><b>' +
+                    s.name +
+                    '</b> · HW moved=' +
+                    !!s.moved_hw +
+                    (s.delta_deg
+                        ? ' (Δpan=' +
+                          (s.delta_deg.pan != null ? Number(s.delta_deg.pan).toFixed(2) : '?') +
+                          '° Δtilt=' +
+                          (s.delta_deg.tilt != null ? Number(s.delta_deg.tilt).toFixed(2) : '?') +
+                          '°)'
+                        : '') +
+                    '</div>';
+                if (cmp.mean_abs_diff != null) {
+                    html +=
+                        '<div style="color:#9aa3b2">photo mad=' +
+                        cmp.mean_abs_diff +
+                        ' · changed=' +
+                        cmp.frac_changed_gt15 +
+                        ' · visual=' +
+                        !!cmp.visual_change +
+                        '</div>';
+                }
+                if (cmp.panel_data_url) {
+                    html +=
+                        '<img src="' +
+                        cmp.panel_data_url +
+                        '" alt="before/after ' +
+                        s.name +
+                        '" style="width:100%;max-width:360px;border-radius:6px;margin-top:4px;border:1px solid #2a2f3d" />';
+                    html +=
+                        '<div style="color:#6b7280;font-size:10px">before | after</div>';
+                } else if (s.photo_data_url) {
+                    html +=
+                        '<img src="' +
+                        s.photo_data_url +
+                        '" alt="' +
+                        s.name +
+                        '" style="width:100%;max-width:200px;border-radius:6px;margin-top:4px;border:1px solid #2a2f3d" />';
+                }
+                if (s.error) {
+                    html += '<div style="color:#f87171">' + s.error + '</div>';
+                }
+                html += '</div>';
+            });
+            box.innerHTML = html;
+            if (window.refreshOpsLog) window.refreshOpsLog(true);
+        })
+        .catch(function (e) {
+            box.innerHTML =
+                '<span style="color:#f87171">Request failed: ' + e + '</span>';
+        })
+        .finally(function () {
+            if (btn) {
+                btn.disabled = false;
+                btn.textContent = 'Run PTZ test';
+            }
+        });
+}
+
 // Sync labels with server on load
 fetch('/api/status').then(function (r) { return r.json(); }).then(function (d) {
     updateControlModeBtn(d.control_mode || (d.enable_motor_control ? 'direct' : 'ros2'));

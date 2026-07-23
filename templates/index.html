@@ -303,6 +303,19 @@
                                 <div><button onclick="cmdSend(base_on,0,0);" class="ctl_btn">BASE ON</button></div>
                             </div>
                         </div>
+                        <div>
+                            <h2 class="sc_title feed_ct_tt">PTZ Self-Test</h2>
+                            <p style="font-size:11px;color:#9aa3b2;margin:0 0 8px;line-height:1.35;">
+                              Pan L/R + tilt up/down with before/after photos and HW angles.
+                            </p>
+                            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
+                              <button type="button" id="ptz-selftest-btn" class="ctl_btn" onclick="runPtzSelfTest()"
+                                style="min-width:120px;background:#1a3a2a;color:#3dd68c;border:1px solid #3dd68c;font-weight:700;">
+                                Run PTZ test
+                              </button>
+                            </div>
+                            <div id="ptz-selftest-result" style="display:none;font-size:11px;line-height:1.4;color:#c4d0e0;background:#0f1117;border:1px solid #2a2f3d;border-radius:8px;padding:8px;max-height:420px;overflow:auto;"></div>
+                        </div>
                         <div class="long_btn new_page" id="open_jupyter">
                             <a target="_blank" style="color: #f5bd5f;" href="/"><span>JupyterLab</span>&nbsp;<span>&gt;</span></a>
                         </div>

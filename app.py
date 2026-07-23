@@ -760,6 +760,287 @@ def api_ptz():
     return jsonify({'success': False, 'error': "action must be status|goto|center|feedback"}), 400
 
 
+def _ptz_goto_raw(x, y, wait_s=1.5):
+    """Send T:133 (or ROS gimbal) and return movement diagnostics + HW snapshot."""
+    x, y = float(x), float(y)
+    wait_s = max(0.3, min(5.0, float(wait_s)))
+    cmd = {'T': 133, 'X': x, 'Y': y, 'SPD': 0.0, 'ACC': 0.0}
+    mode = get_control_mode()
+    path = 'serial'
+    before = _ptz_status_snapshot(request_feedback=(mode == 'direct'))
+    before_pan = (before.get('hardware') or {}).get('pan_deg')
+    before_tilt = (before.get('hardware') or {}).get('tilt_deg')
+    try:
+        if mode == 'ros2' or getattr(base, 'serial_released_for_ros', False):
+            import ros_motion
+            result = ros_motion.publish_gimbal_from_ui(x, y, throttle=False)
+            path = 'ros2'
+            if not result.get('ok'):
+                return {
+                    'success': False, 'error': result.get('error'),
+                    'command_sent': cmd, 'path': path,
+                    'before': {'pan_deg': before_pan, 'tilt_deg': before_tilt},
+                    'moved': False,
+                }
+        else:
+            base.base_json_ctrl({'T': 4, 'cmd': 2})
+            base.base_json_ctrl(cmd)
+        try:
+            cvf.pan_angle = x
+            cvf.tilt_angle = -y
+        except Exception:
+            pass
+    except Exception as e:
+        return {
+            'success': False, 'error': str(e), 'command_sent': cmd, 'path': path,
+            'before': {'pan_deg': before_pan, 'tilt_deg': before_tilt}, 'moved': False,
+        }
+    time.sleep(wait_s)
+    snap = _ptz_status_snapshot(request_feedback=(path == 'serial'))
+    after_pan = (snap.get('hardware') or {}).get('pan_deg')
+    after_tilt = (snap.get('hardware') or {}).get('tilt_deg')
+
+    def _delta(a, b):
+        try:
+            return abs(float(a) - float(b))
+        except (TypeError, ValueError):
+            return None
+
+    d_pan = _delta(before_pan, after_pan)
+    d_tilt = _delta(before_tilt, after_tilt)
+    moved = bool((d_pan is not None and d_pan > 2.0) or (d_tilt is not None and d_tilt > 2.0))
+    return {
+        'success': True,
+        'command_sent': cmd,
+        'path': path,
+        'before': {'pan_deg': before_pan, 'tilt_deg': before_tilt},
+        'after': {'pan_deg': after_pan, 'tilt_deg': after_tilt},
+        'delta_deg': {'pan': d_pan, 'tilt': d_tilt},
+        'moved': moved,
+        'hardware': snap.get('hardware'),
+        'control_mode': snap.get('control_mode'),
+    }
+
+
+def _jpeg_compare(jpeg_a, jpeg_b):
+    """Compare two JPEGs; return metrics used by PTZ photo self-test."""
+    try:
+        import cv2
+        import numpy as np
+        ia = cv2.imdecode(np.frombuffer(jpeg_a, dtype=np.uint8), cv2.IMREAD_COLOR)
+        ib = cv2.imdecode(np.frombuffer(jpeg_b, dtype=np.uint8), cv2.IMREAD_COLOR)
+        if ia is None or ib is None:
+            return {'error': 'decode failed', 'visual_change': False}
+        if ia.shape != ib.shape:
+            ib = cv2.resize(ib, (ia.shape[1], ia.shape[0]))
+        ga = cv2.cvtColor(ia, cv2.COLOR_BGR2GRAY).astype(np.float32)
+        gb = cv2.cvtColor(ib, cv2.COLOR_BGR2GRAY).astype(np.float32)
+        diff = np.abs(ga - gb)
+        mad = float(diff.mean())
+        changed = float((diff > 15).mean())
+        try:
+            shift, response = cv2.phaseCorrelate(ga, gb)
+            shift_xy = [float(shift[0]), float(shift[1])]
+            response = float(response)
+        except Exception:
+            shift_xy, response = [0.0, 0.0], 0.0
+        visual = mad > 3.0 or changed > 0.05 or abs(shift_xy[0]) > 2.0 or abs(shift_xy[1]) > 2.0
+        # Compact side-by-side JPEG for UI
+        try:
+            scale = min(1.0, 320.0 / max(ia.shape[1], 1))
+            if scale < 1.0:
+                ia_s = cv2.resize(ia, None, fx=scale, fy=scale)
+                ib_s = cv2.resize(ib, None, fx=scale, fy=scale)
+            else:
+                ia_s, ib_s = ia, ib
+            panel = np.hstack([ia_s, ib_s])
+            ok, buf = cv2.imencode('.jpg', panel, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
+            panel_b64 = base64.b64encode(buf.tobytes()).decode('ascii') if ok else None
+        except Exception:
+            panel_b64 = None
+        return {
+            'mean_abs_diff': round(mad, 3),
+            'frac_changed_gt15': round(changed, 5),
+            'phase_shift_xy': shift_xy,
+            'phase_response': round(response, 4),
+            'visual_change': visual,
+            'panel_data_url': (f'data:image/jpeg;base64,{panel_b64}' if panel_b64 else None),
+        }
+    except Exception as e:
+        return {'error': str(e)[:200], 'visual_change': False}
+
+
+def _snap_jpeg_b64():
+    jpeg = _grab_jpeg_bytes(max_width=640, quality=70)
+    if not jpeg:
+        return None, None
+    return jpeg, f'data:image/jpeg;base64,{base64.b64encode(jpeg).decode("ascii")}'
+
+
+@app.route('/api/ptz/self_test', methods=['POST'])
+def api_ptz_self_test():
+    """Photo + status self-test for pan and tilt.
+
+    Sequence: center → snap → pan L/R → snaps → center → tilt up/down → snaps → center.
+    Returns per-step HW deltas, image metrics, side-by-side panels, and a verdict.
+    """
+    data = request.get_json(silent=True) or {}
+    wait_s = float(data.get('wait_s', 1.8) or 1.8)
+    wait_s = max(0.8, min(4.0, wait_s))
+    pan_deg = float(data.get('pan_deg', 35) or 35)
+    tilt_deg = float(data.get('tilt_deg', 30) or 30)
+    pan_deg = max(10.0, min(60.0, abs(pan_deg)))
+    tilt_deg = max(10.0, min(50.0, abs(tilt_deg)))
+    include_photos = data.get('include_photos', True)
+
+    steps = []
+    t0 = time.time()
+
+    def _step(name, cmd_x, cmd_y, prev_jpeg=None):
+        goto = _ptz_goto_raw(cmd_x, cmd_y, wait_s=wait_s)
+        jpeg, data_url = (None, None)
+        if include_photos:
+            try:
+                jpeg, data_url = _snap_jpeg_b64()
+            except Exception as e:
+                jpeg, data_url = None, None
+                goto['photo_error'] = str(e)[:160]
+        photo_cmp = None
+        if prev_jpeg and jpeg:
+            photo_cmp = _jpeg_compare(prev_jpeg, jpeg)
+        entry = {
+            'name': name,
+            'command': goto.get('command_sent'),
+            'path': goto.get('path'),
+            'success': goto.get('success'),
+            'moved_hw': bool(goto.get('moved')),
+            'delta_deg': goto.get('delta_deg'),
+            'before': goto.get('before'),
+            'after': goto.get('after'),
+            'error': goto.get('error'),
+            'photo_data_url': data_url if include_photos else None,
+            'photo_compare': photo_cmp,
+        }
+        steps.append(entry)
+        return jpeg, entry
+
+    try:
+        # Center / baseline
+        j_base, _ = _step('baseline_center', 0, 0, None)
+        # Pan left / right
+        j_pl, _ = _step('pan_left', -pan_deg, 0, j_base)
+        j_pr, _ = _step('pan_right', pan_deg, 0, j_pl)
+        # Re-center before tilt
+        j_mid, _ = _step('recenter', 0, 0, j_pr)
+        # Tilt up / down
+        j_tu, _ = _step('tilt_up', 0, tilt_deg, j_mid)
+        j_td, _ = _step('tilt_down', 0, -min(tilt_deg, 25.0), j_tu)
+        # Final center
+        _step('final_center', 0, 0, j_td)
+    except Exception as e:
+        olog.error('ptz_self_test', f'Self-test crashed: {e}', error=str(e)[:300])
+        return jsonify({'success': False, 'error': str(e)[:300], 'steps': steps}), 500
+
+    pan_hw = any(
+        s.get('moved_hw') and s.get('name', '').startswith('pan')
+        for s in steps
+    )
+    tilt_hw = any(
+        s.get('moved_hw') and s.get('name', '').startswith('tilt')
+        for s in steps
+    )
+    # Also accept large HW span across steps even if pairwise moved failed thresholds oddly
+    pans = []
+    tilts = []
+    for s in steps:
+        a = s.get('after') or {}
+        if a.get('pan_deg') is not None:
+            try:
+                pans.append(float(a['pan_deg']))
+            except (TypeError, ValueError):
+                pass
+        if a.get('tilt_deg') is not None:
+            try:
+                tilts.append(float(a['tilt_deg']))
+            except (TypeError, ValueError):
+                pass
+    pan_span = (max(pans) - min(pans)) if pans else 0.0
+    tilt_span = (max(tilts) - min(tilts)) if tilts else 0.0
+    if pan_span > 5.0:
+        pan_hw = True
+    if tilt_span > 5.0:
+        tilt_hw = True
+
+    pan_photo = any(
+        (s.get('photo_compare') or {}).get('visual_change')
+        and s.get('name', '').startswith('pan')
+        for s in steps
+    )
+    tilt_photo = any(
+        (s.get('photo_compare') or {}).get('visual_change')
+        and s.get('name', '').startswith('tilt')
+        for s in steps
+    )
+
+    if pan_hw or pan_photo:
+        pan_result = 'pass'
+    else:
+        pan_result = 'fail'
+    if tilt_hw or tilt_photo:
+        tilt_result = 'pass'
+    else:
+        tilt_result = 'fail'
+
+    if pan_result == 'pass' and tilt_result == 'pass':
+        overall = 'both_axes_ok'
+        summary = 'Pan and tilt both show movement (HW and/or photo).'
+    elif pan_result == 'pass':
+        overall = 'pan_ok_tilt_fail'
+        summary = 'Pan moved; tilt did not — check tilt servo wiring/power/ID.'
+    elif tilt_result == 'pass':
+        overall = 'tilt_ok_pan_fail'
+        summary = 'Tilt moved; pan did not — check pan servo wiring/power/ID.'
+    else:
+        overall = 'both_axes_fail'
+        summary = (
+            'Neither pan nor tilt proved movement. Commands were sent; check bus-servo '
+            'power, daisy-chain plugs, and that the PT module is powered.'
+        )
+
+    verdict = {
+        'overall': overall,
+        'summary': summary,
+        'pan': {
+            'result': pan_result,
+            'hw_moved': pan_hw,
+            'photo_changed': pan_photo,
+            'hw_span_deg': round(pan_span, 3),
+        },
+        'tilt': {
+            'result': tilt_result,
+            'hw_moved': tilt_hw,
+            'photo_changed': tilt_photo,
+            'hw_span_deg': round(tilt_span, 3),
+        },
+        'elapsed_s': round(time.time() - t0, 2),
+        'control_mode': get_control_mode(),
+        'pan_cmd_deg': pan_deg,
+        'tilt_cmd_deg': tilt_deg,
+    }
+    olog.info(
+        'ptz_self_test',
+        f'PTZ self-test {overall}: {summary}',
+        overall=overall, pan=pan_result, tilt=tilt_result,
+        pan_span=round(pan_span, 3), tilt_span=round(tilt_span, 3),
+        elapsed_s=verdict['elapsed_s'],
+    )
+    return jsonify({
+        'success': True,
+        'verdict': verdict,
+        'steps': steps,
+    })
+
+
 @app.route('/api/logs', methods=['GET', 'POST', 'DELETE'])
 def api_logs():
     """In-app ops log ring buffer.
