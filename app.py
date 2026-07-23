@@ -3028,9 +3028,9 @@ def _seek_force_tools_on():
 
 # Triple-view nav: left / straight / right pans (degrees on T:133 X)
 _SEEK_VIEW_PANS = (
-    ('left', -70),
+    ('left', -90),
     ('straight', 0),
-    ('right', 70),
+    ('right', 90),
 )
 # Wait for HW pan feedback after each aim (not a blind sleep-only “settle”)
 _SEEK_PAN_TOL_DEG = 10.0       # |hw_pan - target| within this → arrived
@@ -3308,22 +3308,85 @@ def _parse_json_from_text(text):
     return None
 
 
+def _stitch_panorama_views(views):
+    """Stitch Left (-90°), Straight (0°), and Right (+90°) JPEGs horizontally into a single annotated 180° panoramic JPEG image for the LLM.
+    
+    views: list of view dicts [{'name': 'left'|'straight'|'right', 'jpeg': bytes, 'pan_deg': float}]
+    Returns: stitched_jpeg_bytes (or None if no images)
+    """
+    frames = []
+    have_any = False
+    for name in ('left', 'straight', 'right'):
+        v = next((item for item in views if item.get('name') == name), None)
+        jpeg = v.get('jpeg') if (isinstance(v, dict) and v.get('jpeg')) else None
+        img = None
+        if jpeg:
+            try:
+                arr = np.frombuffer(jpeg, np.uint8)
+                img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+                if img is not None:
+                    have_any = True
+            except Exception:
+                img = None
+
+        if img is None:
+            img = np.zeros((240, 320, 3), dtype=np.uint8)
+            cv2.putText(img, f'{name.upper()} (N/A)', (60, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (120, 120, 120), 1)
+
+        # Standardize size for horizontal concatenation
+        img = cv2.resize(img, (320, 240))
+
+        # Add section title banner
+        banner_text = 'LEFT (-90°)' if name == 'left' else ('CENTRE (0°)' if name == 'straight' else 'RIGHT (+90°)')
+        cv2.rectangle(img, (0, 0), (320, 24), (18, 20, 26), -1)
+        cv2.putText(img, banner_text, (8, 16), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 230, 255), 1, cv2.LINE_AA)
+        cv2.line(img, (319, 0), (319, 240), (50, 50, 65), 2)
+        frames.append(img)
+
+    if not have_any:
+        return None
+
+    # Concatenate horizontally into a 960x240 panorama
+    panorama = cv2.hconcat(frames)
+
+    # Encode as JPEG
+    ok, buf = cv2.imencode('.jpg', panorama, [int(cv2.IMWRITE_JPEG_QUALITY), 75])
+    if ok:
+        return buf.tobytes()
+    return None
+
+
 def _seek_unified_llm_analysis(current_views, prev_forward_jpeg, goal_label):
-    """Perform single unified LLM query to answer all 4 seek questions in one go:
-    a. Is the goal in the image?
+    """Single unified LLM query passing a stitched 180° panorama (Left -90°, Centre 0°, Right +90°)
+    plus previous forward view to answer all 4 seek questions in one go:
+    a. Is the goal in the panorama?
     b. Is the path forward clear?
     c. Is the current forward view identical to previous forward view (stuck detection)?
     d. Which direction to continue in (left/right/forward/backward)?
     """
+    stitched_jpeg = _stitch_panorama_views(current_views)
+    if not stitched_jpeg:
+        return {
+            'goal_found': False,
+            'goal_found_view': None,
+            'path_forward_clear': True,
+            'is_identical_to_previous': False,
+            'recommended_direction': 'forward',
+            'drive_distance': 'short',
+            'reason': 'no camera images captured'
+        }
+
     user_content = [
         {
             'type': 'text',
             'text': (
                 f'Target object to seek: "{goal_label}".\n'
-                'Analyze the provided camera view(s) to answer all of the following questions in a single JSON response:\n'
-                'a. Is the target object clearly visible in any of the current views?\n'
-                'b. Is the path directly in front clear and safe for driving forward?\n'
-                'c. Is the current forward view identical/unchanged compared to the previous forward view (indicating the robot is stuck facing a wall/obstacle)?\n'
+                'You are given a stitched 180° panoramic camera view of the robot\'s surroundings with 3 sections:\n'
+                'LEFT (-90°) | CENTRE (0°) | RIGHT (+90°).\n\n'
+                'Analyze the panorama to answer all of the following questions in a single JSON response:\n'
+                'a. Is the target object clearly visible in any section of the panorama?\n'
+                'b. Is the path directly in front (CENTRE 0° section) clear and safe for driving forward?\n'
+                'c. Is the current CENTRE (0°) section identical/unchanged compared to the previous forward view (indicating the robot is stuck facing a wall/obstacle)?\n'
                 'd. Which direction should the robot drive next (forward|left|right|backward) and at what distance (short|medium|long)?\n\n'
                 'Respond strictly in JSON format with schema:\n'
                 '{\n'
@@ -3344,32 +3407,12 @@ def _seek_unified_llm_analysis(current_views, prev_forward_jpeg, goal_label):
         user_content.append({'type': 'text', 'text': 'PREVIOUS FORWARD VIEW (from previous nav check):'})
         user_content.append({'type': 'image_url', 'image_url': {'url': f'data:image/jpeg;base64,{b64_prev}'}})
 
-    have_any = False
-    for v in current_views:
-        jpeg = v.get('jpeg')
-        name = (v.get('name') or 'view').upper()
-        pan = v.get('pan_deg', 0.0)
-        user_content.append({'type': 'text', 'text': f'CURRENT {name} VIEW (pan≈{pan}°):'})
-        if jpeg:
-            have_any = True
-            b64 = base64.b64encode(jpeg).decode('ascii')
-            user_content.append({'type': 'image_url', 'image_url': {'url': f'data:image/jpeg;base64,{b64}'}})
-        else:
-            user_content.append({'type': 'text', 'text': '(capture failed)'})
-
-    if not have_any:
-        return {
-            'goal_found': False,
-            'goal_found_view': None,
-            'path_forward_clear': True,
-            'is_identical_to_previous': False,
-            'recommended_direction': 'forward',
-            'drive_distance': 'short',
-            'reason': 'no camera images captured'
-        }
+    b64_pano = base64.b64encode(stitched_jpeg).decode('ascii')
+    user_content.append({'type': 'text', 'text': 'CURRENT 180° STITCHED PANORAMA [LEFT (-90°) | CENTRE (0°) | RIGHT (+90°)]:'})
+    user_content.append({'type': 'image_url', 'image_url': {'url': f'data:image/jpeg;base64,{b64_pano}'}})
 
     messages = [
-        {'role': 'system', 'content': 'You are an AI pilot for an autonomous mobile robot. Output JSON only.'},
+        {'role': 'system', 'content': 'You are an autonomous mobile robot pilot. Analyze panoramic vision data and output JSON only.'},
         {'role': 'user', 'content': user_content}
     ]
 
@@ -3514,74 +3557,44 @@ def _seek_loop(ctrl, label, conf, max_steps, timeout_s):
                 if is_calc_step:
                     ctrl.update(
                         step=step,
-                        seek_phase='nav_decide',
-                        message=f'Step {step}/{steps_label}: Single-query LLM analyzing scene & goal…'
+                        seek_phase='triple_scan',
+                        message=f'Step {step}/{steps_label}: Capturing Left, Centre & Right views for LLM Scene Nav…'
                     )
-                    # 1) Capture forward photo
-                    _seek_look_deg(0.0, 0.0, wait_hw=True, should_stop=ctrl.should_stop)
-                    straight_jpeg = _seek_grab_jpeg()
+                    views_to_analyze, found_det = _seek_capture_triple_views(
+                        ctrl, step, steps_label, goal_label=label, conf_threshold=conf, referee=referee
+                    )
                     
-                    # On-device detector referee check first (if detector referee)
-                    chk_det = None
-                    if referee == REFEREE_DETECTOR:
-                        chk_det = seek_goal_check(label, referee=REFEREE_DETECTOR, conf_threshold=conf, jpeg=straight_jpeg)
-                        if chk_det.get('found'):
-                            _seek_run_on_found(ctrl, label)
-                            _halt('found', message=f'Found {label} via detector at step {step}', step=step, last_detection=chk_det)
-                            return
+                    if referee == REFEREE_DETECTOR and found_det and found_det.get('found'):
+                        _seek_run_on_found(ctrl, label)
+                        _halt('found', message=f'Found {label} via detector at step {step}', step=step, last_detection=found_det)
+                        return
 
-                    # Prepare forward view
-                    b64_straight = base64.b64encode(straight_jpeg).decode('ascii') if straight_jpeg else ''
-                    straight_view = {
-                        'name': 'straight', 'pan_deg': 0.0, 'bytes': len(straight_jpeg) if straight_jpeg else 0,
-                        'data_url': f'data:image/jpeg;base64,{b64_straight}' if b64_straight else '',
-                        'has_target': bool(chk_det and chk_det.get('found')),
-                        'detected_labels': chk_det.get('labels_found') if chk_det else [],
-                        'jpeg': straight_jpeg,
-                    }
+                    ctrl.update(
+                        last_views=[{
+                            'name': v['name'], 'pan_deg': v['pan_deg'], 'bytes': v['bytes'],
+                            'data_url': v.get('data_url'), 'has_target': v.get('has_target'),
+                            'detected_labels': v.get('detected_labels', []),
+                        } for v in views_to_analyze]
+                    )
 
-                    views_to_analyze = [straight_view]
+                    straight_v = next((v for v in views_to_analyze if v.get('name') == 'straight'), None)
+                    straight_jpeg = straight_v.get('jpeg') if straight_v else None
 
-                    # Perform single unified LLM query
                     analysis = _seek_unified_llm_analysis(views_to_analyze, prev_center_jpeg, label)
                     
-                    # If referee is LLM and unified query detected goal, or detector found goal:
-                    if (referee == REFEREE_LLM and analysis.get('goal_found')) or (chk_det and chk_det.get('found')):
-                        found_v = analysis.get('goal_found_view') or 'straight'
-                        straight_view['has_target'] = True
-                        res_check = chk_det or {
+                    if (referee == REFEREE_LLM and analysis.get('goal_found')) or (found_det and found_det.get('found')):
+                        found_v = analysis.get('goal_found_view') or (found_det.get('found_view') if found_det else 'straight')
+                        for v in views_to_analyze:
+                            if v.get('name') == found_v:
+                                v['has_target'] = True
+                        res_check = found_det or {
                             'found': True, 'goal_label': label, 'referee': REFEREE_LLM,
                             'reason': analysis.get('reason') or 'LLM unified query identified goal',
                             'found_view': found_v
                         }
                         _seek_run_on_found(ctrl, label)
-                        _halt('found', message=f'Found {label} via {referee} at step {step}', step=step, last_detection=res_check)
+                        _halt('found', message=f'Found {label} via {referee} at step {step} ({found_v} view)', step=step, last_detection=res_check)
                         return
-
-                    # Check if forward is blocked -> if so, capture Left and Right views for side decision
-                    if not analysis.get('path_forward_clear') and not analysis.get('is_identical_to_previous'):
-                        ctrl.update(message=f'Step {step}/{steps_label}: Forward blocked! Capturing Left & Right views…')
-                        _seek_look_deg(-70.0, 0.0, wait_hw=True, should_stop=ctrl.should_stop)
-                        left_jpeg = _seek_grab_jpeg()
-                        b64_l = base64.b64encode(left_jpeg).decode('ascii') if left_jpeg else ''
-                        left_view = {
-                            'name': 'left', 'pan_deg': -70.0, 'bytes': len(left_jpeg) if left_jpeg else 0,
-                            'data_url': f'data:image/jpeg;base64,{b64_l}' if b64_l else '',
-                            'has_target': False, 'detected_labels': [], 'jpeg': left_jpeg
-                        }
-
-                        _seek_look_deg(70.0, 0.0, wait_hw=True, should_stop=ctrl.should_stop)
-                        right_jpeg = _seek_grab_jpeg()
-                        b64_r = base64.b64encode(right_jpeg).decode('ascii') if right_jpeg else ''
-                        right_view = {
-                            'name': 'right', 'pan_deg': 70.0, 'bytes': len(right_jpeg) if right_jpeg else 0,
-                            'data_url': f'data:image/jpeg;base64,{b64_r}' if b64_r else '',
-                            'has_target': False, 'detected_labels': [], 'jpeg': right_jpeg
-                        }
-                        _seek_look_deg(0.0, 0.0, wait_hw=True, should_stop=ctrl.should_stop)
-
-                        views_to_analyze = [left_view, straight_view, right_view]
-                        analysis = _seek_unified_llm_analysis(views_to_analyze, prev_center_jpeg, label)
 
                     raw_dir = analysis.get('recommended_direction') or 'forward'
                     if raw_dir == 'left':
@@ -3601,11 +3614,6 @@ def _seek_loop(ctrl, label, conf, max_steps, timeout_s):
                     prev_center_jpeg = straight_jpeg
                     cached_nav = {'action': action, 'drive_distance': dist, 'reason': reason}
                     ctrl.update(
-                        last_views=[{
-                            'name': v['name'], 'pan_deg': v['pan_deg'], 'bytes': v['bytes'],
-                            'data_url': v.get('data_url'), 'has_target': v.get('has_target'),
-                            'detected_labels': v.get('detected_labels', []),
-                        } for v in views_to_analyze],
                         last_nav=cached_nav,
                         last_llm_reply=reason[:500],
                         message=f'Step {step}/{steps_label}: Single-query Nav -> {action} ({dist}) — {reason[:60]}',
