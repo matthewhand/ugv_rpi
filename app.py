@@ -679,7 +679,13 @@ def api_ptz():
         return jsonify(snap)
 
     data = request.get_json(silent=True) or {}
-    action = (data.get('action') or 'status').strip().lower()
+    action = data.get('action')
+    if not action:
+        if any(k in data for k in ('x', 'X', 'pan', 'y', 'Y', 'tilt')):
+            action = 'goto'
+        else:
+            action = 'status'
+    action = str(action).strip().lower()
     if action in ('status', 'read', 'query'):
         return jsonify(_ptz_status_snapshot(request_feedback=True))
     if action in ('feedback',):
@@ -809,9 +815,15 @@ def _grab_jpeg_bytes(max_width=640, quality=70):
     return buf.tobytes()
 
 _AI_SYSTEM_PROMPT = (
-    "You are a helpful vision assistant on a Waveshare UGV rover. "
+    "You are a vision-capable scout on a Waveshare UGV rover with a forward camera. "
     "When an image is attached, describe what you see clearly and briefly. "
-    "Use tools when they are available to you."
+    "Use tools when available: get_cv_detections for MobileNet-SSD labels (includes dog, person, cat, …), "
+    "send_motor_command for short timed drives, send_gimbal_command to look around, stop_motors for safety. "
+    "For search tasks: (1) inspect the current view / run detection, (2) if the target is missing drive "
+    "forward in short steps (duration_ms 800–1500, linear_x ~0.12–0.2) down open hallways, "
+    "(3) re-check with get_cv_detections after each move, (4) stop when the target is found or the path is blocked. "
+    "Do not claim you cannot see or move if the matching tools are listed as callable. "
+    "Prefer several short moves over one long continuous drive."
 )
 
 # Toggle tree: groups + leaf tools. Persisted under ugv_rpi/.ai_capabilities.json
@@ -1595,15 +1607,22 @@ def _openai_tools_for_agent():
             'function': {
                 'name': 'get_cv_detections',
                 'description': (
-                    'Run on-board MobileNet-SSD object detection on the live camera. '
-                    'Returns labels, confidences, and normalized bounding boxes [x1,y1,x2,y2].'
+                    'Run on-board MobileNet-SSD on the live camera. Returns labels, confidences, '
+                    'normalized bboxes [x1,y1,x2,y2], and center_x/center_y (0–1, image coords). '
+                    'Useful labels include dog, person, cat, chair, bottle, … Use conf_threshold '
+                    '0.15–0.25 when searching; raise to 0.4+ to reduce false positives. '
+                    'Optional filter_label (e.g. \"dog\") keeps only that class.'
                 ),
                 'parameters': {
                     'type': 'object',
                     'properties': {
                         'conf_threshold': {
                             'type': 'number',
-                            'description': 'Minimum confidence 0-1 (default 0.25)',
+                            'description': 'Minimum confidence 0-1 (default 0.18 for search)',
+                        },
+                        'filter_label': {
+                            'type': 'string',
+                            'description': 'If set, only return this label (case-insensitive), e.g. dog',
                         },
                     },
                 },
@@ -1662,26 +1681,49 @@ def _execute_agent_tool(name, arguments):
 
     if name == 'get_cv_detections':
         try:
-            conf = float(args.get('conf_threshold', 0.25))
+            conf = float(args.get('conf_threshold', 0.18))
             conf = max(0.05, min(0.95, conf))
+            filter_label = (args.get('filter_label') or args.get('label') or '').strip().lower()
             frame = cvf.grab_bgr_frame()
             if frame is None:
-                dets = getattr(cvf, 'last_detections', []) or []
-                return {
-                    'ok': bool(dets),
-                    'engine': 'mobilenet-ssd',
-                    'detections': dets,
-                    'count': len(dets),
-                    'warning': 'live frame unavailable; returning last_detections if any',
-                }
-            dets = cvf.detect_objects_structured(frame, conf_threshold=conf)
-            return {
+                dets = list(getattr(cvf, 'last_detections', []) or [])
+                warning = 'live frame unavailable; returning last_detections if any'
+            else:
+                dets = cvf.detect_objects_structured(frame, conf_threshold=conf)
+                warning = None
+            # Enrich with centers for steering; optional class filter
+            enriched = []
+            for d in dets:
+                if not isinstance(d, dict):
+                    continue
+                lab = (d.get('label') or '').lower()
+                if filter_label and lab != filter_label:
+                    continue
+                bb = d.get('bbox_norm') or d.get('bbox') or [0, 0, 0, 0]
+                try:
+                    x1, y1, x2, y2 = [float(v) for v in bb[:4]]
+                except (TypeError, ValueError):
+                    x1 = y1 = x2 = y2 = 0.0
+                item = dict(d)
+                item['center_x'] = round((x1 + x2) / 2.0, 3)
+                item['center_y'] = round((y1 + y2) / 2.0, 3)
+                # +center_x = target right of image center → turn right to face it
+                item['offset_x'] = round(item['center_x'] - 0.5, 3)
+                enriched.append(item)
+            labels = sorted({(d.get('label') or '') for d in enriched if d.get('label')})
+            out = {
                 'ok': True,
                 'engine': 'mobilenet-ssd',
                 'conf_threshold': conf,
-                'detections': dets,
-                'count': len(dets),
+                'filter_label': filter_label or None,
+                'detections': enriched,
+                'count': len(enriched),
+                'labels_found': labels,
+                'found_dog': any(l.lower() == 'dog' for l in labels),
             }
+            if warning:
+                out['warning'] = warning
+            return out
         except Exception as e:
             return {'ok': False, 'error': str(e), 'tool': name}
 
@@ -2220,11 +2262,20 @@ def api_ai_chat():
     if inactive:
         system += f"Unavailable (do not claim you have these): {', '.join(inactive)}. "
     if any(n in active for n in ('send_motor_command', 'stop_motors')):
-        system += "Prefer short timed moves (duration_ms 500–2000). Call stop_motors if unsure."
+        system += (
+            "Prefer short timed moves (duration_ms 800–1500, linear_x 0.12–0.2). "
+            "After each drive, re-check with get_cv_detections before moving again. "
+            "Call stop_motors if unsure or when done."
+        )
     elif any(n in inactive for n in ('send_motor_command', 'stop_motors')):
         system += (
             "Motion is unavailable; tell the user to toggle Control to Direct serial, "
             "or enable ROS 2 mode with rosbridge + ugv_bringup."
+        )
+    if 'get_cv_detections' in active:
+        system += (
+            " get_cv_detections: use filter_label when hunting a class (e.g. dog); "
+            "center_x/offset_x help aim (offset_x>0 means target is to the right)."
         )
 
     snapshot_data_url = None
@@ -2309,6 +2360,253 @@ def api_ai_chat():
         'tool_calls': tool_trace,
         'motion_backend': backend,
     })
+
+
+# ---------- Seek mode: LLM steers, OpenCV judges goal ----------
+from ai_seek import (
+    seek_controller,
+    parse_seek_goal,
+    evaluate_goal_detections,
+    DEFAULT_SEEK_MAX_STEPS,
+    DEFAULT_SEEK_TIMEOUT_S,
+    DEFAULT_SEEK_CONF,
+    DEFAULT_SEEK_STEP_PAUSE_S,
+)
+
+_SEEK_SYSTEM = (
+    "You are a seek pilot on a UGV rover. Move the robot so the forward camera can see the target class. "
+    "OpenCV (not you) decides when the target is found — never claim success. "
+    "CRITICAL: You MUST call tools on every turn. Prefer function/tool calls over prose. "
+    "Each turn: call send_motor_command and optionally send_gimbal_command, then one short line of plan. "
+    "Prefer short timed drives (duration_ms 800–1500, linear_x 0.12–0.18). "
+    "If the path looks open, drive forward; otherwise turn slightly (angular_z ±0.4). "
+    "Do not write long analysis. Do not invent detections."
+)
+
+
+def opencv_goal_check(goal_label, conf_threshold=DEFAULT_SEEK_CONF, frame=None):
+    """Shipped OpenCV goal oracle used by Seek (and tests).
+
+    Runs MobileNet-SSD on a live or provided BGR frame, then evaluate_goal_detections.
+    """
+    if frame is None:
+        frame = cvf.grab_bgr_frame()
+    dets = []
+    if frame is not None:
+        dets = cvf.detect_objects_structured(frame, conf_threshold=float(conf_threshold))
+    else:
+        dets = list(getattr(cvf, 'last_detections', []) or [])
+    result = evaluate_goal_detections(dets, goal_label, conf_threshold=conf_threshold)
+    result['frame_ok'] = frame is not None
+    return result
+
+
+def _seek_force_tools_on():
+    """Ensure CV + motion tools are offered during Seek."""
+    try:
+        _set_capabilities({
+            'group_computer_vision': True,
+            'get_cv_detections': True,
+            'get_camera_snapshot': True,
+            'group_ros2_motion': True,
+            'send_motor_command': True,
+            'stop_motors': True,
+            'send_gimbal_command': True,
+        })
+    except Exception as e:
+        olog.warn('ai_seek', f'Could not enable seek tools: {e}', error=str(e)[:200])
+
+
+def _seek_fallback_drive(reason=''):
+    """Deterministic short move when LLM is down or skipped tools."""
+    args = {'linear_x': 0.15, 'angular_z': 0.35 if (int(time.time()) % 2) else -0.35, 'duration_ms': 900}
+    try:
+        res = _execute_agent_tool('send_motor_command', args)
+        return [{
+            'name': 'send_motor_command',
+            'arguments': args,
+            'result': res if isinstance(res, dict) else {'ok': True, 'fallback': True, 'reason': reason},
+        }], f'fallback drive ({reason or "no tools"})'
+    except Exception as e:
+        return [], f'fallback failed: {e}'
+
+
+def _seek_loop(ctrl, label, conf, max_steps, timeout_s):
+    """Background Seek loop: detect → maybe found → LLM motion step → repeat."""
+    t0 = time.time()
+
+    def _halt(phase, message, step=0, **kwargs):
+        try:
+            _execute_agent_tool('stop_motors', {})
+        except Exception:
+            pass
+        ctrl.finish(phase, message=message, step=step, **kwargs)
+
+    try:
+        _seek_force_tools_on()
+        history = []
+        for step in range(1, int(max_steps) + 1):
+            if ctrl.should_stop():
+                _halt('stopped', 'Stopped by user', step=step - 1)
+                return
+            if time.time() - t0 >= float(timeout_s):
+                _halt('timeout', f'Timeout after {timeout_s}s', step=step - 1)
+                return
+
+            # OpenCV goal check (authority)
+            check = opencv_goal_check(label, conf_threshold=conf)
+            ctrl.update(
+                step=step,
+                last_detection=check,
+                message=f'Step {step}/{max_steps}: scanning for {label}…',
+            )
+            if check.get('found'):
+                best = check.get('best') or {}
+                _halt(
+                    'found',
+                    message=(
+                        f'Found {label} (conf={best.get("confidence", "?")}) '
+                        f'at step {step}'
+                    ),
+                    step=step,
+                    last_detection=check,
+                )
+                olog.info('ai_seek', f'Seek found {label} at step {step}', goal=label, step=step)
+                return
+
+            # LLM one tool-using turn (steer only)
+            det_summary = {
+                'goal': label,
+                'step': step,
+                'max_steps': max_steps,
+                'labels_seen': check.get('labels_found') or [],
+                'all_count': check.get('all_count', 0),
+                'note': 'Target not found yet by OpenCV. Issue a short drive or look.',
+            }
+            user_line = (
+                f"Seeking class '{label}'. OpenCV has NOT found it yet. "
+                f"Detections summary: {json.dumps(det_summary)}. "
+                f"MUST call send_motor_command now (optional send_gimbal_command), then one-line plan."
+            )
+            messages = [
+                {'role': 'system', 'content': _SEEK_SYSTEM},
+            ]
+            # Keep short history; long monologues poison the next turn
+            for h in history[-4:]:
+                hh = dict(h)
+                if isinstance(hh.get('content'), str) and len(hh['content']) > 400:
+                    hh['content'] = hh['content'][:400] + '…'
+                messages.append(hh)
+            messages.append({'role': 'user', 'content': user_line})
+            tool_trace = []
+            reply = ''
+            try:
+                content, _raw, _cfg, tool_trace = _run_agent_loop(messages, max_rounds=2)
+                reply = (content or '')[:500]
+                tool_trace = tool_trace or []
+            except Exception as e:
+                olog.warn('ai_seek', f'LLM step failed: {e}', error=str(e)[:200], step=step)
+                tool_trace, reply = _seek_fallback_drive(str(e)[:80])
+                if not tool_trace:
+                    _halt('failed', f'LLM and fallback failed: {reply}', step=step, error=reply[:300])
+                    return
+
+            # Honor stop ASAP after blocking LLM call
+            if ctrl.should_stop():
+                _halt('stopped', 'Stopped by user', step=step, last_llm_reply=reply[:500], last_tools=tool_trace)
+                return
+
+            if not tool_trace:
+                tool_trace, fb = _seek_fallback_drive('no tool calls')
+                reply = (reply + ' | ' + fb).strip(' |') if reply else fb
+
+            history.append({'role': 'user', 'content': user_line})
+            history.append({'role': 'assistant', 'content': reply[:400]})
+            ctrl.update(
+                last_llm_reply=reply[:500],
+                last_tools=tool_trace,
+                message=f'Step {step}/{max_steps}: moved; re-scanning…',
+                history=list(history[-6:]),
+            )
+            # Cooperative cancel during pause
+            for _ in range(int(DEFAULT_SEEK_STEP_PAUSE_S / 0.1) or 1):
+                if ctrl.should_stop():
+                    _halt('stopped', 'Stopped by user', step=step)
+                    return
+                time.sleep(0.1)
+
+        # Final detection after last step
+        check = opencv_goal_check(label, conf_threshold=conf)
+        if check.get('found'):
+            best = check.get('best') or {}
+            _halt(
+                'found',
+                message=f'Found {label} after final step (conf={best.get("confidence", "?")})',
+                step=max_steps,
+                last_detection=check,
+            )
+        else:
+            _halt(
+                'timeout',
+                message=f'Gave up after {max_steps} steps without OpenCV match for {label}',
+                step=max_steps,
+                last_detection=check,
+            )
+    except Exception as e:
+        olog.error('ai_seek', f'Seek loop crashed: {e}', error=str(e)[:300])
+        try:
+            _execute_agent_tool('stop_motors', {})
+        except Exception:
+            pass
+        ctrl.finish('failed', message=str(e)[:300], error=str(e)[:300])
+
+
+@app.route('/api/ai/seek/start', methods=['POST'])
+def api_ai_seek_start():
+    data = request.get_json(silent=True) or {}
+    goal = data.get('goal') or data.get('target') or data.get('label') or ''
+    max_steps = int(data.get('max_steps') or DEFAULT_SEEK_MAX_STEPS)
+    max_steps = max(1, min(40, max_steps))
+    timeout_s = float(data.get('timeout_s') or DEFAULT_SEEK_TIMEOUT_S)
+    timeout_s = max(5.0, min(600.0, timeout_s))
+    conf = float(data.get('conf_threshold') or DEFAULT_SEEK_CONF)
+    conf = max(0.05, min(0.95, conf))
+    result = seek_controller.start(
+        goal,
+        loop_fn=_seek_loop,
+        max_steps=max_steps,
+        timeout_s=timeout_s,
+        conf_threshold=conf,
+    )
+    code = 200 if result.get('success') else 400
+    if result.get('success'):
+        olog.info('ai_seek', f'Seek started for {result.get("status", {}).get("goal_label")}', goal=goal)
+    return jsonify(result), code
+
+
+@app.route('/api/ai/seek/status', methods=['GET'])
+def api_ai_seek_status():
+    return jsonify({'success': True, 'status': seek_controller.status()})
+
+
+@app.route('/api/ai/seek/stop', methods=['POST'])
+def api_ai_seek_stop():
+    st = seek_controller.stop()
+    olog.info('ai_seek', 'Seek stop requested', phase=st.get('phase'))
+    return jsonify({'success': True, 'status': seek_controller.status()})
+
+
+@app.route('/api/ai/seek/check', methods=['POST'])
+def api_ai_seek_check():
+    """One-shot OpenCV goal check (no motion). Body: {goal|label, conf_threshold?}."""
+    data = request.get_json(silent=True) or {}
+    goal = data.get('goal') or data.get('label') or ''
+    label, err = parse_seek_goal(goal)
+    if err:
+        return jsonify({'success': False, 'error': err}), 400
+    conf = float(data.get('conf_threshold') or DEFAULT_SEEK_CONF)
+    check = opencv_goal_check(label, conf_threshold=conf)
+    return jsonify({'success': True, 'goal_label': label, 'check': check})
 
 
 @app.route('/api/ai/motion_status', methods=['GET'])

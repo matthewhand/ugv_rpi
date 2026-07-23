@@ -11,6 +11,41 @@
     </style>
   </head>
 <body>
+
+    <nav class="ugv-navbar" id="ugv-navbar" aria-label="Global controls">
+      <span class="nav-brand">UGV Control</span>
+      <div class="ugv-mode-tabs" role="tablist" aria-label="App mode">
+        <button type="button" role="tab" data-mode="raw" class="active" id="mode-tab-raw" aria-selected="true">Raw</button>
+        <button type="button" role="tab" data-mode="chat" id="mode-tab-chat" aria-selected="false">Chat</button>
+        <button type="button" role="tab" data-mode="seek" id="mode-tab-seek" aria-selected="false">Seek</button>
+      </div>
+      <div class="ugv-nav-toggles" id="ugv-nav-toggles">
+        <button id="rtsp-toggle-btn" class="normal_btn" onclick="toggleRTSP()" style="padding: 6px 12px; font-size: 12px; background: #222; color: #ff5555; border: 1px solid #555; border-radius: 4px; cursor: pointer;">RTSP Stream: OFF</button>
+        <button id="motor-toggle-btn" class="normal_btn" onclick="toggleMotors()" style="padding: 6px 12px; font-size: 12px; background: #222; color: #5b8cff; border: 1px solid #555; border-radius: 4px; cursor: pointer;" title="Toggle routing for chassis + pan/tilt: Direct serial (UART) or ROS 2 relay (rosbridge).">Control: ROS 2 relay</button>
+        <button id="chassis-heartbeat-btn" class="normal_btn" onclick="toggleChassisHeartbeat()" style="padding: 6px 12px; font-size: 12px; background: #222; color: #ffaa55; border: 1px solid #555; border-radius: 4px; cursor: pointer;" title="Every 2s the UI re-sends last wheel cmd (idle = stop). Turn OFF for AI timed drives so the heartbeat does not cut them short.">Freq. stop: ON</button>
+        <button id="esp32-wifi-btn" class="normal_btn" onclick="toggleEsp32Wifi()" style="padding: 6px 12px; font-size: 12px; background: #222; color: #ffaa55; border: 1px solid #555; border-radius: 4px; cursor: pointer;" title="Session-only: send serial T:408 to stop ESP32 WiFi (SoftAP UGV). Does NOT change boot config — AP returns after ESP32 reboot. Never uses T:401 (persistent off).">ESP32 WiFi: on?</button>
+        <button type="button" id="ops-log-btn" class="normal_btn" onclick="toggleOpsLogPane()" style="padding: 6px 12px; font-size: 12px; background: #222; color: #c4b5fd; border: 1px solid #555; border-radius: 4px; cursor: pointer;" title="Show operational app log (control mode, WiFi, AI motion, errors).">App log</button>
+        <a href="/ai" target="_blank" class="normal_btn" style="padding: 6px 12px; font-size: 12px; background: #222; color: #5b8cff; border: 1px solid #5b8cff; border-radius: 4px; text-decoration: none;">Full AI page ↗</a>
+        <a href="/3d" target="_blank" class="normal_btn" style="padding: 6px 12px; font-size: 12px; background: #1f2538; color: #5b8cff; border: 1px solid #5b8cff; border-radius: 4px; text-decoration: none; font-weight: 600;">3D Twin</a>
+      </div>
+    </nav>
+
+    <div id="mode-restart-banner" style="display:none; margin: 0 10px 10px; padding: 10px 12px; border-radius: 8px; border: 1px solid #e0b35a; background: #2a2210; color: #f5e6c8; font-size: 12px; line-height: 1.45; max-width: 720px; margin-left: auto; margin-right: auto;">
+      <div style="display:flex; gap:10px; align-items:flex-start; flex-wrap:wrap;">
+        <div style="flex:1; min-width:200px;">
+          <strong id="mode-restart-title" style="color:#fbbf24;">⚠ Restart recommended</strong>
+          <div id="mode-restart-reason" style="margin-top:4px;"></div>
+          <div id="mode-restart-detail" style="margin-top:4px; color:#c4b59a; font-size:11px;"></div>
+          <div id="mode-restart-status" style="margin-top:6px; color:#9aa3b2; font-size:11px;"></div>
+        </div>
+        <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+          <button type="button" id="mode-restart-btn" class="normal_btn" onclick="runStackRestart()" style="padding: 8px 12px; font-size: 12px; background: #3d2e0a; color: #fbbf24; border: 1px solid #e0b35a; border-radius: 4px; cursor: pointer; font-weight: 700;">Restart ROS container</button>
+          <button type="button" class="normal_btn" onclick="dismissModeRestartBanner()" style="padding: 8px 12px; font-size: 12px; background: #222; color: #9aa3b2; border: 1px solid #555; border-radius: 4px; cursor: pointer;">Dismiss</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="mode-panel-raw" class="mode-panel active" role="tabpanel" aria-labelledby="mode-tab-raw">
     <main>
         <div class="box1">
             <section class="section_video box_outline">
@@ -103,29 +138,7 @@
                         </div>
                     </div>
                 </div>
-                <div style="display: flex; gap: 10px; margin: 10px 0; justify-content: center; flex-wrap: wrap;">
-                    <button id="rtsp-toggle-btn" class="normal_btn" onclick="toggleRTSP()" style="padding: 6px 12px; font-size: 12px; background: #222; color: #ff5555; border: 1px solid #555; border-radius: 4px; cursor: pointer;">RTSP Stream: OFF</button>
-                    <button id="motor-toggle-btn" class="normal_btn" onclick="toggleMotors()" style="padding: 6px 12px; font-size: 12px; background: #222; color: #5b8cff; border: 1px solid #555; border-radius: 4px; cursor: pointer;" title="Toggle routing for chassis + pan/tilt: Direct serial (UART) or ROS 2 relay (rosbridge).">Control: ROS 2 relay</button>
-                    <button id="chassis-heartbeat-btn" class="normal_btn" onclick="toggleChassisHeartbeat()" style="padding: 6px 12px; font-size: 12px; background: #222; color: #ffaa55; border: 1px solid #555; border-radius: 4px; cursor: pointer;" title="Every 2s the UI re-sends last wheel cmd (idle = stop). Turn OFF for AI timed drives so the heartbeat does not cut them short.">Freq. stop: ON</button>
-                    <button id="esp32-wifi-btn" class="normal_btn" onclick="toggleEsp32Wifi()" style="padding: 6px 12px; font-size: 12px; background: #222; color: #ffaa55; border: 1px solid #555; border-radius: 4px; cursor: pointer;" title="Session-only: send serial T:408 to stop ESP32 WiFi (SoftAP UGV). Does NOT change boot config — AP returns after ESP32 reboot. Never uses T:401 (persistent off).">ESP32 WiFi: on?</button>
-                    <button type="button" id="ops-log-btn" class="normal_btn" onclick="toggleOpsLogPane()" style="padding: 6px 12px; font-size: 12px; background: #222; color: #c4b5fd; border: 1px solid #555; border-radius: 4px; cursor: pointer;" title="Show operational app log (control mode, WiFi, AI motion, errors).">App log</button>
-                    <button type="button" id="ai-open-btn" class="normal_btn" style="padding: 6px 14px; font-size: 12px; background: #1a3a2a; color: #3dd68c; border: 1px solid #3dd68c; border-radius: 4px; cursor: pointer; font-weight: 700;">AI Vision Chat ▾</button>
-                    <a href="/ai" target="_blank" class="normal_btn" style="padding: 6px 12px; font-size: 12px; background: #222; color: #5b8cff; border: 1px solid #5b8cff; border-radius: 4px; text-decoration: none;">Full AI page ↗</a>
-                </div>
-                <div id="mode-restart-banner" style="display:none; margin: 0 10px 10px; padding: 10px 12px; border-radius: 8px; border: 1px solid #e0b35a; background: #2a2210; color: #f5e6c8; font-size: 12px; line-height: 1.45; max-width: 720px; margin-left: auto; margin-right: auto;">
-                    <div style="display:flex; gap:10px; align-items:flex-start; flex-wrap:wrap;">
-                        <div style="flex:1; min-width:200px;">
-                            <strong id="mode-restart-title" style="color:#fbbf24;">⚠ Restart recommended</strong>
-                            <div id="mode-restart-reason" style="margin-top:4px;"></div>
-                            <div id="mode-restart-detail" style="margin-top:4px; color:#c4b59a; font-size:11px;"></div>
-                            <div id="mode-restart-status" style="margin-top:6px; color:#9aa3b2; font-size:11px;"></div>
-                        </div>
-                        <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
-                            <button type="button" id="mode-restart-btn" class="normal_btn" onclick="runStackRestart()" style="padding: 8px 12px; font-size: 12px; background: #3d2e0a; color: #fbbf24; border: 1px solid #e0b35a; border-radius: 4px; cursor: pointer; font-weight: 700;">Restart ROS container</button>
-                            <button type="button" class="normal_btn" onclick="dismissModeRestartBanner()" style="padding: 8px 12px; font-size: 12px; background: #222; color: #9aa3b2; border: 1px solid #555; border-radius: 4px; cursor: pointer;">Dismiss</button>
-                        </div>
-                    </div>
-                </div>
+                <!-- global toggles + restart banner live in #ugv-navbar chrome -->
                 <div>
                     <div class="controller">
                         <div class="ctl9_middle">
@@ -332,6 +345,65 @@
             </section>
         </div>
     </main>
+    </div><!-- /mode-panel-raw -->
+
+    <div id="mode-panel-chat" class="mode-panel" role="tabpanel" aria-labelledby="mode-tab-chat" hidden>
+      <div class="mode-panel-chat">
+        <div class="ugv-chat-layout">
+          <div class="ugv-panel-card">
+            <h2>Live camera</h2>
+            <p class="hint">Same MJPEG feed as Raw mode. Snapshots attach when you send.</p>
+            <img class="ugv-preview-img" id="chat-live-preview" src="/video_feed" alt="Live feed" />
+            <div class="ugv-row-actions">
+              <button type="button" class="secondary" id="chat-snap-btn">Grab still</button>
+              <label class="hint" style="display:flex;align-items:center;gap:6px;color:#9aa3b2">
+                <input type="checkbox" id="chat-attach" checked /> Attach still on send
+              </label>
+            </div>
+            <img class="ugv-preview-img" id="chat-snap-preview" alt="last still" style="max-height:160px" />
+          </div>
+          <div class="ugv-panel-card">
+            <h2>AI Vision Chat</h2>
+            <p class="hint">Conversational mode — describe the scene, run tools, optional drive.</p>
+            <div class="ugv-chat-log" id="chat-log"></div>
+            <div class="ugv-chat-compose">
+              <textarea id="chat-input" placeholder="Ask about what the robot sees…"></textarea>
+            </div>
+            <div class="ugv-row-actions">
+              <button type="button" class="secondary" id="chat-clear-btn">Clear</button>
+              <button type="button" id="chat-send-btn">Send</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="mode-panel-seek" class="mode-panel" role="tabpanel" aria-labelledby="mode-tab-seek" hidden>
+      <div class="mode-panel-seek">
+        <div class="ugv-seek-layout">
+          <div class="ugv-panel-card">
+            <h2>Live camera</h2>
+            <p class="hint">Seek uses OpenCV (MobileNet-SSD) to decide if the goal is met. LLM only steers.</p>
+            <img class="ugv-preview-img" id="seek-live-preview" src="/video_feed" alt="Live feed" />
+            <div class="ugv-seek-status" id="seek-status">Phase: <span class="phase-idle">idle</span></div>
+          </div>
+          <div class="ugv-panel-card">
+            <h2>Seek mode</h2>
+            <p class="hint">Type a detector class (e.g. dog, person, chair) and press Seek. Stop anytime.</p>
+            <div class="ugv-seek-form">
+              <input type="text" id="seek-goal" placeholder="dog" value="dog" autocomplete="off" />
+            </div>
+            <div class="ugv-row-actions">
+              <button type="button" id="seek-start-btn">Seek</button>
+              <button type="button" class="danger" id="seek-stop-btn">Stop</button>
+              <button type="button" class="secondary" id="seek-check-btn">Check once</button>
+            </div>
+            <div class="ugv-seek-log" id="seek-log"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
 
     <!-- Ops log drawer + AI Vision chat drawer -->
     <style>
@@ -710,6 +782,7 @@
         <div style="background-image: url('./img/grey/delete.svg');"></div>
     </footer>
     <!-- <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.7.0/jquery.min.js"></script> -->
+    <script src="./modes.js"></script>
     <script src="./control.js"></script>
     <script src="./main.js"></script>
 </body>
