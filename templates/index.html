@@ -476,14 +476,29 @@
               <strong>Detector</strong>: closed class list (MobileNet-SSD). 
               <strong>LLM vision</strong>: free-text goal; model returns JSON <code>found: true|false</code>.
             </p>
-            <div class="ugv-seek-referee" role="radiogroup" aria-label="Seek referee">
-              <label class="ugv-seek-radio">
-                <input type="radio" name="seek-referee" value="detector" id="seek-referee-detector" checked />
-                Detector (dropdown)
+            <div class="ugv-seek-mode-selector" role="radiogroup" aria-label="Seek mode configuration" style="display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px;">
+              <label class="ugv-seek-radio-card" style="display: flex; align-items: center; gap: 8px; padding: 8px 10px; background: #161922; border: 1px solid #2a2f3d; border-radius: 6px; cursor: pointer;">
+                <input type="radio" name="seek-mode-type" value="detector" id="seek-mode-detector" />
+                <div style="display: flex; flex-direction: column;">
+                  <strong style="font-size: 12px; color: #fff;">a. Object Detector</strong>
+                  <span style="font-size: 10px; color: #9aa3b2;">MobileNet-SSD detector + classic navigation</span>
+                </div>
               </label>
-              <label class="ugv-seek-radio">
-                <input type="radio" name="seek-referee" value="llm" id="seek-referee-llm" />
-                LLM vision (free text)
+
+              <label class="ugv-seek-radio-card" style="display: flex; align-items: center; gap: 8px; padding: 8px 10px; background: #161922; border: 1px solid #00e676; border-radius: 6px; cursor: pointer;">
+                <input type="radio" name="seek-mode-type" value="detector_llm_nav" id="seek-mode-detector-llm" checked />
+                <div style="display: flex; flex-direction: column;">
+                  <strong style="font-size: 12px; color: #00e676;">b. Object Detector + LLM Navigation (Default)</strong>
+                  <span style="font-size: 10px; color: #9aa3b2;">MobileNet-SSD detector + 180° LLM scene navigation</span>
+                </div>
+              </label>
+
+              <label class="ugv-seek-radio-card" style="display: flex; align-items: center; gap: 8px; padding: 8px 10px; background: #161922; border: 1px solid #2a2f3d; border-radius: 6px; cursor: pointer;">
+                <input type="radio" name="seek-mode-type" value="llm_vision" id="seek-mode-llm-vision" />
+                <div style="display: flex; flex-direction: column;">
+                  <strong style="font-size: 12px; color: #fff;">c. LLM Detection & Vision</strong>
+                  <span style="font-size: 10px; color: #9aa3b2;">Free-text goal + Vision LLM referee & scene pilot</span>
+                </div>
               </label>
             </div>
             <div class="ugv-seek-form" id="seek-goal-detector-wrap">

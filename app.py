@@ -3691,11 +3691,34 @@ def _seek_loop(ctrl, label, conf, max_steps, timeout_s):
                     ctrl.update(step=step, seek_phase='goal_check', message=f'Step {step}/{steps_label}: goal check for {label}…')
                     _seek_look_deg(0.0, 0.0, wait_hw=True, should_stop=ctrl.should_stop)
                     straight_jpeg = _seek_grab_jpeg()
-                    chk_centre = seek_goal_check(label, referee=referee, conf_threshold=conf, jpeg=straight_jpeg)
+                    chk_centre = seek_goal_check(label, referee=REFEREE_DETECTOR, conf_threshold=conf, jpeg=straight_jpeg)
                     if chk_centre.get('found'):
                         _seek_run_on_found(ctrl, label)
-                        _halt('found', message=f'Found {label} via {referee} at step {step}', step=step, last_detection=chk_centre)
+                        _halt('found', message=f'Found {label} via detector at step {step}', step=step, last_detection=chk_centre)
                         return
+
+                    # Update CENTRE image section in 180° panoramic scan live as we drive forward!
+                    if straight_jpeg and views_to_analyze:
+                        b64_s = base64.b64encode(straight_jpeg).decode('ascii')
+                        for v in views_to_analyze:
+                            if v.get('name') == 'straight':
+                                v['jpeg'] = straight_jpeg
+                                v['bytes'] = len(straight_jpeg)
+                                v['data_url'] = f'data:image/jpeg;base64,{b64_s}'
+                                v['detected_labels'] = chk_centre.get('labels_found') or []
+                        
+                        partial_pano = _stitch_panorama_views(views_to_analyze)
+                        if partial_pano:
+                            b64_p = base64.b64encode(partial_pano).decode('ascii')
+                            ctrl.update(
+                                panorama_data_url=f'data:image/jpeg;base64,{b64_p}',
+                                last_views=[{
+                                    'name': v['name'], 'pan_deg': v['pan_deg'], 'bytes': v['bytes'],
+                                    'data_url': v.get('data_url'), 'has_target': v.get('has_target'),
+                                    'detected_labels': v.get('detected_labels', []),
+                                } for v in views_to_analyze]
+                            )
+
                     action = cached_nav['action']
                     dist = cached_nav['drive_distance']
                     reason = cached_nav['reason']

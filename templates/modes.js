@@ -184,14 +184,20 @@
     log.scrollTop = log.scrollHeight;
   }
 
+  function getSelectedSeekMode() {
+    var rDetector = $('seek-mode-detector');
+    var rLlmVision = $('seek-mode-llm-vision');
+    if (rDetector && rDetector.checked) return 'detector';
+    if (rLlmVision && rLlmVision.checked) return 'llm_vision';
+    return 'detector_llm_nav'; // Default: Object Detector + LLM Nav
+  }
+
   function getSeekReferee() {
-    var llm = $('seek-referee-llm');
-    if (llm && llm.checked) return 'llm';
-    return 'detector';
+    return getSelectedSeekMode() === 'llm_vision' ? 'llm' : 'detector';
   }
 
   function getSeekGoal() {
-    if (getSeekReferee() === 'llm') {
+    if (getSelectedSeekMode() === 'llm_vision') {
       var t = $('seek-goal-text');
       return (t && t.value) || '';
     }
@@ -200,15 +206,18 @@
   }
 
   function syncSeekRefereeUI() {
+    var mode = getSelectedSeekMode();
     var ref = getSeekReferee();
     var detWrap = $('seek-goal-detector-wrap');
     var llmWrap = $('seek-goal-llm-wrap');
-    if (detWrap) detWrap.hidden = ref !== 'detector';
-    if (llmWrap) llmWrap.hidden = ref !== 'llm';
+
+    if (detWrap) detWrap.hidden = (mode === 'llm_vision');
+    if (llmWrap) llmWrap.hidden = (mode !== 'llm_vision');
+
     try {
-      localStorage.setItem(SEEK_REFEREE_KEY, ref);
+      localStorage.setItem(SEEK_REFEREE_KEY, mode);
     } catch (e) {}
-    // Idle badge reflects selected referee type
+
     if (!$('seek-detector-bar') || ($('seek-detector-bar').classList.contains('is-running'))) return;
     setDetectorBar('idle', ref === 'llm' ? 'Judge: idle' : 'Detector: idle', '');
   }
@@ -468,17 +477,18 @@
   }
 
   function seekStart() {
+    var mode = getSelectedSeekMode();
     var goal = getSeekGoal();
-    var referee = getSeekReferee();
+    var referee = (mode === 'llm_vision') ? 'llm' : 'detector';
+    var llmSceneNav = (mode !== 'detector');
     var onFound = getSeekOnFound();
     var onFoundTts = getSeekOnFoundTts();
-    var llmSceneNav = $('seek-llm-scene-nav') ? $('seek-llm-scene-nav').checked : true;
     var llmNavInterval = parseInt(($('seek-llm-nav-interval') && $('seek-llm-nav-interval').value) || '10', 10);
     if (isNaN(llmNavInterval) || llmNavInterval < 1) llmNavInterval = 10;
     lastSeekCheckSeq = 0;
     lastSeekStep = -1;
     seekLog(
-      'Starting seek (' +
+      'Starting seek [' + mode + '] (' +
         referee +
         ') for: ' +
         goal +
@@ -609,7 +619,7 @@
     if (stop) stop.addEventListener('click', seekStop);
     if (check) check.addEventListener('click', seekCheckOnce);
 
-    var radios = document.querySelectorAll('input[name="seek-referee"]');
+    var radios = document.querySelectorAll('input[name="seek-mode-type"]');
     radios.forEach(function (r) {
       r.addEventListener('change', syncSeekRefereeUI);
     });
@@ -618,8 +628,9 @@
     syncSeekOnFoundUI();
     try {
       var saved = localStorage.getItem(SEEK_REFEREE_KEY);
-      if (saved === 'llm' && $('seek-referee-llm')) $('seek-referee-llm').checked = true;
-      if (saved === 'detector' && $('seek-referee-detector')) $('seek-referee-detector').checked = true;
+      if (saved === 'detector' && $('seek-mode-detector')) $('seek-mode-detector').checked = true;
+      if (saved === 'detector_llm_nav' && $('seek-mode-detector-llm')) $('seek-mode-detector-llm').checked = true;
+      if (saved === 'llm_vision' && $('seek-mode-llm-vision')) $('seek-mode-llm-vision').checked = true;
     } catch (e) {}
     syncSeekRefereeUI();
 
