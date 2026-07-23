@@ -3006,16 +3006,16 @@ def _seek_disable_steady():
 
 
 def _seek_run_on_found(ctrl, label):
-    """Run configured post-found action once (default: nothing)."""
+    """Run configured post-found action (TTS announcement by default)."""
     action = ctrl.on_found_action()
-    if action == ON_FOUND_NONE:
-        return
+    if not action or action == ON_FOUND_NONE:
+        action = ON_FOUND_TTS
     if action == ON_FOUND_TTS:
         phrase = format_on_found_tts(ctrl.on_found_tts_template(), label)
         try:
             audio_ctrl.play_speech_thread(phrase)
             ctrl.update(on_found_done=True, on_found_phrase=phrase)
-            olog.info('ai_seek', f'On-found TTS: {phrase[:100]}', goal=label, action='tts')
+            olog.info('ai_seek', f'On-found TTS spoken: "{phrase}"', goal=label, action='tts')
         except Exception as e:
             olog.warn('ai_seek', f'On-found TTS failed: {e}', error=str(e)[:200], goal=label)
             ctrl.update(on_found_done=False, on_found_error=str(e)[:200])

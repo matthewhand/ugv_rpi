@@ -495,10 +495,10 @@
             <div class="ugv-seek-onfound">
               <label class="hint" for="seek-on-found">Upon found</label>
               <select id="seek-on-found" aria-label="Upon found action">
-                <option value="none" selected>Do nothing</option>
-                <option value="tts">TTS announcement</option>
+                <option value="tts" selected>TTS announcement</option>
+                <option value="none">Do nothing</option>
               </select>
-              <div id="seek-on-found-tts-wrap" class="ugv-seek-form" hidden>
+              <div id="seek-on-found-tts-wrap" class="ugv-seek-form">
                 <input type="text" id="seek-on-found-tts" maxlength="200"
                   value="I have found the {goal}."
                   placeholder="I have found the {goal}."
