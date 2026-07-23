@@ -3415,8 +3415,22 @@ def _seek_unified_llm_analysis(current_views, prev_forward_jpeg, goal_label):
     except Exception as e:
         olog.warn('ai_seek', f'Unified LLM analysis error: {e}')
 
+    return {
+        'goal_found': False,
+        'goal_found_view': None,
+        'path_forward_clear': True,
+        'is_identical_to_previous': False,
+        'recommended_direction': 'forward',
+        'drive_distance': 'short',
+        'reason': 'fallback forward short'
+    }
+
+
 def _seek_execute_nav_action(action, drive_distance='medium'):
-    """Execute body move after nav decision; duration from drive_distance tier."""
+    """Execute body move after nav decision:
+    - Left/Right turns: Fast speed control (angular_z = ±0.8)
+    - Forward/Backward: Middle speed control (linear_x = ±0.15)
+    """
     try:
         _seek_look_deg(0.0, 0.0, wait_hw=True)
     except Exception:
@@ -3428,20 +3442,20 @@ def _seek_execute_nav_action(action, drive_distance='medium'):
     dist = (drive_distance or 'medium').strip().lower()
     if dist not in _SEEK_DRIVE_MS_BY_DIST:
         dist = 'medium'
+
     if action in ('turn_left', 'left'):
-        dur = _SEEK_TURN_MS_BY_DIST.get(dist, 900)
-        args = {'linear_x': 0.08, 'angular_z': 0.5, 'duration_ms': dur}
+        dur = _SEEK_TURN_MS_BY_DIST.get(dist, 800)
+        args = {'linear_x': 0.0, 'angular_z': 0.8, 'duration_ms': dur}
     elif action in ('turn_right', 'right'):
-        dur = _SEEK_TURN_MS_BY_DIST.get(dist, 900)
-        args = {'linear_x': 0.08, 'angular_z': -0.5, 'duration_ms': dur}
+        dur = _SEEK_TURN_MS_BY_DIST.get(dist, 800)
+        args = {'linear_x': 0.0, 'angular_z': -0.8, 'duration_ms': dur}
     elif action in ('backward', 'back', 'drive_backward'):
         dur = _SEEK_DRIVE_MS_BY_DIST.get(dist, _SEEK_DRIVE_MS)
-        lin = -abs(_SEEK_DRIVE_LIN_BY_DIST.get(dist, 0.15))
-        args = {'linear_x': lin, 'angular_z': 0.0, 'duration_ms': dur}
+        args = {'linear_x': -0.15, 'angular_z': 0.0, 'duration_ms': dur}
     else:
         dur = _SEEK_DRIVE_MS_BY_DIST.get(dist, _SEEK_DRIVE_MS)
-        lin = _SEEK_DRIVE_LIN_BY_DIST.get(dist, 0.15)
-        args = {'linear_x': lin, 'angular_z': 0.0, 'duration_ms': dur}
+        args = {'linear_x': 0.15, 'angular_z': 0.0, 'duration_ms': dur}
+
     res = _execute_agent_tool('send_motor_command', args)
     time.sleep(float(args['duration_ms']) / 1000.0 + 0.3)
     return {
@@ -3626,7 +3640,9 @@ def _seek_loop(ctrl, label, conf, max_steps, timeout_s):
                     _halt('found', message=f'Found {label} in {found_chk.get("found_view", "scan")} view at step {step}', step=step, last_detection=found_chk)
                     return
 
-                nav = _seek_nav_decide(views, label, labels_hint=check.get('labels_found') or [])
+                labels_h = (found_chk.get('labels_found') if isinstance(found_chk, dict) else []) or []
+                nav = _seek_nav_decide(views, label, labels_hint=labels_h)
+                nav = nav or {}
                 action = nav.get('action') or 'forward'
                 dist = nav.get('drive_distance') or 'medium'
                 reason = nav.get('reason') or ''
