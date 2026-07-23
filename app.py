@@ -2766,11 +2766,17 @@ _SEEK_JUDGE_SYSTEM = (
 _SEEK_NAV_SYSTEM = (
     "You are a navigation advisor for a small UGV with a pan-tilt camera. "
     "You are given THREE stills from the same pose: LEFT, STRAIGHT (center), and RIGHT. "
-    "Decide the safest short move to continue searching for a goal object. "
+    "Decide the safest move AND how far to drive before the next scan. "
     "Prefer forward when the straight view is open (hallway/path clear enough for the robot). "
     "Choose turn_left or turn_right if straight is blocked/cluttered/unsafe and that side looks more open "
     "or more likely to reveal the goal. "
+    "Also set drive_distance for how long the next timed hop should be before re-scanning: "
+    "short = tight space / near obstacles / uncertain (crawl); "
+    "medium = somewhat open corridor; "
+    "long = long clear hallway with nothing near ahead (go farther between scans). "
+    "Turns should usually use short (or medium at most). Long is mainly for clear forward. "
     "Reply with JSON only. action must be exactly one of: forward, turn_left, turn_right. "
+    "drive_distance must be exactly one of: short, medium, long. "
     "Do not claim the goal is found — another system handles that."
 )
 
@@ -2787,19 +2793,44 @@ _SEEK_NAV_JSON_SCHEMA = {
                     'enum': ['forward', 'turn_left', 'turn_right'],
                     'description': 'Drive choice after comparing the three views.',
                 },
+                'drive_distance': {
+                    'type': 'string',
+                    'enum': ['short', 'medium', 'long'],
+                    'description': (
+                        'How far/long to drive before the next L/straight/R scan. '
+                        'short≈near obstacles; medium≈open; long≈long clear hallway.'
+                    ),
+                },
                 'reason': {
                     'type': 'string',
-                    'description': 'One short sentence.',
+                    'description': 'One short sentence covering direction and distance.',
                 },
                 'path_clear_forward': {
                     'type': 'boolean',
                     'description': 'True if straight view looks open enough to drive forward.',
                 },
             },
-            'required': ['action', 'reason', 'path_clear_forward'],
+            'required': ['action', 'drive_distance', 'reason', 'path_clear_forward'],
             'additionalProperties': False,
         },
     },
+}
+
+# Timed hop lengths (ms) for drive_distance tiers — body linear applied after sign map
+_SEEK_DRIVE_MS_BY_DIST = {
+    'short': 900,
+    'medium': 1800,
+    'long': 3200,
+}
+_SEEK_DRIVE_LIN_BY_DIST = {
+    'short': 0.12,
+    'medium': 0.15,
+    'long': 0.18,
+}
+_SEEK_TURN_MS_BY_DIST = {
+    'short': 900,
+    'medium': 1200,
+    'long': 1200,  # cap turns; long forward only
 }
 
 _SEEK_FOUND_JSON_SCHEMA = {
@@ -2999,7 +3030,7 @@ _SEEK_PAN_WAIT_MAX_S = 2.8     # give up waiting and still snap (note pan_settle
 _SEEK_PAN_POLL_S = 0.08
 _SEEK_PAN_POST_ARRIVE_S = 0.12  # brief damp after arrival before shutter
 _SEEK_PAN_FALLBACK_SLEEP_S = 0.55  # if no HW pan feedback at all
-_SEEK_DRIVE_MS = 1100
+_SEEK_DRIVE_MS = 1100  # legacy default; prefer _SEEK_DRIVE_MS_BY_DIST
 
 
 def _seek_pan_deg_to_rad(pan_deg, tilt_deg=0.0):
@@ -3177,8 +3208,9 @@ def _seek_capture_triple_views(ctrl, step, steps_label):
 
 
 def _seek_parse_nav_action(raw_text):
-    """Parse nav JSON into action + reason + path_clear_forward."""
+    """Parse nav JSON into action, drive_distance, reason, path_clear_forward."""
     action = 'forward'
+    drive_distance = 'medium'
     reason = ''
     path_clear = True
     parsed = None
@@ -3203,13 +3235,36 @@ def _seek_parse_nav_action(raw_text):
             action = 'turn_left'
         elif a in ('turn_right', 'right'):
             action = 'turn_right'
+        dd = str(
+            parsed.get('drive_distance')
+            or parsed.get('distance')
+            or parsed.get('range')
+            or 'medium'
+        ).strip().lower()
+        if dd in ('short', 'near', 'slow', 'crawl'):
+            drive_distance = 'short'
+        elif dd in ('long', 'far', 'fast', 'open'):
+            drive_distance = 'long'
+        else:
+            drive_distance = 'medium'
         reason = str(parsed.get('reason') or '')[:240]
         pc = parsed.get('path_clear_forward')
         if isinstance(pc, str):
             path_clear = pc.strip().lower() in ('1', 'true', 'yes')
         elif pc is not None:
             path_clear = bool(pc)
-    return {'action': action, 'reason': reason, 'path_clear_forward': path_clear, 'raw': (raw_text or '')[:400]}
+        # Safety: if model says forward not clear, don't allow long hop
+        if action == 'forward' and not path_clear and drive_distance == 'long':
+            drive_distance = 'short'
+        if action in ('turn_left', 'turn_right') and drive_distance == 'long':
+            drive_distance = 'medium'
+    return {
+        'action': action,
+        'drive_distance': drive_distance,
+        'reason': reason,
+        'path_clear_forward': path_clear,
+        'raw': (raw_text or '')[:400],
+    }
 
 
 def _seek_nav_decide(views, goal_label, labels_hint=None):
@@ -3221,7 +3276,8 @@ def _seek_nav_decide(views, goal_label, labels_hint=None):
                 f'Goal being sought (do not claim found): {goal_label}. '
                 f'Detector labels recently seen: {json.dumps(labels_hint or [])}. '
                 'Images follow in order: LEFT, STRAIGHT, RIGHT. '
-                'Choose action: forward | turn_left | turn_right. JSON only.'
+                'Choose action (forward|turn_left|turn_right) AND drive_distance '
+                '(short|medium|long) for how far to go before the next scan. JSON only.'
             ),
         },
     ]
@@ -3242,7 +3298,8 @@ def _seek_nav_decide(views, goal_label, labels_hint=None):
     if not have_any:
         return {
             'action': 'forward',
-            'reason': 'no images; default forward',
+            'drive_distance': 'short',
+            'reason': 'no images; default short forward',
             'path_clear_forward': True,
             'fallback': True,
         }
@@ -3260,7 +3317,7 @@ def _seek_nav_decide(views, goal_label, labels_hint=None):
     ):
         try:
             msg, _body, _cfg = _openai_chat(
-                messages, max_tokens=120, temperature=0.1, tools=None, response_format=fmt,
+                messages, max_tokens=160, temperature=0.1, tools=None, response_format=fmt,
             )
             content_out = _message_text_content(msg) or ''
             last_err = None
@@ -3272,30 +3329,47 @@ def _seek_nav_decide(views, goal_label, labels_hint=None):
             continue
     return {
         'action': 'forward',
-        'reason': f'nav LLM failed ({last_err}); default forward',
+        'drive_distance': 'short',
+        'reason': f'nav LLM failed ({last_err}); default short forward',
         'path_clear_forward': True,
         'fallback': True,
         'error': str(last_err)[:200] if last_err else None,
     }
 
 
-def _seek_execute_nav_action(action):
-    """Execute one short body move; camera recentered first."""
+def _seek_execute_nav_action(action, drive_distance='medium'):
+    """Execute body move after multi-view decision; duration from drive_distance tier."""
     try:
-        _seek_look_deg(0.0, 0.0, settle_s=0.25)
+        _seek_look_deg(0.0, 0.0, wait_hw=True)
     except Exception:
-        pass
+        try:
+            _seek_look_deg(0.0, 0.0, wait_hw=False, settle_s=0.25)
+        except Exception:
+            pass
     action = (action or 'forward').strip().lower()
+    dist = (drive_distance or 'medium').strip().lower()
+    if dist not in _SEEK_DRIVE_MS_BY_DIST:
+        dist = 'medium'
     if action == 'turn_left':
-        args = {'linear_x': 0.08, 'angular_z': 0.5, 'duration_ms': _SEEK_DRIVE_MS}
+        dur = _SEEK_TURN_MS_BY_DIST.get(dist, 900)
+        args = {'linear_x': 0.08, 'angular_z': 0.5, 'duration_ms': dur}
     elif action == 'turn_right':
-        args = {'linear_x': 0.08, 'angular_z': -0.5, 'duration_ms': _SEEK_DRIVE_MS}
+        dur = _SEEK_TURN_MS_BY_DIST.get(dist, 900)
+        args = {'linear_x': 0.08, 'angular_z': -0.5, 'duration_ms': dur}
     else:
-        args = {'linear_x': 0.15, 'angular_z': 0.0, 'duration_ms': _SEEK_DRIVE_MS}
+        dur = _SEEK_DRIVE_MS_BY_DIST.get(dist, _SEEK_DRIVE_MS)
+        lin = _SEEK_DRIVE_LIN_BY_DIST.get(dist, 0.15)
+        args = {'linear_x': lin, 'angular_z': 0.0, 'duration_ms': dur}
     res = _execute_agent_tool('send_motor_command', args)
-    # Wait for timed drive to finish
-    time.sleep(_SEEK_DRIVE_MS / 1000.0 + 0.25)
-    return {'name': 'send_motor_command', 'arguments': args, 'result': res}
+    # Wait for timed drive to finish (uses body duration requested)
+    time.sleep(float(args['duration_ms']) / 1000.0 + 0.3)
+    return {
+        'name': 'send_motor_command',
+        'arguments': args,
+        'result': res,
+        'drive_distance': dist,
+        'action': action,
+    }
 
 
 def _seek_loop(ctrl, label, conf, max_steps, timeout_s):
@@ -3399,40 +3473,42 @@ def _seek_loop(ctrl, label, conf, max_steps, timeout_s):
                 labels_hint=check.get('labels_found') or [],
             )
             action = nav.get('action') or 'forward'
+            dist = nav.get('drive_distance') or 'medium'
             reason = nav.get('reason') or ''
             ctrl.update(
                 last_nav=nav,
                 last_llm_reply=reason[:500],
                 message=(
-                    f'Step {step}/{steps_label}: nav={action}'
-                    + (f' — {reason[:80]}' if reason else '')
+                    f'Step {step}/{steps_label}: nav={action} dist={dist}'
+                    + (f' — {reason[:70]}' if reason else '')
                 ),
             )
             olog.info(
                 'ai_seek',
-                f'Nav decision step={step} action={action}',
-                goal=label, step=step, action=action, reason=reason[:120],
+                f'Nav decision step={step} action={action} dist={dist}',
+                goal=label, step=step, action=action, drive_distance=dist,
+                reason=reason[:120],
             )
 
             if ctrl.should_stop():
                 _halt('stopped', 'Stopped by user', step=step)
                 return
 
-            # 4) Drive only after multi-image decision
+            # 4) Drive only after multi-image decision (distance = how far before next scan)
             ctrl.update(
                 seek_phase='drive',
-                message=f'Step {step}/{steps_label}: driving {action}…',
+                message=f'Step {step}/{steps_label}: driving {action} ({dist})…',
             )
             try:
-                drive = _seek_execute_nav_action(action)
+                drive = _seek_execute_nav_action(action, dist)
                 ctrl.update(last_tools=[drive])
             except Exception as e:
                 olog.warn('ai_seek', f'Drive failed: {e}', error=str(e)[:200], step=step)
-                # fallback alternate turn
+                # fallback alternate turn, short only
                 try:
                     alt = 'turn_left' if action != 'turn_left' else 'turn_right'
-                    drive = _seek_execute_nav_action(alt)
-                    ctrl.update(last_tools=[drive], message=f'Step {step}: drive fallback {alt}')
+                    drive = _seek_execute_nav_action(alt, 'short')
+                    ctrl.update(last_tools=[drive], message=f'Step {step}: drive fallback {alt} short')
                 except Exception as e2:
                     _halt('failed', f'Drive failed: {e2}', step=step, error=str(e2)[:300])
                     return

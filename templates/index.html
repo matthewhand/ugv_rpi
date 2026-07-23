@@ -393,8 +393,9 @@
           <div class="ugv-panel-card">
             <h2>Live camera</h2>
             <p class="hint" id="seek-hint-camera">
-              Each cycle: capture <strong>left / straight / right</strong>, LLM picks drive, then move.
-              Referee (detector or LLM) decides “found”.
+              Each cycle: L/straight/R photos → LLM picks <strong>direction</strong> and
+              <strong>short/medium/long</strong> distance, then drive, then re-scan.
+              Referee decides “found”.
             </p>
             <div class="ugv-seek-detector-bar" id="seek-detector-bar" aria-live="polite">
               <span class="ugv-seek-detector-dot" id="seek-detector-dot" aria-hidden="true"></span>

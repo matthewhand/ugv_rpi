@@ -279,7 +279,10 @@
     var meta = [];
     if (st && st.step) meta.push('step ' + st.step);
     if (st && st.seek_phase) meta.push(String(st.seek_phase));
-    if (st && st.last_nav && st.last_nav.action) meta.push('nav ' + st.last_nav.action);
+    if (st && st.last_nav && st.last_nav.action) {
+      var nd = st.last_nav.drive_distance ? '/' + st.last_nav.drive_distance : '';
+      meta.push('nav ' + st.last_nav.action + nd);
+    }
     if (st && st.last_check_seq) meta.push('#' + st.last_check_seq);
     var age = formatCheckAge(st);
     if (age) meta.push(age);
@@ -340,6 +343,9 @@
       'Seek cycle: ' + (st.seek_phase || '—'),
       'Nav: ' +
         ((st.last_nav && st.last_nav.action) || '—') +
+        (st.last_nav && st.last_nav.drive_distance
+          ? ' · ' + st.last_nav.drive_distance
+          : '') +
         (st.last_nav && st.last_nav.reason ? ' — ' + String(st.last_nav.reason).slice(0, 80) : ''),
       'Referee: ' + ref,
       'Goal: ' + (st.goal_label || st.goal_text || '—'),
