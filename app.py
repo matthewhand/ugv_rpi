@@ -1,23 +1,22 @@
 import serial
 import sys
-import os
 import mpl_toolkits
 mpl_toolkits.__path__ = [p for p in mpl_toolkits.__path__ if 'dist-packages' not in p]
 
-# Load .env BEFORE base_ctrl / mode defaults so UGV_INVERT_* and control_mode apply.
+# import base_ctrl library
+from base_ctrl import BaseController
+import threading
+import yaml, os
+import base64
+import urllib.error
+import urllib.request
+
+# Load local secrets / LLM config before reading env-driven flags
 try:
     from dotenv import load_dotenv
     load_dotenv(os.path.join(os.path.dirname(os.path.realpath(__file__)), '.env'))
 except Exception:
     pass
-
-# import base_ctrl library
-from base_ctrl import BaseController
-import threading
-import yaml
-import base64
-import urllib.error
-import urllib.request
 
 # raspberry pi version check.
 def is_raspberry_pi5():
@@ -1765,10 +1764,11 @@ def _execute_motion_via_mode(name, args):
         }
 
     if name == 'send_motor_command':
+        import ros_motion
         lin = _clamp(float(args.get('linear_x', 0.0)), -max_lin, max_lin)
         ang = _clamp(float(args.get('angular_z', 0.0)), -max_ang, max_ang)
-        # Do NOT invert here — serial egress applies UGV_INVERT_* in base_ctrl
-        # (and ROS path applies once in ros_motion.publish_cmd_vel).
+        # Same UGV_INVERT_LINEAR/ANGULAR as ROS publish_cmd_vel (see ros_motion).
+        lin, ang = ros_motion.apply_drive_inverts(lin, ang)
         cont = args.get('continuous')
         if isinstance(cont, str):
             cont = cont.strip().lower() in ('1', 'true', 'yes', 'on')
