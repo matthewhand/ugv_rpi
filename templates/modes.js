@@ -233,7 +233,10 @@
       'Phase: ' + phase,
       'Referee: ' + ref,
       'Goal: ' + (st.goal_label || st.goal_text || '—'),
-      'Step: ' + (st.step || 0) + ' / ' + (st.max_steps || '—'),
+      'Step: ' +
+        (st.step || 0) +
+        ' / ' +
+        (st.max_steps === 0 || st.max_steps === '0' ? '∞' : st.max_steps || '—'),
       'Message: ' + (st.message || ''),
     ];
     if (det && typeof det === 'object' && Object.keys(det).length) {
@@ -289,7 +292,12 @@
     fetch('/api/ai/seek/start', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ goal: goal, referee: referee, max_steps: 12, timeout_s: 180 }),
+      body: JSON.stringify({
+        goal: goal,
+        referee: referee,
+        max_steps: 0, // unlimited; stop on found / Stop (timeout_s 0 = no time limit)
+        timeout_s: 0,
+      }),
     })
       .then(function (r) {
         return r.json();

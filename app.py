@@ -2900,9 +2900,17 @@ def _seek_fallback_drive(reason=''):
 
 
 def _seek_loop(ctrl, label, conf, max_steps, timeout_s):
-    """Background Seek loop: referee check → maybe found → pilot motion → repeat."""
+    """Background Seek loop: referee check → maybe found → pilot motion → repeat.
+
+    max_steps: 0 = unlimited (default). timeout_s: 0 = no time limit.
+    Always stops on found or user Stop.
+    """
     t0 = time.time()
     referee = ctrl.referee()
+    max_steps = int(max_steps or 0)
+    timeout_s = float(timeout_s or 0)
+    unlimited = max_steps <= 0
+    steps_label = '∞' if unlimited else str(max_steps)
 
     def _halt(phase, message, step=0, **kwargs):
         try:
@@ -2915,11 +2923,15 @@ def _seek_loop(ctrl, label, conf, max_steps, timeout_s):
         _seek_force_tools_on()
         history = []
         pilot_system = _SEEK_PILOT_LLM if referee == REFEREE_LLM else _SEEK_PILOT_DETECTOR
-        for step in range(1, int(max_steps) + 1):
+        step = 0
+        while True:
+            step += 1
+            if not unlimited and step > max_steps:
+                break
             if ctrl.should_stop():
                 _halt('stopped', 'Stopped by user', step=step - 1)
                 return
-            if time.time() - t0 >= float(timeout_s):
+            if timeout_s > 0 and (time.time() - t0) >= timeout_s:
                 _halt('timeout', f'Timeout after {timeout_s}s', step=step - 1)
                 return
 
@@ -2928,7 +2940,7 @@ def _seek_loop(ctrl, label, conf, max_steps, timeout_s):
             ctrl.update(
                 step=step,
                 last_detection=check,
-                message=f'Step {step}/{max_steps}: scanning ({referee}) for {label}…',
+                message=f'Step {step}/{steps_label}: scanning ({referee}) for {label}…',
             )
             if check.get('found'):
                 reason = check.get('reason') or ''
@@ -2957,7 +2969,8 @@ def _seek_loop(ctrl, label, conf, max_steps, timeout_s):
                 det_summary = {
                     'goal': label,
                     'step': step,
-                    'max_steps': max_steps,
+                    'max_steps': max_steps if not unlimited else None,
+                    'unlimited_steps': unlimited,
                     'referee': referee,
                     'judge_found': False,
                     'judge_reason': check.get('reason') or '',
@@ -2965,7 +2978,7 @@ def _seek_loop(ctrl, label, conf, max_steps, timeout_s):
                 }
                 user_line = (
                     f"Loop continues: vision judge still has NOT confirmed goal '{label}' "
-                    f"(step {step}/{max_steps}, found=false). You have not finished — keep moving. "
+                    f"(step {step}/{steps_label}, found=false). You have not finished — keep moving. "
                     f"Judge note: {json.dumps(det_summary)}. "
                     f"MUST call send_motor_command now (optional send_gimbal_command), then one-line next plan."
                 )
@@ -2973,7 +2986,8 @@ def _seek_loop(ctrl, label, conf, max_steps, timeout_s):
                 det_summary = {
                     'goal': label,
                     'step': step,
-                    'max_steps': max_steps,
+                    'max_steps': max_steps if not unlimited else None,
+                    'unlimited_steps': unlimited,
                     'referee': referee,
                     'labels_seen': check.get('labels_found') or [],
                     'all_count': check.get('all_count', 0),
@@ -2981,7 +2995,7 @@ def _seek_loop(ctrl, label, conf, max_steps, timeout_s):
                 }
                 user_line = (
                     f"Loop continues: detector still has NOT found class '{label}' "
-                    f"(step {step}/{max_steps}). You have not finished — keep moving to search. "
+                    f"(step {step}/{steps_label}). You have not finished — keep moving to search. "
                     f"Detections summary: {json.dumps(det_summary)}. "
                     f"MUST call send_motor_command now (optional send_gimbal_command), then one-line next plan."
                 )
@@ -3020,7 +3034,7 @@ def _seek_loop(ctrl, label, conf, max_steps, timeout_s):
             ctrl.update(
                 last_llm_reply=reply[:500],
                 last_tools=tool_trace,
-                message=f'Step {step}/{max_steps}: moved; re-scanning…',
+                message=f'Step {step}/{steps_label}: moved; re-scanning…',
                 history=list(history[-6:]),
             )
             for _ in range(int(DEFAULT_SEEK_STEP_PAUSE_S / 0.1) or 1):
@@ -3029,6 +3043,7 @@ def _seek_loop(ctrl, label, conf, max_steps, timeout_s):
                     return
                 time.sleep(0.1)
 
+        # Finite max_steps exhausted
         check = seek_goal_check(label, referee=referee, conf_threshold=conf)
         if check.get('found'):
             reason = check.get('reason') or ''
@@ -3074,10 +3089,26 @@ def api_ai_seek_start():
     data = request.get_json(silent=True) or {}
     goal = data.get('goal') or data.get('target') or data.get('label') or ''
     referee = parse_seek_referee(data.get('referee') or data.get('mode') or REFEREE_DETECTOR)
-    max_steps = int(data.get('max_steps') or DEFAULT_SEEK_MAX_STEPS)
-    max_steps = max(1, min(40, max_steps))
-    timeout_s = float(data.get('timeout_s') or DEFAULT_SEEK_TIMEOUT_S)
-    timeout_s = max(5.0, min(600.0, timeout_s))
+    # max_steps: 0 / null / "inf" = unlimited (default). Positive capped for safety.
+    raw_steps = data.get('max_steps', DEFAULT_SEEK_MAX_STEPS)
+    if raw_steps is None or raw_steps == '' or str(raw_steps).lower() in ('inf', 'infinite', 'unlimited', 'none'):
+        max_steps = 0
+    else:
+        max_steps = int(raw_steps)
+        if max_steps < 0:
+            max_steps = 0
+        elif max_steps > 0:
+            max_steps = min(500, max_steps)
+    # timeout_s: 0 = no time limit; positive seconds capped
+    raw_to = data.get('timeout_s', DEFAULT_SEEK_TIMEOUT_S)
+    if raw_to is None or raw_to == '' or str(raw_to).lower() in ('inf', 'infinite', 'unlimited', 'none'):
+        timeout_s = 0.0
+    else:
+        timeout_s = float(raw_to)
+        if timeout_s < 0:
+            timeout_s = 0.0
+        elif timeout_s > 0:
+            timeout_s = max(5.0, min(7200.0, timeout_s))
     conf = float(data.get('conf_threshold') or DEFAULT_SEEK_CONF)
     conf = max(0.05, min(0.95, conf))
     result = seek_controller.start(

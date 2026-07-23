@@ -45,8 +45,10 @@ REFEREE_DETECTOR = 'detector'  # OpenCV / MobileNet-SSD / future YOLO class list
 REFEREE_LLM = 'llm'            # vision model answers found: true|false via JSON
 VALID_REFEREES = frozenset({REFEREE_DETECTOR, REFEREE_LLM})
 
-DEFAULT_SEEK_MAX_STEPS = 12
-DEFAULT_SEEK_TIMEOUT_S = 180.0
+# 0 = unlimited steps (stop only on found / user Stop / timeout)
+DEFAULT_SEEK_MAX_STEPS = 0
+# 0 = no time limit; positive seconds still hard-stops a runaway seek
+DEFAULT_SEEK_TIMEOUT_S = 0.0
 DEFAULT_SEEK_CONF = 0.22
 DEFAULT_SEEK_STEP_PAUSE_S = 0.35
 
@@ -300,20 +302,27 @@ class SeekController:
                 return {'success': False, 'error': 'seek already running', 'status': dict(self._state)}
             self._cancel.clear()
             self._state = self._idle_state()
+            ms = int(max_steps)
+            if ms < 0:
+                ms = 0
+            ts = float(timeout_s)
+            if ts < 0:
+                ts = 0.0
             self._state.update({
                 'phase': 'running',
                 'referee': referee,
                 'goal_text': (goal_text or '').strip(),
                 'goal_label': label,
-                'max_steps': int(max_steps),
-                'timeout_s': float(timeout_s),
+                'max_steps': ms,  # 0 = unlimited
+                'timeout_s': ts,  # 0 = no time limit
                 'conf_threshold': float(conf_threshold),
                 'started_at': time.time(),
                 'message': f'Seeking {label} ({referee})…',
             })
+            start_ms, start_ts, start_conf = ms, ts, float(conf_threshold)
         t = threading.Thread(
             target=loop_fn,
-            args=(self, label, float(conf_threshold), int(max_steps), float(timeout_s)),
+            args=(self, label, start_conf, start_ms, start_ts),
             daemon=True,
             name='ai-seek-loop',
         )
