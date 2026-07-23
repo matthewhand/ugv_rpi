@@ -164,7 +164,7 @@
         }
       });
     }
-    chatAdd('sys', 'Chat mode ready. Tools follow the capability pills on /ai if needed.');
+    chatAdd('sys', 'Chat mode ready. Attach a still when you want vision context.');
   }
 
   // ---------- Seek panel ----------

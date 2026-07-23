@@ -25,7 +25,6 @@
         <button id="chassis-heartbeat-btn" class="normal_btn" onclick="toggleChassisHeartbeat()" style="padding: 6px 12px; font-size: 12px; background: #222; color: #ffaa55; border: 1px solid #555; border-radius: 4px; cursor: pointer;" title="Every 2s the UI re-sends last wheel cmd (idle = stop). Turn OFF for AI timed drives so the heartbeat does not cut them short.">Freq. stop: ON</button>
         <button id="esp32-wifi-btn" class="normal_btn" onclick="toggleEsp32Wifi()" style="padding: 6px 12px; font-size: 12px; background: #222; color: #ffaa55; border: 1px solid #555; border-radius: 4px; cursor: pointer;" title="Session-only: send serial T:408 to stop ESP32 WiFi (SoftAP UGV). Does NOT change boot config — AP returns after ESP32 reboot. Never uses T:401 (persistent off).">ESP32 WiFi: on?</button>
         <button type="button" id="ops-log-btn" class="normal_btn" onclick="toggleOpsLogPane()" style="padding: 6px 12px; font-size: 12px; background: #222; color: #c4b5fd; border: 1px solid #555; border-radius: 4px; cursor: pointer;" title="Show operational app log (control mode, WiFi, AI motion, errors).">App log</button>
-        <a href="/ai" target="_blank" class="normal_btn" style="padding: 6px 12px; font-size: 12px; background: #222; color: #5b8cff; border: 1px solid #5b8cff; border-radius: 4px; text-decoration: none;">Full AI page ↗</a>
         <a href="/3d" target="_blank" class="normal_btn" style="padding: 6px 12px; font-size: 12px; background: #1f2538; color: #5b8cff; border: 1px solid #5b8cff; border-radius: 4px; text-decoration: none; font-weight: 600;">3D Twin</a>
       </div>
     </nav>
@@ -307,9 +306,6 @@
                         <div class="long_btn new_page" id="open_jupyter">
                             <a target="_blank" style="color: #f5bd5f;" href="/"><span>JupyterLab</span>&nbsp;<span>&gt;</span></a>
                         </div>
-                        <div class="long_btn new_page" id="open_ai_agent">
-                            <a target="_blank" style="color: #3dd68c;" href="/ai"><span>AI Vision Agent</span>&nbsp;<span>&gt;</span></a>
-                        </div>
                     </div>
                 </div>
             </section>
@@ -421,7 +417,7 @@
     </div>
 
 
-    <!-- Ops log drawer + AI Vision chat drawer -->
+    <!-- Ops log drawer (App log button in navbar) -->
     <style>
       #ops-log-drawer {
         position: fixed; right: 12px; bottom: 52px; z-index: 9998;
@@ -457,66 +453,6 @@
       #ops-log-body .ol-msg { color: #e8eaef; }
       #ops-log-body .ol-fields { color: #9aa3b2; }
       #ops-log-empty { color: #6b7280; font-style: italic; padding: 12px 4px; }
-      #ai-drawer {
-        position: fixed; left: 0; right: 0; bottom: 0; z-index: 9999;
-        max-height: 55vh; display: flex; flex-direction: column;
-        background: #12151d; border-top: 2px solid #3dd68c;
-        box-shadow: 0 -8px 32px rgba(0,0,0,.55);
-        transform: translateY(calc(100% - 40px));
-        transition: transform .25s ease;
-        font-family: ui-sans-serif, system-ui, sans-serif;
-        color: #e8eaef;
-      }
-      #ai-drawer.open { transform: translateY(0); }
-      #ai-drawer-handle {
-        height: 40px; display: flex; align-items: center; justify-content: space-between;
-        padding: 0 14px; cursor: pointer; background: #1a1d27; user-select: none;
-        font-size: 13px; font-weight: 600;
-      }
-      #ai-drawer-handle span.badge {
-        background: #1a3a2a; color: #3dd68c; border: 1px solid #3dd68c;
-        border-radius: 999px; padding: 2px 8px; font-size: 11px; margin-left: 8px;
-      }
-      #ai-drawer-body { display: flex; flex-direction: column; min-height: 0; flex: 1; padding: 0 12px 12px; }
-      #ai-log {
-        flex: 1; overflow-y: auto; min-height: 140px; max-height: 28vh;
-        background: #0f1117; border: 1px solid #2a2f3d; border-radius: 8px;
-        padding: 10px; margin-bottom: 8px; font-size: 13px; line-height: 1.4;
-      }
-      #ai-log .m { margin: 6px 0; white-space: pre-wrap; word-break: break-word; }
-      #ai-log .u { color: #8eb6ff; }
-      #ai-log .a { color: #3dd68c; }
-      #ai-log .s { color: #9aa3b2; font-size: 12px; }
-      #ai-log .e { color: #ff8a8a; }
-      #ai-log .m-thumb {
-        display: block; width: 72px; height: 48px; object-fit: cover;
-        border-radius: 4px; border: 1px solid #2a2f3d; margin-top: 4px; cursor: zoom-in;
-      }
-      #ai-composer { display: flex; gap: 8px; align-items: flex-end; }
-      #ai-input {
-        flex: 1; min-height: 44px; max-height: 90px; resize: vertical;
-        border-radius: 8px; border: 1px solid #2a2f3d; background: #0f1117;
-        color: #e8eaef; padding: 8px 10px; font: inherit;
-      }
-      #ai-send, #ai-snap-btn, #ai-compress-btn {
-        border: 0; border-radius: 8px; padding: 10px 14px; cursor: pointer;
-        font-weight: 700; background: #3dd68c; color: #0a0f0c;
-      }
-      #ai-snap-btn, #ai-compress-btn { background: #2a3142; color: #e8eaef; }
-      #ai-compress-btn { position: relative; }
-      #ai-send:disabled, #ai-compress-btn:disabled { opacity: .5; cursor: wait; }
-      #ai-ctx-tip {
-        display: none; position: absolute; bottom: calc(100% + 8px); right: 0;
-        min-width: 220px; max-width: 300px; padding: 8px 10px; border-radius: 8px;
-        background: #0b0e14; border: 1px solid #3dd68c; color: #e8eaef;
-        font-size: 11px; font-weight: 500; line-height: 1.4; z-index: 10001;
-        box-shadow: 0 6px 20px rgba(0,0,0,.45); white-space: pre-wrap;
-      }
-      #ai-compress-wrap { position: relative; display: inline-flex; }
-      #ai-compress-wrap:hover #ai-ctx-tip, #ai-compress-wrap:focus-within #ai-ctx-tip { display: block; }
-      #ai-meta { font-size: 11px; color: #9aa3b2; margin: 4px 0 8px; display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
-      #ai-meta label { display: flex; align-items: center; gap: 4px; cursor: pointer; }
-      #ai-thumb { width: 72px; height: 48px; object-fit: cover; border-radius: 4px; border: 1px solid #2a2f3d; background: #000; }
     </style>
     <div id="ops-log-drawer" aria-label="Application operations log">
       <div id="ops-log-header">
@@ -536,248 +472,6 @@
       </div>
       <div id="ops-log-body"><div class="ol-empty" id="ops-log-empty">No events yet…</div></div>
     </div>
-    <div id="ai-drawer">
-      <div id="ai-drawer-handle" title="Toggle AI chat">
-        <div>🤖 AI Vision <span class="badge" id="ai-model-badge">…</span></div>
-        <div style="color:#9aa3b2;font-weight:500;font-size:12px">tap to expand · camera + LLM</div>
-      </div>
-      <div id="ai-drawer-body">
-        <div id="ai-meta">
-          <label><input type="checkbox" id="ai-attach" checked /> Attach live camera</label>
-          <img id="ai-thumb" alt="" />
-          <span id="ai-status">loading config…</span>
-          <a href="/ai" style="color:#5b8cff;margin-left:auto">Open full page</a>
-        </div>
-        <div id="ai-log"></div>
-        <div id="ai-composer">
-          <textarea id="ai-input" placeholder="Ask what the robot sees… e.g. Describe the scene in front of the camera"></textarea>
-          <button type="button" id="ai-snap-btn">Snap</button>
-          <span id="ai-compress-wrap">
-            <div id="ai-ctx-tip">Estimating context…</div>
-            <button type="button" id="ai-compress-btn" title="Compress older chat into a short summary">Compress</button>
-          </span>
-          <button type="button" id="ai-send">Send</button>
-        </div>
-      </div>
-    </div>
-    <script>
-    (function () {
-      var drawer = document.getElementById('ai-drawer');
-      var handle = document.getElementById('ai-drawer-handle');
-      var openBtn = document.getElementById('ai-open-btn');
-      var logEl = document.getElementById('ai-log');
-      var inputEl = document.getElementById('ai-input');
-      var sendBtn = document.getElementById('ai-send');
-      var snapBtn = document.getElementById('ai-snap-btn');
-      var compressBtn = document.getElementById('ai-compress-btn');
-      var ctxTip = document.getElementById('ai-ctx-tip');
-      var attachEl = document.getElementById('ai-attach');
-      var thumb = document.getElementById('ai-thumb');
-      var statusEl = document.getElementById('ai-status');
-      var badge = document.getElementById('ai-model-badge');
-      var history = [];
-      var estimateTimer = null;
-      var lastEstimateLabel = 'Estimating context…';
-
-      function toggle() { drawer.classList.toggle('open'); }
-      handle.addEventListener('click', toggle);
-      if (openBtn) openBtn.addEventListener('click', function () {
-        drawer.classList.add('open');
-        inputEl.focus();
-      });
-
-      function add(cls, text, imageUrl) {
-        var d = document.createElement('div');
-        d.className = 'm ' + cls;
-        var t = document.createElement('div');
-        t.textContent = text;
-        d.appendChild(t);
-        if (imageUrl) {
-          var img = document.createElement('img');
-          img.className = 'm-thumb';
-          img.src = imageUrl;
-          img.alt = 'snapshot';
-          img.title = 'Attached camera still';
-          img.onclick = function () { window.open(imageUrl, '_blank'); };
-          d.appendChild(img);
-        }
-        logEl.appendChild(d);
-        logEl.scrollTop = logEl.scrollHeight;
-        return d;
-      }
-
-      function setTip(text) {
-        lastEstimateLabel = text || lastEstimateLabel;
-        ctxTip.textContent = lastEstimateLabel;
-        compressBtn.setAttribute('title', lastEstimateLabel);
-      }
-
-      function refreshEstimate() {
-        fetch('/api/ai/estimate', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            history: history,
-            message: (inputEl.value || '').trim(),
-            attach_snapshot: !!attachEl.checked
-          })
-        }).then(function (r) { return r.json(); }).then(function (d) {
-          if (!d.success) {
-            setTip('Estimate failed: ' + (d.error || 'unknown'));
-            return;
-          }
-          setTip(
-            'Context ~' + d.tokens_est + ' tokens\n' +
-            'text ~' + d.text_tokens_est +
-            (d.image_tokens_est ? (', image ~' + d.image_tokens_est) : '') +
-            '\n' + d.history_messages + ' hist msgs · ' +
-            (d.method || '') +
-            (d.snapshot_bytes ? ('\nsnapshot ' + d.snapshot_bytes + ' B') : '') +
-            '\n(hover Compress · click to summarize older turns)'
-          );
-        }).catch(function (e) {
-          setTip('Estimate error: ' + e);
-        });
-      }
-
-      function scheduleEstimate() {
-        if (estimateTimer) clearTimeout(estimateTimer);
-        estimateTimer = setTimeout(refreshEstimate, 350);
-      }
-
-      function loadCfg() {
-        fetch('/api/ai/config').then(function (r) { return r.json(); }).then(function (d) {
-          badge.textContent = (d.model || '?');
-          statusEl.textContent = (d.model || '') + ' @ ' + (d.base_url || '');
-          if (d.token_estimate_method) {
-            setTip('Token estimator: ' + d.token_estimate_method + '\n(hover again after chat grows)');
-          }
-          scheduleEstimate();
-        }).catch(function (e) {
-          badge.textContent = 'error';
-          statusEl.textContent = String(e);
-        });
-      }
-
-      function refreshSnap() {
-        return fetch('/api/snapshot').then(function (r) { return r.json(); }).then(function (d) {
-          if (d.success && d.data_url) {
-            thumb.src = d.data_url;
-            statusEl.textContent = 'snapshot ' + (d.bytes || 0) + ' B';
-          } else {
-            statusEl.textContent = d.error || 'snapshot failed';
-          }
-          scheduleEstimate();
-        }).catch(function (e) { statusEl.textContent = String(e); });
-      }
-
-      function compress() {
-        if (!history.length) {
-          add('s', 'Nothing to compress yet.');
-          return;
-        }
-        compressBtn.disabled = true;
-        var thinking = add('s', 'Compressing older context…');
-        fetch('/api/ai/compress', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ history: history, keep_recent: 4 })
-        }).then(function (r) { return r.json(); }).then(function (d) {
-          thinking.remove();
-          if (!d.success) {
-            add('e', d.error || 'compress failed');
-            return;
-          }
-          if (!d.compressed) {
-            add('s', d.reason || 'Already short — no compress needed.');
-            scheduleEstimate();
-            return;
-          }
-          history = d.history || [];
-          add('s',
-            'Compressed: ' + (d.label_before || '') + ' → ' + (d.label_after || '') +
-            (d.saved_tokens_est != null ? (' (saved ~' + d.saved_tokens_est + ' tokens)') : '')
-          );
-          if (d.summary) add('s', 'Summary: ' + d.summary);
-          scheduleEstimate();
-        }).catch(function (e) {
-          thinking.remove();
-          add('e', String(e));
-        }).finally(function () {
-          compressBtn.disabled = false;
-        });
-      }
-
-      function send() {
-        var message = (inputEl.value || '').trim();
-        if (!message) return;
-        sendBtn.disabled = true;
-        var wantAttach = !!attachEl.checked;
-        var userEl = add('u', 'You: ' + message);
-        inputEl.value = '';
-        var thinking = add('s', 'Thinking… (vision may take a bit)');
-        fetch('/api/ai/chat', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            message: message,
-            history: history,
-            attach_snapshot: wantAttach
-          })
-        }).then(function (r) { return r.json(); }).then(function (d) {
-          thinking.remove();
-          if (!d.success) {
-            add('e', d.error || 'request failed');
-            return;
-          }
-          if (d.snapshot_data_url) {
-            thumb.src = d.snapshot_data_url;
-            var img = document.createElement('img');
-            img.className = 'm-thumb';
-            img.src = d.snapshot_data_url;
-            img.alt = 'snapshot';
-            img.title = 'Attached camera still';
-            img.onclick = function () { window.open(d.snapshot_data_url, '_blank'); };
-            userEl.appendChild(img);
-          }
-          add('a', 'AI: ' + (d.reply || '(empty)'));
-          history.push({ role: 'user', content: message });
-          history.push({ role: 'assistant', content: d.reply || '' });
-          if (history.length > 20) history = history.slice(-20);
-          var ctx = (d.context_tokens_est != null) ? (' · ~' + d.context_tokens_est + ' tok') : '';
-          statusEl.textContent = (d.model || '') + (d.snapshot_attached ? ' · vision' : ' · text') + ctx;
-          scheduleEstimate();
-        }).catch(function (e) {
-          thinking.remove();
-          add('e', String(e));
-        }).finally(function () {
-          sendBtn.disabled = false;
-        });
-      }
-
-      sendBtn.addEventListener('click', send);
-      snapBtn.addEventListener('click', refreshSnap);
-      compressBtn.addEventListener('click', compress);
-      compressBtn.addEventListener('mouseenter', refreshEstimate);
-      attachEl.addEventListener('change', scheduleEstimate);
-      inputEl.addEventListener('input', scheduleEstimate);
-      inputEl.addEventListener('keydown', function (e) {
-        if (e.key === 'Enter' && !e.shiftKey) {
-          e.preventDefault();
-          send();
-        }
-      });
-
-      add('s', 'AI Vision drawer ready — expand and ask about the camera view. Hover Compress for token estimate.');
-      loadCfg();
-      refreshSnap();
-      // Open once so the update is obvious on first load
-      if (!sessionStorage.getItem('ugv_ai_drawer_seen')) {
-        drawer.classList.add('open');
-        sessionStorage.setItem('ugv_ai_drawer_seen', '1');
-      }
-    })();
-    </script>
 
     <div id="video-del-tips" class="video-del-tips"><p>Successfully deleted video</p></div>
     <footer style="visibility: hidden;">
