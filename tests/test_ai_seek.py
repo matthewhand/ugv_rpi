@@ -18,9 +18,13 @@ from ai_seek import (  # noqa: E402
     parse_llm_goal,
     parse_llm_found_payload,
     parse_seek_referee,
+    parse_on_found,
+    format_on_found_tts,
     detector_labels,
     REFEREE_DETECTOR,
     REFEREE_LLM,
+    ON_FOUND_NONE,
+    ON_FOUND_TTS,
 )
 
 
@@ -97,6 +101,15 @@ class TestRefereeAndLlmParse(unittest.TestCase):
         self.assertEqual(parse_seek_referee('opencv'), REFEREE_DETECTOR)
         self.assertEqual(parse_seek_referee('llm'), REFEREE_LLM)
         self.assertEqual(parse_seek_referee('vision'), REFEREE_LLM)
+
+    def test_on_found_parse_and_tts(self):
+        self.assertEqual(parse_on_found('none'), ON_FOUND_NONE)
+        self.assertEqual(parse_on_found('tts'), ON_FOUND_TTS)
+        self.assertEqual(parse_on_found('announce'), ON_FOUND_TTS)
+        self.assertEqual(
+            format_on_found_tts('I have found the {goal}.', 'dog'),
+            'I have found the dog.',
+        )
 
     def test_llm_goal_free_text(self):
         lab, err = parse_llm_goal('red fire extinguisher')

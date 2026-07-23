@@ -52,6 +52,34 @@ DEFAULT_SEEK_TIMEOUT_S = 0.0
 DEFAULT_SEEK_CONF = 0.22
 DEFAULT_SEEK_STEP_PAUSE_S = 0.35
 
+# What to do when the referee reports found
+ON_FOUND_NONE = 'none'
+ON_FOUND_TTS = 'tts'
+VALID_ON_FOUND = frozenset({ON_FOUND_NONE, ON_FOUND_TTS})
+DEFAULT_ON_FOUND = ON_FOUND_NONE
+DEFAULT_ON_FOUND_TTS = 'I have found the {goal}.'
+
+
+def parse_on_found(value: str) -> str:
+    raw = (value or '').strip().lower()
+    if raw in ('', 'nothing', 'no', 'off', 'idle'):
+        return ON_FOUND_NONE
+    if raw in ('tts', 'speak', 'announce', 'say'):
+        return ON_FOUND_TTS
+    if raw in VALID_ON_FOUND:
+        return raw
+    return ON_FOUND_NONE
+
+
+def format_on_found_tts(template: str, goal: str) -> str:
+    """Fill {goal} / {label} in the TTS template."""
+    g = (goal or 'target').strip() or 'target'
+    tmpl = (template or DEFAULT_ON_FOUND_TTS).strip() or DEFAULT_ON_FOUND_TTS
+    try:
+        return tmpl.format(goal=g, label=g, target=g)
+    except Exception:
+        return f'I have found the {g}.'
+
 
 def detector_labels() -> List[str]:
     """Sorted MobileNet-SSD class names available for dropdown (no background)."""
@@ -260,6 +288,9 @@ class SeekController:
             'error': None,
             'message': 'Idle',
             'history': [],
+            'on_found': DEFAULT_ON_FOUND,
+            'on_found_tts': DEFAULT_ON_FOUND_TTS,
+            'on_found_done': False,
         }
 
     def status(self) -> Dict[str, Any]:
@@ -290,6 +321,8 @@ class SeekController:
         timeout_s: float = DEFAULT_SEEK_TIMEOUT_S,
         conf_threshold: float = DEFAULT_SEEK_CONF,
         referee: str = REFEREE_DETECTOR,
+        on_found: str = DEFAULT_ON_FOUND,
+        on_found_tts: str = DEFAULT_ON_FOUND_TTS,
     ) -> Dict[str, Any]:
         """Start seek. loop_fn(controller, goal_key, conf, max_steps, timeout_s) runs in a thread."""
         referee = parse_seek_referee(referee)
@@ -299,6 +332,10 @@ class SeekController:
             label, err = parse_seek_goal(goal_text)
         if err:
             return {'success': False, 'error': err}
+        on_found = parse_on_found(on_found)
+        tts_tmpl = (on_found_tts or DEFAULT_ON_FOUND_TTS).strip() or DEFAULT_ON_FOUND_TTS
+        if len(tts_tmpl) > 200:
+            tts_tmpl = tts_tmpl[:200]
         with self._lock:
             if self._state['phase'] == 'running':
                 return {'success': False, 'error': 'seek already running', 'status': dict(self._state)}
@@ -318,6 +355,9 @@ class SeekController:
                 'max_steps': ms,  # 0 = unlimited
                 'timeout_s': ts,  # 0 = no time limit
                 'conf_threshold': float(conf_threshold),
+                'on_found': on_found,
+                'on_found_tts': tts_tmpl,
+                'on_found_done': False,
                 'started_at': time.time(),
                 'message': f'Seeking {label} ({referee})…',
             })
@@ -331,6 +371,14 @@ class SeekController:
         self._thread = t
         t.start()
         return {'success': True, 'status': self.status()}
+
+    def on_found_action(self) -> str:
+        with self._lock:
+            return self._state.get('on_found') or ON_FOUND_NONE
+
+    def on_found_tts_template(self) -> str:
+        with self._lock:
+            return self._state.get('on_found_tts') or DEFAULT_ON_FOUND_TTS
 
     def update(self, **kwargs) -> None:
         with self._lock:

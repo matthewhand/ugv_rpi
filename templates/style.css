@@ -1205,6 +1205,27 @@ ul.video-list li a:hover div .normal_btn_play::before{background-image: url('./i
   user-select: none;
 }
 .ugv-seek-radio input { accent-color: #5b8cff; }
+.ugv-seek-onfound {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 4px 0 2px;
+}
+.ugv-seek-onfound > label.hint {
+  font-size: 11px;
+  color: #9aa3b2;
+}
+.ugv-seek-onfound select {
+  width: 100%;
+  box-sizing: border-box;
+  background: #12151d;
+  border: 1px solid #2a2f3d;
+  color: #e8eaef;
+  border-radius: 8px;
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 12px;
+}
 .ugv-row-actions {
   display: flex;
   flex-wrap: wrap;

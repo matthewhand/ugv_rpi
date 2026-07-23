@@ -417,12 +417,38 @@
       .catch(function () {});
   }
 
+  function getSeekOnFound() {
+    var sel = $('seek-on-found');
+    return (sel && sel.value) || 'none';
+  }
+
+  function getSeekOnFoundTts() {
+    var inp = $('seek-on-found-tts');
+    var v = (inp && inp.value) || '';
+    return v.trim() || 'I have found the {goal}.';
+  }
+
+  function syncSeekOnFoundUI() {
+    var wrap = $('seek-on-found-tts-wrap');
+    if (!wrap) return;
+    wrap.hidden = getSeekOnFound() !== 'tts';
+  }
+
   function seekStart() {
     var goal = getSeekGoal();
     var referee = getSeekReferee();
+    var onFound = getSeekOnFound();
+    var onFoundTts = getSeekOnFoundTts();
     lastSeekCheckSeq = 0;
     lastSeekStep = -1;
-    seekLog('Starting seek (' + referee + ') for: ' + goal);
+    seekLog(
+      'Starting seek (' +
+        referee +
+        ') for: ' +
+        goal +
+        ' · upon found: ' +
+        (onFound === 'tts' ? 'TTS “' + onFoundTts + '”' : 'do nothing')
+    );
     setDetectorBar(
       'running',
       (referee === 'llm' ? 'Judge' : 'Detector') + ': starting…',
@@ -436,6 +462,8 @@
         referee: referee,
         max_steps: 0, // unlimited; stop on found / Stop (timeout_s 0 = no time limit)
         timeout_s: 0,
+        on_found: onFound,
+        on_found_tts: onFoundTts,
       }),
     })
       .then(function (r) {
@@ -546,6 +574,9 @@
     radios.forEach(function (r) {
       r.addEventListener('change', syncSeekRefereeUI);
     });
+    var onFoundSel = $('seek-on-found');
+    if (onFoundSel) onFoundSel.addEventListener('change', syncSeekOnFoundUI);
+    syncSeekOnFoundUI();
     try {
       var saved = localStorage.getItem(SEEK_REFEREE_KEY);
       if (saved === 'llm' && $('seek-referee-llm')) $('seek-referee-llm').checked = true;

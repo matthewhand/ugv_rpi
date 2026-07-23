@@ -2737,14 +2737,20 @@ from ai_seek import (
     parse_llm_goal,
     parse_seek_referee,
     parse_llm_found_payload,
+    parse_on_found,
+    format_on_found_tts,
     evaluate_goal_detections,
     detector_labels,
     REFEREE_DETECTOR,
     REFEREE_LLM,
+    ON_FOUND_NONE,
+    ON_FOUND_TTS,
     DEFAULT_SEEK_MAX_STEPS,
     DEFAULT_SEEK_TIMEOUT_S,
     DEFAULT_SEEK_CONF,
     DEFAULT_SEEK_STEP_PAUSE_S,
+    DEFAULT_ON_FOUND,
+    DEFAULT_ON_FOUND_TTS,
 )
 
 _SEEK_PILOT_SHARED = (
@@ -2933,6 +2939,24 @@ def _seek_disable_steady():
         olog.warn('ai_seek', f'Could not disable gimbal steady: {e}', error=str(e)[:160])
 
 
+def _seek_run_on_found(ctrl, label):
+    """Run configured post-found action once (default: nothing)."""
+    action = ctrl.on_found_action()
+    if action == ON_FOUND_NONE:
+        return
+    if action == ON_FOUND_TTS:
+        phrase = format_on_found_tts(ctrl.on_found_tts_template(), label)
+        try:
+            audio_ctrl.play_speech_thread(phrase)
+            ctrl.update(on_found_done=True, on_found_phrase=phrase)
+            olog.info('ai_seek', f'On-found TTS: {phrase[:100]}', goal=label, action='tts')
+        except Exception as e:
+            olog.warn('ai_seek', f'On-found TTS failed: {e}', error=str(e)[:200], goal=label)
+            ctrl.update(on_found_done=False, on_found_error=str(e)[:200])
+        return
+    olog.warn('ai_seek', f'Unknown on_found action: {action}', action=action)
+
+
 def _seek_force_tools_on():
     """Ensure CV + motion + gimbal tools are offered during Seek pilot turns."""
     try:
@@ -3087,6 +3111,7 @@ def _seek_loop(ctrl, label, conf, max_steps, timeout_s):
                 reason = check.get('reason') or ''
                 best = check.get('best') or {}
                 conf_s = best.get('confidence', '?')
+                _seek_run_on_found(ctrl, label)
                 _halt(
                     'found',
                     message=(
@@ -3262,6 +3287,7 @@ def _seek_loop(ctrl, label, conf, max_steps, timeout_s):
         check = seek_goal_check(label, referee=referee, conf_threshold=conf)
         if check.get('found'):
             reason = check.get('reason') or ''
+            _seek_run_on_found(ctrl, label)
             _halt(
                 'found',
                 message=f'Found {label} via {referee} after final step' + (f' — {reason}' if reason else ''),
@@ -3326,6 +3352,8 @@ def api_ai_seek_start():
             timeout_s = max(5.0, min(7200.0, timeout_s))
     conf = float(data.get('conf_threshold') or DEFAULT_SEEK_CONF)
     conf = max(0.05, min(0.95, conf))
+    on_found = parse_on_found(data.get('on_found') or data.get('upon_found') or DEFAULT_ON_FOUND)
+    on_found_tts = data.get('on_found_tts') or data.get('tts_phrase') or DEFAULT_ON_FOUND_TTS
     result = seek_controller.start(
         goal,
         loop_fn=_seek_loop,
@@ -3333,13 +3361,15 @@ def api_ai_seek_start():
         timeout_s=timeout_s,
         conf_threshold=conf,
         referee=referee,
+        on_found=on_found,
+        on_found_tts=on_found_tts,
     )
     code = 200 if result.get('success') else 400
     if result.get('success'):
         olog.info(
             'ai_seek',
-            f'Seek started ({referee}) for {result.get("status", {}).get("goal_label")}',
-            goal=goal, referee=referee,
+            f'Seek started ({referee}) for {result.get("status", {}).get("goal_label")} on_found={on_found}',
+            goal=goal, referee=referee, on_found=on_found,
         )
     return jsonify(result), code
 

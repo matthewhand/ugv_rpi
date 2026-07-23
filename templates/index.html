@@ -423,6 +423,19 @@
             <div class="ugv-seek-form" id="seek-goal-llm-wrap" hidden>
               <input type="text" id="seek-goal-text" placeholder="e.g. red fire extinguisher by the door" autocomplete="off" />
             </div>
+            <div class="ugv-seek-onfound">
+              <label class="hint" for="seek-on-found">Upon found</label>
+              <select id="seek-on-found" aria-label="Upon found action">
+                <option value="none" selected>Do nothing</option>
+                <option value="tts">TTS announcement</option>
+              </select>
+              <div id="seek-on-found-tts-wrap" class="ugv-seek-form" hidden>
+                <input type="text" id="seek-on-found-tts" maxlength="200"
+                  value="I have found the {goal}."
+                  placeholder="I have found the {goal}."
+                  title="Use {goal} for the target name" autocomplete="off" />
+              </div>
+            </div>
             <div class="ugv-row-actions">
               <button type="button" id="seek-start-btn">Seek</button>
               <button type="button" class="danger" id="seek-stop-btn">Stop</button>
