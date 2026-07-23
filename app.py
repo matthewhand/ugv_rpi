@@ -139,6 +139,42 @@ def get_control_mode():
         return _control_mode
 
 
+def _drive_sign(name, default=1.0):
+    """Read ±1 drive sign from env (preferred) or config.yaml base_config."""
+    env_key = 'UGV_DRIVE_LINEAR_SIGN' if name == 'linear' else 'UGV_DRIVE_ANGULAR_SIGN'
+    env = (os.environ.get(env_key) or '').strip()
+    if env != '':
+        try:
+            return -1.0 if float(env) < 0 else 1.0
+        except ValueError:
+            pass
+    try:
+        cfg_key = 'drive_linear_sign' if name == 'linear' else 'drive_angular_sign'
+        v = f.get('base_config', {}).get(cfg_key, default)
+        return -1.0 if float(v) < 0 else 1.0
+    except (TypeError, ValueError):
+        return 1.0 if default >= 0 else -1.0
+
+
+def body_to_hw_twist(linear_x, angular_z=0.0):
+    """Map body-frame velocities (camera-forward +linear) to hardware twist.
+
+    Single choke point for AI T:13, ROS cmd_vel, and any other twist API.
+    """
+    s_lin = _drive_sign('linear', 1.0)
+    s_ang = _drive_sign('angular', 1.0)
+    return float(linear_x) * s_lin, float(angular_z) * s_ang
+
+
+def body_to_hw_diff(left, right):
+    """Map body-frame differential wheel speeds to hardware T:1 L/R.
+
+    Same linear sign as twist so stick-forward and AI-forward stay aligned.
+    """
+    s_lin = _drive_sign('linear', 1.0)
+    return float(left) * s_lin, float(right) * s_lin
+
+
 def set_control_mode(mode, *, source='api'):
     """Set 'direct' (Flask owns UART) or 'ros2' (release UART for ugv_bringup).
 
@@ -2074,7 +2110,15 @@ def _execute_motion_via_mode(name, args):
         if name == 'stop_motors':
             _clear_ai_motion_lock()
             _cancel_ai_drive_timer()
-        result = ros_motion.execute_motion_tool(name, args)
+        ros_args = dict(args)
+        if name == 'send_motor_command':
+            # Same body→hardware mapping as direct serial T:13
+            body_lin = float(ros_args.get('linear_x', 0.0) or 0.0)
+            body_ang = float(ros_args.get('angular_z', 0.0) or 0.0)
+            hw_lin, hw_ang = body_to_hw_twist(body_lin, body_ang)
+            ros_args['linear_x'] = hw_lin
+            ros_args['angular_z'] = hw_ang
+        result = ros_motion.execute_motion_tool(name, ros_args)
         if isinstance(result, dict):
             result.setdefault('control_mode', mode)
             ok = bool(result.get('ok', True)) and not result.get('error')
@@ -2085,6 +2129,7 @@ def _execute_motion_via_mode(name, args):
                 result['ui_heartbeat_lock_s'] = max(
                     0.0, _ai_motion_lock_until - time.time()
                 )
+                result['drive_linear_sign'] = _drive_sign('linear')
             olog.log(
                 'error' if not ok else level,
                 'ai_motion',
@@ -2121,8 +2166,10 @@ def _execute_motion_via_mode(name, args):
         }
 
     if name == 'send_motor_command':
-        lin = _clamp(float(args.get('linear_x', 0.0)), -max_lin, max_lin)
-        ang = _clamp(float(args.get('angular_z', 0.0)), -max_ang, max_ang)
+        # Body-frame (camera-forward +linear) before hardware mapping
+        body_lin = _clamp(float(args.get('linear_x', 0.0)), -max_lin, max_lin)
+        body_ang = _clamp(float(args.get('angular_z', 0.0)), -max_ang, max_ang)
+        lin, ang = body_to_hw_twist(body_lin, body_ang)
         cont = args.get('continuous')
         if isinstance(cont, str):
             cont = cont.strip().lower() in ('1', 'true', 'yes', 'on')
@@ -2159,9 +2206,11 @@ def _execute_motion_via_mode(name, args):
             scheduled_stop_ms = dur
         olog.info(
             'ai_motion',
-            f'AI drive lin={lin:.3f} ang={ang:.3f} dur={dur}ms continuous={is_continuous} (direct)',
+            f'AI drive body_lin={body_lin:.3f}→hw_X={lin:.3f} ang={body_ang:.3f}→{ang:.3f} '
+            f'dur={dur}ms continuous={is_continuous} (direct)',
             tool=name, control_mode=mode, path='serial', ok=True,
-            linear_x=lin, angular_z=ang, duration_ms=dur,
+            linear_x=body_lin, angular_z=body_ang, hw_linear_x=lin, hw_angular_z=ang,
+            drive_linear_sign=_drive_sign('linear'), duration_ms=dur,
             continuous=is_continuous, async_stop=async_stop, stopped=False,
             ui_heartbeat_lock_s=max(0.0, _ai_motion_lock_until - time.time()),
         )
@@ -2170,8 +2219,11 @@ def _execute_motion_via_mode(name, args):
             'backend': 'direct',
             'control_mode': mode,
             'path': 'serial',
-            'linear_x': lin,
-            'angular_z': ang,
+            'linear_x': body_lin,
+            'angular_z': body_ang,
+            'hw_linear_x': lin,
+            'hw_angular_z': ang,
+            'drive_linear_sign': _drive_sign('linear'),
             'duration_ms': dur,
             'continuous': is_continuous,
             'stopped': False,
@@ -3781,21 +3833,39 @@ def _route_json_command(cmd):
 
     # ---- Chassis wheels ----
     if t in chassis_types:
+        # Apply universal body→hardware signs so UI stick, AI T:13, and ROS agree.
+        if t in (13, '13') or (('X' in cmd or 'x' in cmd) and t not in (1, '1')):
+            body_lin = float(cmd.get('X', cmd.get('x', 0)) or 0)
+            body_ang = float(cmd.get('Z', cmd.get('z', 0)) or 0)
+            hw_lin, hw_ang = body_to_hw_twist(body_lin, body_ang)
+            cmd = dict(cmd)
+            cmd['X'] = hw_lin
+            cmd['Z'] = hw_ang
+            if 'x' in cmd:
+                cmd['x'] = hw_lin
+            if 'z' in cmd:
+                cmd['z'] = hw_ang
+        elif t in (1, '1') or 'L' in cmd or 'R' in cmd:
+            L = float(cmd.get('L', 0) or 0)
+            R = float(cmd.get('R', 0) or 0)
+            hw_L, hw_R = body_to_hw_diff(L, R)
+            cmd = dict(cmd)
+            cmd['L'] = hw_L
+            cmd['R'] = hw_R
+
         if mode == 'ros2':
             try:
                 import ros_motion
-                # Map T:1 L/R roughly to twist, or T:13 X/Z.
-                # Stock Waveshare: UI T:1 positive L/R = forward; ROS/AI positive
-                # linear_x = forward (same convention on serial and cmd_vel).
+                # Values already sign-mapped above for T:13; for T:1 derive twist from HW L/R
+                # (same as body after sign). Prefer twist fields if present.
                 if t in (13, '13') or 'X' in cmd or 'x' in cmd:
                     lin = float(cmd.get('X', cmd.get('x', 0)) or 0)
                     ang = float(cmd.get('Z', cmd.get('z', 0)) or 0)
                 else:
-                    # Differential L/R → approximate unicycle
                     L = float(cmd.get('L', 0) or 0)
                     R = float(cmd.get('R', 0) or 0)
                     lin = (L + R) / 2.0
-                    ang = (R - L)  # crude; good enough for stick heartbeats
+                    ang = (R - L)
                 result = ros_motion.publish_cmd_vel(lin, ang)
                 return {'path': 'ros2', 'ok': bool(result.get('ok')), 'mode': mode, 'result': result}
             except Exception as e:

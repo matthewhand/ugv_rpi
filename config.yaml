@@ -20,6 +20,12 @@ base_config:
   robot_name: UGV Rover
   sbc_version: 0.93
   use_lidar: false
+  # Body frame: +linear = camera-forward, +angular = CCW/left turn.
+  # Applied once for T:1 L/R, T:13 X/Z, and ROS cmd_vel (AI + UI + Seek).
+  # This rover needs -1 so software "forward" matches camera-forward motion.
+  # Override with env UGV_DRIVE_LINEAR_SIGN / UGV_DRIVE_ANGULAR_SIGN (±1).
+  drive_linear_sign: -1
+  drive_angular_sign: 1
 cmd_config:
   cmd_arm_ctrl_ui: 144
   cmd_gimbal_base_ctrl: 141
