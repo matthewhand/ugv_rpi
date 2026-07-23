@@ -53,7 +53,6 @@ OpenAI-compatible chat UI at `/ai` with optional live camera still attach.
 ### Drive safety / conventions
 
 - Positive `linear_x` / `T:13` X = forward (ROS unicycle). UI `T:1` positive L/R = forward on stock firmware.
-- If physical forward is reversed relative to that convention, set `UGV_INVERT_LINEAR=1` (and optionally `UGV_INVERT_ANGULAR=1`).
 - AI chassis drives are **timed by default**; continuous motion requires an explicit continuous flag.
 - Motion tools must be enabled in the AI capability UI before the LLM can call them.
 - **UI “Freq. stop” (2s heartbeat):** the main dashboard re-sends last wheel cmd every 2s (idle = `L=0/R=0` stop). That can cut AI timed drives short if a control tab is open. Toggle **Freq. stop: OFF** for AI sessions. The server also arms an **AI motion lock** during timed AI drives that ignores those zero heartbeats until the maneuver ends.

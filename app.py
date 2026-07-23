@@ -1764,11 +1764,8 @@ def _execute_motion_via_mode(name, args):
         }
 
     if name == 'send_motor_command':
-        import ros_motion
         lin = _clamp(float(args.get('linear_x', 0.0)), -max_lin, max_lin)
         ang = _clamp(float(args.get('angular_z', 0.0)), -max_ang, max_ang)
-        # Same UGV_INVERT_LINEAR/ANGULAR as ROS publish_cmd_vel (see ros_motion).
-        lin, ang = ros_motion.apply_drive_inverts(lin, ang)
         cont = args.get('continuous')
         if isinstance(cont, str):
             cont = cont.strip().lower() in ('1', 'true', 'yes', 'on')
@@ -2779,8 +2776,7 @@ def _route_json_command(cmd):
                 import ros_motion
                 # Map T:1 L/R roughly to twist, or T:13 X/Z.
                 # Stock Waveshare: UI T:1 positive L/R = forward; ROS/AI positive
-                # linear_x = forward. Invert (if needed) is applied inside
-                # publish_cmd_vel via UGV_INVERT_LINEAR/ANGULAR — do not flip UI maps.
+                # linear_x = forward (same convention on serial and cmd_vel).
                 if t in (13, '13') or 'X' in cmd or 'x' in cmd:
                     lin = float(cmd.get('X', cmd.get('x', 0)) or 0)
                     ang = float(cmd.get('Z', cmd.get('z', 0)) or 0)
