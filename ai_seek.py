@@ -300,6 +300,7 @@ class SeekController:
             'llm_scene_nav': DEFAULT_LLM_SCENE_NAV,
             'llm_nav_interval': DEFAULT_LLM_NAV_INTERVAL,
             'last_views': [],
+            'panorama_data_url': None,
         }
 
     def status(self) -> Dict[str, Any]:

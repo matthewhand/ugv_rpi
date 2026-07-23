@@ -8,66 +8,58 @@
     <script src="./socket.io.js"></script>
     <link rel="stylesheet" type="text/css" href="./style.css">
     <style type="text/css">
-      .ugv-seek-thumbs-strip {
-        display: flex;
-        gap: 6px;
+      .seek-pano-card {
         margin-top: 8px;
-        justify-content: space-between;
-      }
-      .seek-thumb-card {
-        flex: 1;
         background: #141720;
         border: 1px solid #2a2f3d;
         border-radius: 6px;
         overflow: hidden;
-        text-align: center;
         transition: all 0.25s ease;
       }
-      .seek-thumb-title {
-        font-size: 9px;
-        font-weight: 700;
-        padding: 2px 0;
+      .seek-pano-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 4px 8px;
         background: #1a1d27;
+        font-size: 10px;
+        font-weight: 700;
         color: #9aa3b2;
         letter-spacing: 0.4px;
       }
-      .seek-thumb-img-wrap {
+      .seek-pano-img-wrap {
         position: relative;
         width: 100%;
-        height: 52px;
+        height: 76px;
         background: #090a0e;
         display: flex;
         align-items: center;
         justify-content: center;
       }
-      .seek-thumb-img {
+      .seek-pano-img {
         width: 100%;
         height: 100%;
-        object-fit: cover;
+        object-fit: contain;
         display: block;
       }
-      .seek-thumb-img:not([src]), .seek-thumb-img[src=""], .seek-thumb-img[src="#"] {
+      .seek-pano-img:not([src]), .seek-pano-img[src=""], .seek-pano-img[src="#"] {
         display: none !important;
       }
       .seek-target-badge {
-        position: absolute;
-        bottom: 2px;
-        left: 50%;
-        transform: translateX(-50%);
         background: #00e676;
         color: #000;
         font-weight: 800;
-        font-size: 8px;
-        padding: 1px 4px;
+        font-size: 9px;
+        padding: 1px 5px;
         border-radius: 6px;
-        box-shadow: 0 0 6px rgba(0, 230, 118, 0.8);
+        box-shadow: 0 0 8px rgba(0, 230, 118, 0.8);
         white-space: nowrap;
       }
-      .seek-thumb-card.has-target {
+      .seek-pano-card.has-target {
         border: 2px solid #00e676 !important;
-        box-shadow: 0 0 10px rgba(0, 230, 118, 0.5);
+        box-shadow: 0 0 12px rgba(0, 230, 118, 0.5);
       }
-      .seek-thumb-card.has-target .seek-thumb-title {
+      .seek-pano-card.has-target .seek-pano-header {
         background: #00e676;
         color: #000;
       }
@@ -467,28 +459,14 @@
             </div>
             <img class="ugv-preview-img" id="seek-live-preview" src="/video_feed" alt="Live feed" />
             <div class="ugv-seek-status" id="seek-status">Phase: <span class="phase-idle">idle</span></div>
-            <!-- 3-Thumbnail Strip (Left, Centre, Right) -->
-            <div id="seek-thumbnails-strip" class="ugv-seek-thumbs-strip">
-              <div id="seek-thumb-card-left" class="seek-thumb-card">
-                <div class="seek-thumb-title">LEFT (-90°)</div>
-                <div class="seek-thumb-img-wrap">
-                  <img id="seek-thumb-img-left" class="seek-thumb-img" src="" alt="Left view" />
-                  <span id="seek-badge-left" class="seek-target-badge" hidden>🎯 GOAL MATCH</span>
-                </div>
+            <!-- 180° Panoramic View Thumbnail -->
+            <div id="seek-panorama-card" class="seek-pano-card">
+              <div class="seek-pano-header">
+                <span>180° PANORAMIC SCAN [ LEFT (-90°) | CENTRE (0°) | RIGHT (+90°) ]</span>
+                <span id="seek-pano-badge" class="seek-target-badge" hidden>🎯 GOAL MATCH</span>
               </div>
-              <div id="seek-thumb-card-straight" class="seek-thumb-card">
-                <div class="seek-thumb-title">CENTRE (0°)</div>
-                <div class="seek-thumb-img-wrap">
-                  <img id="seek-thumb-img-straight" class="seek-thumb-img" src="" alt="Centre view" />
-                  <span id="seek-badge-straight" class="seek-target-badge" hidden>🎯 GOAL MATCH</span>
-                </div>
-              </div>
-              <div id="seek-thumb-card-right" class="seek-thumb-card">
-                <div class="seek-thumb-title">RIGHT (+90°)</div>
-                <div class="seek-thumb-img-wrap">
-                  <img id="seek-thumb-img-right" class="seek-thumb-img" src="" alt="Right view" />
-                  <span id="seek-badge-right" class="seek-target-badge" hidden>🎯 GOAL MATCH</span>
-                </div>
+              <div class="seek-pano-img-wrap">
+                <img id="seek-pano-img" class="seek-pano-img" src="" alt="180° Panoramic view" />
               </div>
             </div>
           </div>

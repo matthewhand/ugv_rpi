@@ -2867,12 +2867,23 @@ def opencv_goal_check(goal_label, conf_threshold=DEFAULT_SEEK_CONF, frame=None):
         frame = cvf.grab_bgr_frame()
     dets = []
     if frame is not None:
-        dets = cvf.detect_objects_structured(frame, conf_threshold=float(conf_threshold))
+        dets = cvf.detect_objects_structured(frame, conf_threshold=0.12)
     else:
         dets = list(getattr(cvf, 'last_detections', []) or [])
+    
+    raw_labels = [
+        f"{d.get('label')}: {round(float(d.get('confidence', 0))*100)}%"
+        for d in (dets or []) if isinstance(d, dict) and d.get('label')
+    ]
+    olog.info(
+        'ai_seek',
+        f'CV scan for target "{goal_label}" (conf>={conf_threshold}) — saw {len(dets)} objects: {", ".join(raw_labels) or "none"}',
+        goal=goal_label, conf_threshold=conf_threshold, raw_count=len(dets), detected_objects=raw_labels,
+    )
     result = evaluate_goal_detections(dets, goal_label, conf_threshold=conf_threshold)
     result['frame_ok'] = frame is not None
     result['referee'] = REFEREE_DETECTOR
+    result['raw_detections'] = raw_labels
     return result
 
 
@@ -3571,7 +3582,12 @@ def _seek_loop(ctrl, label, conf, max_steps, timeout_s):
                         _halt('found', message=f'Found {label} via detector at step {step}', step=step, last_detection=found_det)
                         return
 
+                    stitched_jpeg = _stitch_panorama_views(views_to_analyze)
+                    b64_pano = base64.b64encode(stitched_jpeg).decode('ascii') if stitched_jpeg else ''
+                    pano_url = f'data:image/jpeg;base64,{b64_pano}' if b64_pano else ''
+
                     ctrl.update(
+                        panorama_data_url=pano_url,
                         last_views=[{
                             'name': v['name'], 'pan_deg': v['pan_deg'], 'bytes': v['bytes'],
                             'data_url': v.get('data_url'), 'has_target': v.get('has_target'),

@@ -317,66 +317,63 @@
     }
   }
 
-  function renderSeekThumbnails(views) {
-    if (!Array.isArray(views) || !views.length) return;
-    views.forEach(function (v) {
-      var name = (v.name || '').toLowerCase();
-      if (name === 'center') name = 'straight';
-      var imgEl = $('seek-thumb-img-' + name);
-      var cardEl = $('seek-thumb-card-' + name);
-      var badgeEl = $('seek-badge-' + name);
-      if (imgEl) {
-        if (v.data_url) {
-          imgEl.src = v.data_url;
-          imgEl.style.display = 'block';
-        } else {
-          imgEl.removeAttribute('src');
-          imgEl.style.display = 'none';
-        }
+  function renderSeekPanorama(st) {
+    var imgEl = $('seek-pano-img');
+    var cardEl = $('seek-panorama-card');
+    var badgeEl = $('seek-pano-badge');
+    var dataUrl = st.panorama_data_url;
+    var hasTarget = false;
+    if (Array.isArray(st.last_views)) {
+      hasTarget = st.last_views.some(function (v) { return v.has_target; });
+    }
+    if (st.last_detection && st.last_detection.found) {
+      hasTarget = true;
+    }
+
+    if (imgEl) {
+      if (dataUrl) {
+        imgEl.src = dataUrl;
+        imgEl.style.display = 'block';
+      } else {
+        imgEl.removeAttribute('src');
+        imgEl.style.display = 'none';
       }
-      if (cardEl) {
-        if (v.has_target) {
-          cardEl.classList.add('has-target');
-        } else {
-          cardEl.classList.remove('has-target');
-        }
+    }
+    if (cardEl) {
+      if (hasTarget) {
+        cardEl.classList.add('has-target');
+      } else {
+        cardEl.classList.remove('has-target');
       }
-      if (badgeEl) {
-        badgeEl.hidden = !v.has_target;
-      }
-    });
+    }
+    if (badgeEl) {
+      badgeEl.hidden = !hasTarget;
+    }
   }
 
   function renderSeekStatus(st, opts) {
-    var el = $('seek-status');
-    if (!el || !st) return;
+    st = st || {};
     opts = opts || {};
-    var phase = st.phase || 'idle';
-    var cls = 'phase-' + phase;
-    var det = st.last_detection || {};
-    var ref = st.referee || det.referee || '—';
-    var seq = st.last_check_seq || 0;
-    var step = st.step || 0;
     var fired = false;
-    if (seq && seq !== lastSeekCheckSeq) {
+    var curSeq = st.last_check_seq || 0;
+    var curStep = st.step !== undefined ? st.step : -1;
+    if (
+      curSeq > 0 &&
+      (curSeq > lastSeekCheckSeq ||
+        (curSeq === lastSeekCheckSeq && curStep > lastSeekStep))
+    ) {
+      lastSeekCheckSeq = curSeq;
+      lastSeekStep = curStep;
       fired = true;
-      lastSeekCheckSeq = seq;
-    } else if (step && step !== lastSeekStep && phase === 'running') {
-      // step advanced even if seq missing (older server)
-      fired = lastSeekStep >= 0;
-      lastSeekStep = step;
     }
-    if (step) lastSeekStep = step;
-
+    var phase = st.phase || 'idle';
+    var el = $('seek-status');
+    if (!el) return;
+    var cls = 'phase-' + phase;
+    var ref = st.referee || 'detector';
+    var det = st.last_detection;
     var lines = [
-      'Phase: ' + phase,
-      'Seek cycle: ' + (st.seek_phase || '—'),
-      'Nav: ' +
-        ((st.last_nav && st.last_nav.action) || '—') +
-        (st.last_nav && st.last_nav.drive_distance
-          ? ' · ' + st.last_nav.drive_distance
-          : '') +
-        (st.last_nav && st.last_nav.reason ? ' — ' + String(st.last_nav.reason).slice(0, 80) : ''),
+      'Phase: ' + phase.toUpperCase(),
       'Referee: ' + ref,
       'Goal: ' + (st.goal_label || st.goal_text || '—'),
       'Step: ' +
@@ -421,9 +418,7 @@
       lines.slice(1).join('\n');
 
     updateDetectorBar(st, opts);
-    if (Array.isArray(st.last_views)) {
-      renderSeekThumbnails(st.last_views);
-    }
+    renderSeekPanorama(st);
 
     if (fired && phase === 'running') {
       pulseDetectorFire(st);
