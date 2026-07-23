@@ -787,13 +787,50 @@ function steadyCtrl(inputCmd, inputBias){
     }
 }
 
+// heartbeat_send_flag: also cleared while a gamepad is connected (see gamepad handlers).
+// chassis_heartbeat_enabled: user toggle — when false, skip the 2s idle L/R resend so
+// AI timed drives (T:13) are not cut short by neutral T:1 L=0/R=0 "frequent stop" packets.
 var heartbeat_send_flag = true;
+var chassis_heartbeat_enabled = (function () {
+    try {
+        return localStorage.getItem('ugv_chassis_heartbeat') !== '0';
+    } catch (e) {
+        return true;
+    }
+})();
+
 function heartbeat_send(){
-    if (socketJson.connected && heartbeat_send_flag && !cv_heartbeat_stop_flag) {
+    if (socketJson.connected && heartbeat_send_flag && chassis_heartbeat_enabled && !cv_heartbeat_stop_flag) {
         cmdJsonCmd({'T':cmd_movition_ctrl,'L':heartbeat_left,'R':heartbeat_right});
     }
 }
 setInterval(heartbeat_send, 2000);
+
+function updateChassisHeartbeatBtn() {
+    var btn = document.getElementById('chassis-heartbeat-btn');
+    if (!btn) return;
+    if (chassis_heartbeat_enabled) {
+        btn.textContent = 'Freq. stop: ON';
+        btn.style.color = '#ffaa55';
+        btn.title = 'Every 2s the UI re-sends last wheel cmd (idle = L0/R0 stop). Turn OFF while using AI timed drives so heartbeats do not cut them short.';
+    } else {
+        btn.textContent = 'Freq. stop: OFF';
+        btn.style.color = '#3dd68c';
+        btn.title = '2s chassis heartbeat disabled — good for AI timed moves. Stick/keyboard still work; only the periodic resend is off.';
+    }
+}
+
+function toggleChassisHeartbeat() {
+    chassis_heartbeat_enabled = !chassis_heartbeat_enabled;
+    try {
+        localStorage.setItem('ugv_chassis_heartbeat', chassis_heartbeat_enabled ? '1' : '0');
+    } catch (e) {}
+    updateChassisHeartbeatBtn();
+    if (typeof addMsg === 'function') {
+        // no-op on main UI
+    }
+    console.log('[ugv] chassis heartbeat (freq. stop)', chassis_heartbeat_enabled ? 'ON' : 'OFF');
+}
 
 
 
@@ -1744,4 +1781,7 @@ function clearOpsLog() {
 fetch('/api/status').then(function (r) { return r.json(); }).then(function (d) {
     updateControlModeBtn(d.control_mode || (d.enable_motor_control ? 'direct' : 'ros2'));
     updateEsp32WifiBtn(!!d.esp32_wifi_stopped);
-}).catch(function () {});
+    updateChassisHeartbeatBtn();
+}).catch(function () {
+    updateChassisHeartbeatBtn();
+});

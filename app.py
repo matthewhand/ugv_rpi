@@ -895,6 +895,46 @@ _DEFAULT_AI_DRIVE_MS = 1000
 _ai_drive_timer_lock = threading.Lock()
 _ai_drive_timer = None  # threading.Timer
 _ai_drive_timer_gen = 0
+# While set, zero-velocity UI chassis heartbeats (T:1 L=0/R=0 etc.) are ignored so
+# the browser's 2s idle resend cannot cut short an AI timed/continuous drive.
+_ai_motion_lock_until = 0.0
+_AI_MOTION_LOCK_GRACE_S = 0.25
+
+
+def _arm_ai_motion_lock(duration_ms=0, continuous=False):
+    """Hold off zero UI chassis cmds for the AI maneuver window."""
+    global _ai_motion_lock_until
+    if continuous:
+        # Until stop_motors / explicit clear (1h safety cap)
+        _ai_motion_lock_until = time.time() + 3600.0
+    else:
+        _ai_motion_lock_until = (
+            time.time() + max(0.0, float(duration_ms)) / 1000.0 + _AI_MOTION_LOCK_GRACE_S
+        )
+
+
+def _clear_ai_motion_lock():
+    global _ai_motion_lock_until
+    _ai_motion_lock_until = 0.0
+
+
+def _ai_motion_lock_active():
+    return time.time() < _ai_motion_lock_until
+
+
+def _chassis_cmd_is_zero(cmd):
+    """True for neutral/stop chassis payloads (UI idle heartbeat)."""
+    if not isinstance(cmd, dict):
+        return False
+    try:
+        L = float(cmd.get('L', 0) or 0)
+        R = float(cmd.get('R', 0) or 0)
+        X = float(cmd.get('X', cmd.get('x', 0)) or 0)
+        Z = float(cmd.get('Z', cmd.get('z', 0)) or 0)
+    except (TypeError, ValueError):
+        return False
+    eps = 1e-9
+    return abs(L) < eps and abs(R) < eps and abs(X) < eps and abs(Z) < eps
 
 
 def _cancel_ai_drive_timer():
@@ -933,6 +973,8 @@ def _schedule_ai_drive_stop(duration_ms):
                 base.base_json_ctrl({'T': 13, 'X': 0, 'Z': 0})
             except Exception:
                 pass
+            # Allow UI heartbeats again shortly after our own stop
+            # (lock window already covers duration + grace from arm time)
 
         t = threading.Timer(max(0.0, float(duration_ms)) / 1000.0, _fire)
         t.daemon = True
@@ -1672,10 +1714,20 @@ def _execute_motion_via_mode(name, args):
 
     if mode == 'ros2':
         import ros_motion
+        if name == 'stop_motors':
+            _clear_ai_motion_lock()
+            _cancel_ai_drive_timer()
         result = ros_motion.execute_motion_tool(name, args)
         if isinstance(result, dict):
             result.setdefault('control_mode', mode)
             ok = bool(result.get('ok', True)) and not result.get('error')
+            if name == 'send_motor_command' and ok:
+                cont = bool(result.get('continuous'))
+                dur = int(result.get('duration_ms') or 0)
+                _arm_ai_motion_lock(duration_ms=dur, continuous=cont)
+                result['ui_heartbeat_lock_s'] = max(
+                    0.0, _ai_motion_lock_until - time.time()
+                )
             olog.log(
                 'error' if not ok else level,
                 'ai_motion',
@@ -1698,6 +1750,7 @@ def _execute_motion_via_mode(name, args):
 
     if name == 'stop_motors':
         _cancel_ai_drive_timer()
+        _clear_ai_motion_lock()
         base.base_json_ctrl({'T': 13, 'X': 0, 'Z': 0})
         base.base_json_ctrl({'T': 1, 'L': 0, 'R': 0})
         olog.warn('ai_motion', 'AI stop_motors via direct serial',
@@ -1741,6 +1794,8 @@ def _execute_motion_via_mode(name, args):
                 dur = max_ms
         # Supersede any previous scheduled auto-stop, then start motion
         _cancel_ai_drive_timer()
+        # Block UI idle L=0/R=0 heartbeats for the full maneuver window
+        _arm_ai_motion_lock(duration_ms=dur, continuous=is_continuous)
         base.base_json_ctrl({'T': 13, 'X': lin, 'Z': ang})
         async_stop = False
         scheduled_stop_ms = None
@@ -1754,6 +1809,7 @@ def _execute_motion_via_mode(name, args):
             tool=name, control_mode=mode, path='serial', ok=True,
             linear_x=lin, angular_z=ang, duration_ms=dur,
             continuous=is_continuous, async_stop=async_stop, stopped=False,
+            ui_heartbeat_lock_s=max(0.0, _ai_motion_lock_until - time.time()),
         )
         out = {
             'ok': True,
@@ -1766,6 +1822,7 @@ def _execute_motion_via_mode(name, args):
             'continuous': is_continuous,
             'stopped': False,
             'async_stop': async_stop,
+            'ui_heartbeat_lock_s': max(0.0, _ai_motion_lock_until - time.time()),
         }
         if scheduled_stop_ms is not None:
             out['scheduled_stop_ms'] = scheduled_stop_ms
@@ -2262,6 +2319,7 @@ def api_ai_motion_status():
     try:
         mode = get_control_mode()
         backend, bridge = _motion_backend_info()
+        lock_rem = max(0.0, _ai_motion_lock_until - time.time())
         out = {
             'success': True,
             'control_mode': mode,
@@ -2269,6 +2327,13 @@ def api_ai_motion_status():
             'rosbridge': bridge if mode == 'ros2' else {'ok': True, 'skipped': True, 'path': 'serial'},
             'cmd_vel_topic': None,
             'pt_joint_topic': None,
+            'ai_motion_lock_active': lock_rem > 0,
+            'ai_motion_lock_remaining_s': round(lock_rem, 3),
+            'note': (
+                'While ai_motion_lock_active, zero-velocity UI chassis heartbeats '
+                '(T:1 L=0/R=0) are ignored so AI timed drives complete. '
+                'Also toggle "Freq. stop" OFF on the main dashboard when using AI.'
+            ),
             'tools': [
                 t for t in _ai_tools_catalog()
                 if t['name'].startswith('send_') or t['name'] in ('stop_motors', 'get_telemetry')
@@ -2673,6 +2738,15 @@ def _route_json_command(cmd):
         f.get('cmd_config', {}).get('cmd_gimbal_base_ctrl'),
     }
     chassis_types = {1, 13, '1', '13', f.get('cmd_config', {}).get('cmd_movition_ctrl')}
+
+    # UI 2s idle heartbeat sends T:1 L=0 R=0; do not clobber an in-flight AI drive
+    if t in chassis_types and _ai_motion_lock_active() and _chassis_cmd_is_zero(cmd):
+        return {
+            'path': 'ignored',
+            'ok': True,
+            'reason': 'ai_motion_active',
+            'lock_remaining_s': max(0.0, _ai_motion_lock_until - time.time()),
+        }
 
     # ---- Gimbal / pan-tilt ----
     if t in gimbal_types:
