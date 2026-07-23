@@ -2693,28 +2693,28 @@ from ai_seek import (
     DEFAULT_SEEK_STEP_PAUSE_S,
 )
 
+_SEEK_PILOT_SHARED = (
+    "You are a seek pilot on a UGV rover. Search by DRIVING and regularly LOOKING with the pan-tilt camera. "
+    "IMPORTANT: You are inside a multi-step outer loop. Another user message means the target is still NOT found — keep searching. "
+    "Never claim success or that you are finished. "
+    "CRITICAL: You MUST call tools every turn. Prefer function/tool calls over prose. "
+    "PTZ (required often): call send_gimbal_command on most turns to scan — pan left/right and slight tilt up/down "
+    "(pan_rad roughly ±0.3–0.9, tilt_rad roughly -0.2–0.4). Do not leave the camera fixed straight ahead for many steps. "
+    "A good pattern: look left → look right → look slightly up → center → drive a short hop → repeat. "
+    "Drive: short timed send_motor_command (duration_ms 800–1500, linear_x 0.12–0.18); turn with angular_z ±0.4 if needed. "
+    "You may call send_gimbal_command and send_motor_command in the same turn. "
+    "Gimbal Steady is off during Seek — absolute look commands work. "
+    "One short plan line after tools. No long analysis."
+)
+
 _SEEK_PILOT_DETECTOR = (
-    "You are a seek pilot on a UGV rover. Move the robot so the forward camera can see the target class. "
-    "OpenCV MobileNet-SSD (not you) is the success oracle — never claim the target is found or that the mission is done. "
-    "IMPORTANT: You are inside a multi-step outer loop. If you receive another user message, that means "
-    "the detector still has NOT matched the goal class. Prior drives did not finish the task; keep searching. "
-    "CRITICAL: You MUST call tools on every turn. Prefer function/tool calls over prose. "
-    "Each turn: call send_motor_command and optionally send_gimbal_command, then one short line of next-step plan. "
-    "Prefer short timed drives (duration_ms 800–1500, linear_x 0.12–0.18). "
-    "If the path looks open, drive forward; otherwise turn slightly (angular_z ±0.4). "
-    "Do not write long analysis. Do not invent detections."
+    _SEEK_PILOT_SHARED
+    + " OpenCV MobileNet-SSD (not you) is the only success oracle — never claim the class is found."
 )
 
 _SEEK_PILOT_LLM = (
-    "You are a seek pilot on a UGV rover. Move the robot so the forward camera can see the described target. "
-    "A separate vision-judge LLM (not you) decides when the target is found via JSON found=true/false. "
-    "IMPORTANT: You are inside a multi-step outer loop. Another user message means the judge still said found=false. "
-    "Prior drives did not finish the task; keep searching. Never claim success yourself. "
-    "CRITICAL: You MUST call tools on every turn. Prefer function/tool calls over prose. "
-    "Each turn: call send_motor_command and optionally send_gimbal_command, then one short line of next-step plan. "
-    "Prefer short timed drives (duration_ms 800–1500, linear_x 0.12–0.18). "
-    "If the path looks open, drive forward; otherwise turn slightly (angular_z ±0.4). "
-    "Do not write long analysis."
+    _SEEK_PILOT_SHARED
+    + " A separate vision-judge LLM decides found via JSON true/false — never claim success yourself."
 )
 
 _SEEK_JUDGE_SYSTEM = (
@@ -2869,8 +2869,16 @@ def seek_goal_check(goal, referee=REFEREE_DETECTOR, conf_threshold=DEFAULT_SEEK_
     return opencv_goal_check(goal, conf_threshold=conf_threshold)
 
 
+def _seek_disable_steady():
+    """Turn off gimbal IMU steady so absolute PTZ looks are not fought by horizon hold."""
+    try:
+        base.base_json_ctrl({'T': f['cmd_config'].get('cmd_gimbal_steady', 137), 's': 0, 'y': 0})
+    except Exception as e:
+        olog.warn('ai_seek', f'Could not disable gimbal steady: {e}', error=str(e)[:160])
+
+
 def _seek_force_tools_on():
-    """Ensure CV + motion tools are offered during Seek pilot turns."""
+    """Ensure CV + motion + gimbal tools are offered during Seek pilot turns."""
     try:
         _set_capabilities({
             'group_computer_vision': True,
@@ -2885,18 +2893,52 @@ def _seek_force_tools_on():
         olog.warn('ai_seek', f'Could not enable seek tools: {e}', error=str(e)[:200])
 
 
-def _seek_fallback_drive(reason=''):
-    """Deterministic short move when pilot LLM is down or skipped tools."""
-    args = {'linear_x': 0.15, 'angular_z': 0.35 if (int(time.time()) % 2) else -0.35, 'duration_ms': 900}
+# Deterministic look pattern when the pilot LLM skips tools (pan/tilt in radians)
+_SEEK_LOOK_PATTERN = (
+    {'pan_rad': -0.7, 'tilt_rad': 0.05},   # left
+    {'pan_rad': 0.7, 'tilt_rad': 0.05},    # right
+    {'pan_rad': 0.0, 'tilt_rad': 0.35},    # up a bit
+    {'pan_rad': 0.0, 'tilt_rad': -0.15},   # slight down
+    {'pan_rad': 0.0, 'tilt_rad': 0.0},     # center
+)
+
+
+def _seek_fallback_drive(reason='', step=1):
+    """Deterministic look-around + short drive when pilot LLM is down or skipped tools."""
+    trace = []
+    look = _SEEK_LOOK_PATTERN[(max(1, int(step)) - 1) % len(_SEEK_LOOK_PATTERN)]
     try:
-        res = _execute_agent_tool('send_motor_command', args)
-        return [{
-            'name': 'send_motor_command',
-            'arguments': args,
-            'result': res if isinstance(res, dict) else {'ok': True, 'fallback': True, 'reason': reason},
-        }], f'fallback drive ({reason or "no tools"})'
+        gres = _execute_agent_tool('send_gimbal_command', dict(look))
+        trace.append({
+            'name': 'send_gimbal_command',
+            'arguments': dict(look),
+            'result': gres if isinstance(gres, dict) else {'ok': True, 'fallback': True},
+        })
+        time.sleep(0.35)  # let PT settle before drive / next frame
     except Exception as e:
-        return [], f'fallback failed: {e}'
+        olog.warn('ai_seek', f'Fallback gimbal failed: {e}', error=str(e)[:120])
+    # Alternate: look-only some steps; drive on others so we still explore space
+    do_drive = (int(step) % 3) != 0
+    if do_drive:
+        args = {
+            'linear_x': 0.15,
+            'angular_z': 0.35 if (int(step) % 2) else -0.35,
+            'duration_ms': 900,
+        }
+        try:
+            res = _execute_agent_tool('send_motor_command', args)
+            trace.append({
+                'name': 'send_motor_command',
+                'arguments': args,
+                'result': res if isinstance(res, dict) else {'ok': True, 'fallback': True, 'reason': reason},
+            })
+        except Exception as e:
+            if not trace:
+                return [], f'fallback failed: {e}'
+            return trace, f'fallback look ok; drive failed ({e})'
+    if not trace:
+        return [], f'fallback failed ({reason or "no tools"})'
+    return trace, f'fallback look+{"drive" if do_drive else "look-only"} ({reason or "no tools"})'
 
 
 def _seek_loop(ctrl, label, conf, max_steps, timeout_s):
@@ -2921,6 +2963,7 @@ def _seek_loop(ctrl, label, conf, max_steps, timeout_s):
 
     try:
         _seek_force_tools_on()
+        _seek_disable_steady()
         history = []
         pilot_system = _SEEK_PILOT_LLM if referee == REFEREE_LLM else _SEEK_PILOT_DETECTOR
         step = 0
@@ -2964,7 +3007,16 @@ def _seek_loop(ctrl, label, conf, max_steps, timeout_s):
                 )
                 return
 
-            # Pilot LLM: motion only (not the success oracle)
+            # Suggest a concrete look target this step (LLM should still call the tool)
+            look_hint = _SEEK_LOOK_PATTERN[(step - 1) % len(_SEEK_LOOK_PATTERN)]
+            look_line = (
+                f"This step: prefer send_gimbal_command pan_rad≈{look_hint['pan_rad']}, "
+                f"tilt_rad≈{look_hint['tilt_rad']} (or a nearby scan), "
+                f"THEN optionally send_motor_command for a short hop. "
+                f"Do not skip the gimbal look."
+            )
+
+            # Pilot LLM: drive + PTZ (not the success oracle)
             if referee == REFEREE_LLM:
                 det_summary = {
                     'goal': label,
@@ -2974,13 +3026,14 @@ def _seek_loop(ctrl, label, conf, max_steps, timeout_s):
                     'referee': referee,
                     'judge_found': False,
                     'judge_reason': check.get('reason') or '',
-                    'note': 'Vision judge said found=false. Keep searching.',
+                    'note': 'Vision judge said found=false. Look around with PTZ, then move.',
                 }
                 user_line = (
                     f"Loop continues: vision judge still has NOT confirmed goal '{label}' "
-                    f"(step {step}/{steps_label}, found=false). You have not finished — keep moving. "
+                    f"(step {step}/{steps_label}, found=false). You have not finished. "
+                    f"{look_line} "
                     f"Judge note: {json.dumps(det_summary)}. "
-                    f"MUST call send_motor_command now (optional send_gimbal_command), then one-line next plan."
+                    f"MUST call tools (gimbal look + optional drive), then one-line next plan."
                 )
             else:
                 det_summary = {
@@ -2991,13 +3044,14 @@ def _seek_loop(ctrl, label, conf, max_steps, timeout_s):
                     'referee': referee,
                     'labels_seen': check.get('labels_found') or [],
                     'all_count': check.get('all_count', 0),
-                    'note': 'Detector has not matched goal class yet.',
+                    'note': 'Detector has not matched goal class yet. Scan with PTZ.',
                 }
                 user_line = (
                     f"Loop continues: detector still has NOT found class '{label}' "
-                    f"(step {step}/{steps_label}). You have not finished — keep moving to search. "
+                    f"(step {step}/{steps_label}). You have not finished. "
+                    f"{look_line} "
                     f"Detections summary: {json.dumps(det_summary)}. "
-                    f"MUST call send_motor_command now (optional send_gimbal_command), then one-line next plan."
+                    f"MUST call tools (gimbal look + optional drive), then one-line next plan."
                 )
             messages = [
                 {'role': 'system', 'content': pilot_system},
@@ -3011,12 +3065,12 @@ def _seek_loop(ctrl, label, conf, max_steps, timeout_s):
             tool_trace = []
             reply = ''
             try:
-                content, _raw, _cfg, tool_trace = _run_agent_loop(messages, max_rounds=2)
+                content, _raw, _cfg, tool_trace = _run_agent_loop(messages, max_rounds=3)
                 reply = (content or '')[:500]
                 tool_trace = tool_trace or []
             except Exception as e:
                 olog.warn('ai_seek', f'LLM pilot step failed: {e}', error=str(e)[:200], step=step)
-                tool_trace, reply = _seek_fallback_drive(str(e)[:80])
+                tool_trace, reply = _seek_fallback_drive(str(e)[:80], step=step)
                 if not tool_trace:
                     _halt('failed', f'LLM and fallback failed: {reply}', step=step, error=reply[:300])
                     return
@@ -3025,8 +3079,23 @@ def _seek_loop(ctrl, label, conf, max_steps, timeout_s):
                 _halt('stopped', 'Stopped by user', step=step, last_llm_reply=reply[:500], last_tools=tool_trace)
                 return
 
+            # If LLM drove but never looked, force a look so the camera actually scans
+            tool_names = {(t.get('name') or '') for t in tool_trace}
+            if 'send_gimbal_command' not in tool_names:
+                try:
+                    gres = _execute_agent_tool('send_gimbal_command', dict(look_hint))
+                    tool_trace.append({
+                        'name': 'send_gimbal_command',
+                        'arguments': dict(look_hint),
+                        'result': gres if isinstance(gres, dict) else {'ok': True, 'forced_look': True},
+                    })
+                    reply = ((reply or '') + ' | forced PTZ look').strip(' |')
+                    time.sleep(0.35)
+                except Exception as e:
+                    olog.warn('ai_seek', f'Forced PTZ look failed: {e}', error=str(e)[:120], step=step)
+
             if not tool_trace:
-                tool_trace, fb = _seek_fallback_drive('no tool calls')
+                tool_trace, fb = _seek_fallback_drive('no tool calls', step=step)
                 reply = (reply + ' | ' + fb).strip(' |') if reply else fb
 
             history.append({'role': 'user', 'content': user_line})
