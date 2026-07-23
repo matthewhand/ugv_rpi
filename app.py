@@ -3603,7 +3603,8 @@ def _seek_loop(ctrl, label, conf, max_steps, timeout_s):
                 return
 
             if llm_scene_nav:
-                is_calc_step = (step == 1) or ((step - 1) % llm_nav_interval == 0) or (cached_nav is None)
+                was_turn_action = bool(cached_nav and cached_nav.get('action') in ('turn_left', 'turn_right', 'left', 'right'))
+                is_calc_step = (step == 1) or ((step - 1) % llm_nav_interval == 0) or (cached_nav is None) or was_turn_action
                 if is_calc_step:
                     ctrl.update(
                         step=step,
