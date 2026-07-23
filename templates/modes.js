@@ -278,7 +278,8 @@
     var name = isLlm ? 'Judge' : 'Detector';
     var meta = [];
     if (st && st.step) meta.push('step ' + st.step);
-    if (st && st.seek_phase) meta.push(st.seek_phase);
+    if (st && st.seek_phase) meta.push(String(st.seek_phase));
+    if (st && st.last_nav && st.last_nav.action) meta.push('nav ' + st.last_nav.action);
     if (st && st.last_check_seq) meta.push('#' + st.last_check_seq);
     var age = formatCheckAge(st);
     if (age) meta.push(age);
@@ -337,6 +338,9 @@
     var lines = [
       'Phase: ' + phase,
       'Seek cycle: ' + (st.seek_phase || '—'),
+      'Nav: ' +
+        ((st.last_nav && st.last_nav.action) || '—') +
+        (st.last_nav && st.last_nav.reason ? ' — ' + String(st.last_nav.reason).slice(0, 80) : ''),
       'Referee: ' + ref,
       'Goal: ' + (st.goal_label || st.goal_text || '—'),
       'Step: ' +

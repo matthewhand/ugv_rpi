@@ -1,6 +1,7 @@
 import serial
 import sys
 import math
+import re
 import mpl_toolkits
 mpl_toolkits.__path__ = [p for p in mpl_toolkits.__path__ if 'dist-packages' not in p]
 
@@ -2753,32 +2754,6 @@ from ai_seek import (
     DEFAULT_ON_FOUND_TTS,
 )
 
-_SEEK_PILOT_SHARED = (
-    "You are a seek pilot on a UGV rover. Search by looking with the pan-tilt camera, then driving. "
-    "IMPORTANT: You are inside a multi-step outer loop. Another user message means the target is still NOT found — keep searching. "
-    "Never claim success or that you are finished. "
-    "CRITICAL: You MUST call tools every turn. Prefer function/tool calls over prose. "
-    "SCAN BEFORE YOU DRIVE: Before choosing a drive direction, complete a ~270° horizontal look "
-    "(pan the camera across left → slightly left → center → slightly right → right, about ±2.0–2.4 rad pan). "
-    "While SCANNING: call ONLY send_gimbal_command (no drive). Wait for the scan to finish across steps. "
-    "After the full sweep: pick the most promising side (or straight if unclear), center the camera, "
-    "THEN short send_motor_command hops (duration_ms 800–1500, linear_x 0.12–0.18; angular_z ±0.4 to face that way). "
-    "If still not found after a hop or two, do another ~270° pan sweep before driving again. "
-    "Also use slight tilt (tilt_rad -0.2–0.4) during or after the sweep. "
-    "Gimbal Steady is off during Seek — absolute look commands work. "
-    "One short plan line after tools. No long analysis."
-)
-
-_SEEK_PILOT_DETECTOR = (
-    _SEEK_PILOT_SHARED
-    + " OpenCV MobileNet-SSD (not you) is the only success oracle — never claim the class is found."
-)
-
-_SEEK_PILOT_LLM = (
-    _SEEK_PILOT_SHARED
-    + " A separate vision-judge LLM decides found via JSON true/false — never claim success yourself."
-)
-
 _SEEK_JUDGE_SYSTEM = (
     "You are a visual goal referee for a robot camera. "
     "Look only at the provided image. Decide if the described target is clearly visible. "
@@ -2787,6 +2762,45 @@ _SEEK_JUDGE_SYSTEM = (
     "false if absent, uncertain, occluded, or too small to be sure. "
     "reason is one short sentence."
 )
+
+_SEEK_NAV_SYSTEM = (
+    "You are a navigation advisor for a small UGV with a pan-tilt camera. "
+    "You are given THREE stills from the same pose: LEFT, STRAIGHT (center), and RIGHT. "
+    "Decide the safest short move to continue searching for a goal object. "
+    "Prefer forward when the straight view is open (hallway/path clear enough for the robot). "
+    "Choose turn_left or turn_right if straight is blocked/cluttered/unsafe and that side looks more open "
+    "or more likely to reveal the goal. "
+    "Reply with JSON only. action must be exactly one of: forward, turn_left, turn_right. "
+    "Do not claim the goal is found — another system handles that."
+)
+
+_SEEK_NAV_JSON_SCHEMA = {
+    'type': 'json_schema',
+    'json_schema': {
+        'name': 'seek_nav',
+        'strict': True,
+        'schema': {
+            'type': 'object',
+            'properties': {
+                'action': {
+                    'type': 'string',
+                    'enum': ['forward', 'turn_left', 'turn_right'],
+                    'description': 'Drive choice after comparing the three views.',
+                },
+                'reason': {
+                    'type': 'string',
+                    'description': 'One short sentence.',
+                },
+                'path_clear_forward': {
+                    'type': 'boolean',
+                    'description': 'True if straight view looks open enough to drive forward.',
+                },
+            },
+            'required': ['action', 'reason', 'path_clear_forward'],
+            'additionalProperties': False,
+        },
+    },
+}
 
 _SEEK_FOUND_JSON_SCHEMA = {
     'type': 'json_schema',
@@ -2973,9 +2987,14 @@ def _seek_force_tools_on():
         olog.warn('ai_seek', f'Could not enable seek tools: {e}', error=str(e)[:200])
 
 
-# ~270° horizontal sweep: pan X degrees -135 … +135 (tool uses pan_rad = -deg * pi/180)
-_SEEK_SCAN_PAN_DEG = (-135, -90, -45, 0, 45, 90, 135)
-_SEEK_DRIVE_STEPS_BETWEEN_SCANS = 3  # short hops, then re-sweep
+# Triple-view nav: left / straight / right pans (degrees on T:133 X)
+_SEEK_VIEW_PANS = (
+    ('left', -70),
+    ('straight', 0),
+    ('right', 70),
+)
+_SEEK_NAV_SETTLE_S = 0.55
+_SEEK_DRIVE_MS = 1100
 
 
 def _seek_pan_deg_to_rad(pan_deg, tilt_deg=0.0):
@@ -2985,76 +3004,181 @@ def _seek_pan_deg_to_rad(pan_deg, tilt_deg=0.0):
     return {'pan_rad': round(pan_rad, 4), 'tilt_rad': round(tilt_rad, 4)}
 
 
-def _seek_scan_look(step_index, tilt_deg=5.0):
-    """Look target for scan step (1-based index into the 270° sweep)."""
-    i = (max(1, int(step_index)) - 1) % len(_SEEK_SCAN_PAN_DEG)
-    return _seek_pan_deg_to_rad(_SEEK_SCAN_PAN_DEG[i], tilt_deg)
+def _seek_look_deg(pan_deg, tilt_deg=0.0, settle_s=None):
+    """Point gimbal (degrees) and wait for settle."""
+    look = _seek_pan_deg_to_rad(pan_deg, tilt_deg)
+    res = _execute_agent_tool('send_gimbal_command', look)
+    time.sleep(settle_s if settle_s is not None else _SEEK_NAV_SETTLE_S)
+    return look, res
 
 
-def _seek_phase(step):
-    """Return ('scan'|'drive', look_dict, meta).
+def _seek_grab_jpeg():
+    try:
+        return _grab_jpeg_bytes(max_width=480, quality=65)
+    except Exception:
+        return None
 
-    Pattern: full 270° pan scan (look-only), then a few drive steps, then re-scan.
-    """
-    n_scan = len(_SEEK_SCAN_PAN_DEG)
-    cycle = n_scan + _SEEK_DRIVE_STEPS_BETWEEN_SCANS
-    pos = (max(1, int(step)) - 1) % cycle
-    if pos < n_scan:
-        look = _seek_scan_look(pos + 1)
-        return 'scan', look, {
-            'scan_index': pos + 1,
-            'scan_total': n_scan,
-            'pan_deg': _SEEK_SCAN_PAN_DEG[pos],
-            'span_deg': 270,
+
+def _seek_capture_triple_views(ctrl, step, steps_label):
+    """Pan left → straight → right, capture one JPEG each. Returns list of view dicts."""
+    views = []
+    for i, (name, pan_deg) in enumerate(_SEEK_VIEW_PANS, start=1):
+        if ctrl.should_stop():
+            break
+        ctrl.update(
+            seek_phase='triple_scan',
+            message=(
+                f'Step {step}/{steps_label}: capturing {name} view '
+                f'({i}/{len(_SEEK_VIEW_PANS)}, pan≈{pan_deg}°)…'
+            ),
+            phase_meta={'view': name, 'pan_deg': pan_deg, 'index': i, 'total': len(_SEEK_VIEW_PANS)},
+        )
+        look, gres = _seek_look_deg(pan_deg, 0.0)
+        jpeg = _seek_grab_jpeg()
+        views.append({
+            'name': name,
+            'pan_deg': pan_deg,
+            'look': look,
+            'gimbal_ok': bool(isinstance(gres, dict) and gres.get('ok', True)),
+            'jpeg': jpeg,
+            'bytes': len(jpeg) if jpeg else 0,
+        })
+    # Re-center for drive / next goal check
+    try:
+        _seek_look_deg(0.0, 0.0, settle_s=0.35)
+    except Exception:
+        pass
+    return views
+
+
+def _seek_parse_nav_action(raw_text):
+    """Parse nav JSON into action + reason + path_clear_forward."""
+    action = 'forward'
+    reason = ''
+    path_clear = True
+    parsed = None
+    text = (raw_text or '').strip()
+    if text.startswith('```'):
+        text = re.sub(r'^```(?:json)?\s*', '', text)
+        text = re.sub(r'\s*```$', '', text)
+    try:
+        parsed = json.loads(text)
+    except Exception:
+        m = re.search(r'\{[^{}]+\}', text, re.S)
+        if m:
+            try:
+                parsed = json.loads(m.group(0))
+            except Exception:
+                parsed = None
+    if isinstance(parsed, dict):
+        a = str(parsed.get('action') or '').strip().lower().replace(' ', '_')
+        if a in ('forward', 'go_forward', 'straight'):
+            action = 'forward'
+        elif a in ('turn_left', 'left'):
+            action = 'turn_left'
+        elif a in ('turn_right', 'right'):
+            action = 'turn_right'
+        reason = str(parsed.get('reason') or '')[:240]
+        pc = parsed.get('path_clear_forward')
+        if isinstance(pc, str):
+            path_clear = pc.strip().lower() in ('1', 'true', 'yes')
+        elif pc is not None:
+            path_clear = bool(pc)
+    return {'action': action, 'reason': reason, 'path_clear_forward': path_clear, 'raw': (raw_text or '')[:400]}
+
+
+def _seek_nav_decide(views, goal_label, labels_hint=None):
+    """Send LEFT/STRAIGHT/RIGHT stills to the LLM; return structured nav choice."""
+    content = [
+        {
+            'type': 'text',
+            'text': (
+                f'Goal being sought (do not claim found): {goal_label}. '
+                f'Detector labels recently seen: {json.dumps(labels_hint or [])}. '
+                'Images follow in order: LEFT, STRAIGHT, RIGHT. '
+                'Choose action: forward | turn_left | turn_right. JSON only.'
+            ),
+        },
+    ]
+    have_any = False
+    for v in views:
+        jpeg = v.get('jpeg')
+        label = (v.get('name') or '?').upper()
+        content.append({'type': 'text', 'text': f'{label} view (pan≈{v.get("pan_deg")}°):'})
+        if jpeg:
+            have_any = True
+            b64 = base64.b64encode(jpeg).decode('ascii')
+            content.append({
+                'type': 'image_url',
+                'image_url': {'url': f'data:image/jpeg;base64,{b64}'},
+            })
+        else:
+            content.append({'type': 'text', 'text': '(capture failed)'})
+    if not have_any:
+        return {
+            'action': 'forward',
+            'reason': 'no images; default forward',
+            'path_clear_forward': True,
+            'fallback': True,
         }
-    look = _seek_pan_deg_to_rad(0.0, 0.0)  # center for driving
-    return 'drive', look, {
-        'drive_index': pos - n_scan + 1,
-        'drive_total': _SEEK_DRIVE_STEPS_BETWEEN_SCANS,
+
+    messages = [
+        {'role': 'system', 'content': _SEEK_NAV_SYSTEM},
+        {'role': 'user', 'content': content},
+    ]
+    content_out = ''
+    last_err = None
+    for fmt_name, fmt in (
+        ('json_schema', _SEEK_NAV_JSON_SCHEMA),
+        ('json_object', {'type': 'json_object'}),
+        ('plain', None),
+    ):
+        try:
+            msg, _body, _cfg = _openai_chat(
+                messages, max_tokens=120, temperature=0.1, tools=None, response_format=fmt,
+            )
+            content_out = _message_text_content(msg) or ''
+            last_err = None
+            nav = _seek_parse_nav_action(content_out)
+            nav['response_format'] = fmt_name
+            return nav
+        except Exception as e:
+            last_err = e
+            continue
+    return {
+        'action': 'forward',
+        'reason': f'nav LLM failed ({last_err}); default forward',
+        'path_clear_forward': True,
+        'fallback': True,
+        'error': str(last_err)[:200] if last_err else None,
     }
 
 
-def _seek_fallback_drive(reason='', step=1):
-    """Deterministic scan look or short drive when pilot LLM is down / skips tools."""
-    phase, look, meta = _seek_phase(step)
-    trace = []
+def _seek_execute_nav_action(action):
+    """Execute one short body move; camera recentered first."""
     try:
-        gres = _execute_agent_tool('send_gimbal_command', dict(look))
-        trace.append({
-            'name': 'send_gimbal_command',
-            'arguments': dict(look),
-            'result': gres if isinstance(gres, dict) else {'ok': True, 'fallback': True, 'phase': phase},
-        })
-        time.sleep(0.45 if phase == 'scan' else 0.25)
-    except Exception as e:
-        olog.warn('ai_seek', f'Fallback gimbal failed: {e}', error=str(e)[:120])
-    if phase == 'drive':
-        args = {
-            'linear_x': 0.15,
-            'angular_z': 0.35 if (int(step) % 2) else -0.35,
-            'duration_ms': 900,
-        }
-        try:
-            res = _execute_agent_tool('send_motor_command', args)
-            trace.append({
-                'name': 'send_motor_command',
-                'arguments': args,
-                'result': res if isinstance(res, dict) else {'ok': True, 'fallback': True, 'reason': reason},
-            })
-        except Exception as e:
-            if not trace:
-                return [], f'fallback failed: {e}'
-            return trace, f'fallback look ok; drive failed ({e})'
-    if not trace:
-        return [], f'fallback failed ({reason or "no tools"})'
-    return trace, f'fallback phase={phase} {meta} ({reason or "no tools"})'
+        _seek_look_deg(0.0, 0.0, settle_s=0.25)
+    except Exception:
+        pass
+    action = (action or 'forward').strip().lower()
+    if action == 'turn_left':
+        args = {'linear_x': 0.08, 'angular_z': 0.5, 'duration_ms': _SEEK_DRIVE_MS}
+    elif action == 'turn_right':
+        args = {'linear_x': 0.08, 'angular_z': -0.5, 'duration_ms': _SEEK_DRIVE_MS}
+    else:
+        args = {'linear_x': 0.15, 'angular_z': 0.0, 'duration_ms': _SEEK_DRIVE_MS}
+    res = _execute_agent_tool('send_motor_command', args)
+    # Wait for timed drive to finish
+    time.sleep(_SEEK_DRIVE_MS / 1000.0 + 0.25)
+    return {'name': 'send_motor_command', 'arguments': args, 'result': res}
 
 
 def _seek_loop(ctrl, label, conf, max_steps, timeout_s):
-    """Background Seek loop: referee check → maybe found → pilot motion → repeat.
+    """Seek loop: goal check → triple-view LLM nav → drive → repeat.
 
-    max_steps: 0 = unlimited (default). timeout_s: 0 = no time limit.
-    Always stops on found or user Stop.
+    At start and after every move: capture LEFT/STRAIGHT/RIGHT, ask the LLM which
+    way is acceptable, then drive. Goal found is still OpenCV/LLM referee only.
+    max_steps: 0 = unlimited. timeout_s: 0 = no time limit.
     """
     t0 = time.time()
     referee = ctrl.referee()
@@ -3068,13 +3192,15 @@ def _seek_loop(ctrl, label, conf, max_steps, timeout_s):
             _execute_agent_tool('stop_motors', {})
         except Exception:
             pass
+        try:
+            _seek_look_deg(0.0, 0.0, settle_s=0.2)
+        except Exception:
+            pass
         ctrl.finish(phase, message=message, step=step, **kwargs)
 
     try:
         _seek_force_tools_on()
         _seek_disable_steady()
-        history = []
-        pilot_system = _SEEK_PILOT_LLM if referee == REFEREE_LLM else _SEEK_PILOT_DETECTOR
         step = 0
         while True:
             step += 1
@@ -3087,26 +3213,14 @@ def _seek_loop(ctrl, label, conf, max_steps, timeout_s):
                 _halt('timeout', f'Timeout after {timeout_s}s', step=step - 1)
                 return
 
-            # Referee (authority): detector class list OR LLM JSON found bool
-            check = seek_goal_check(label, referee=referee, conf_threshold=conf)
-            phase, look_hint, phase_meta = _seek_phase(step)
-            if phase == 'scan':
-                status_msg = (
-                    f'Step {step}/{steps_label}: SCAN {phase_meta["scan_index"]}/'
-                    f'{phase_meta["scan_total"]} pan≈{phase_meta["pan_deg"]}° ({referee}) for {label}…'
-                )
-            else:
-                status_msg = (
-                    f'Step {step}/{steps_label}: DRIVE after 270° scan '
-                    f'({phase_meta["drive_index"]}/{phase_meta["drive_total"]}) ({referee}) for {label}…'
-                )
+            # 1) Goal referee (authority)
             ctrl.update(
                 step=step,
-                last_detection=check,
-                message=status_msg,
-                seek_phase=phase,
-                phase_meta=phase_meta,
+                seek_phase='goal_check',
+                message=f'Step {step}/{steps_label}: goal check ({referee}) for {label}…',
             )
+            check = seek_goal_check(label, referee=referee, conf_threshold=conf)
+            ctrl.update(last_detection=check)
             if check.get('found'):
                 reason = check.get('reason') or ''
                 best = check.get('best') or {}
@@ -3130,153 +3244,69 @@ def _seek_loop(ctrl, label, conf, max_steps, timeout_s):
                 )
                 return
 
-            if phase == 'scan':
-                look_line = (
-                    f"PHASE=SCAN (~270° sweep before driving). "
-                    f"Scan pose {phase_meta['scan_index']}/{phase_meta['scan_total']}: "
-                    f"pan≈{phase_meta['pan_deg']}° → send_gimbal_command "
-                    f"pan_rad≈{look_hint['pan_rad']}, tilt_rad≈{look_hint['tilt_rad']}. "
-                    f"Do NOT call send_motor_command this turn — finish the look-around first."
-                )
-            else:
-                look_line = (
-                    f"PHASE=DRIVE (scan complete for this cycle). "
-                    f"Center or aim toward the best side seen during the 270° sweep, then "
-                    f"send_motor_command for a short hop (duration_ms 800–1500). "
-                    f"Optional send_gimbal_command to face the chosen direction first. "
-                    f"After a few hops you will scan 270° again."
-                )
-
-            # Pilot LLM: scan-first, then drive (not the success oracle)
-            if referee == REFEREE_LLM:
-                det_summary = {
-                    'goal': label,
-                    'step': step,
-                    'phase': phase,
-                    'phase_meta': phase_meta,
-                    'max_steps': max_steps if not unlimited else None,
-                    'unlimited_steps': unlimited,
-                    'referee': referee,
-                    'judge_found': False,
-                    'judge_reason': check.get('reason') or '',
-                    'note': (
-                        'SCAN: look only across ~270° pan before choosing a drive direction.'
-                        if phase == 'scan'
-                        else 'DRIVE: short hop after scan; re-scan soon if still not found.'
-                    ),
-                }
-                user_line = (
-                    f"Loop continues: vision judge still has NOT confirmed goal '{label}' "
-                    f"(step {step}/{steps_label}, found=false). You have not finished. "
-                    f"{look_line} "
-                    f"Judge note: {json.dumps(det_summary)}. "
-                    f"MUST call tools now, then one-line next plan."
-                )
-            else:
-                det_summary = {
-                    'goal': label,
-                    'step': step,
-                    'phase': phase,
-                    'phase_meta': phase_meta,
-                    'max_steps': max_steps if not unlimited else None,
-                    'unlimited_steps': unlimited,
-                    'referee': referee,
-                    'labels_seen': check.get('labels_found') or [],
-                    'all_count': check.get('all_count', 0),
-                    'note': (
-                        'SCAN: pan ~270° before driving.'
-                        if phase == 'scan'
-                        else 'DRIVE: short hop after scan.'
-                    ),
-                }
-                user_line = (
-                    f"Loop continues: detector still has NOT found class '{label}' "
-                    f"(step {step}/{steps_label}). You have not finished. "
-                    f"{look_line} "
-                    f"Detections summary: {json.dumps(det_summary)}. "
-                    f"MUST call tools now, then one-line next plan."
-                )
-            messages = [
-                {'role': 'system', 'content': pilot_system},
-            ]
-            for h in history[-4:]:
-                hh = dict(h)
-                if isinstance(hh.get('content'), str) and len(hh['content']) > 400:
-                    hh['content'] = hh['content'][:400] + '…'
-                messages.append(hh)
-            messages.append({'role': 'user', 'content': user_line})
-            tool_trace = []
-            reply = ''
-            try:
-                content, _raw, _cfg, tool_trace = _run_agent_loop(messages, max_rounds=3)
-                reply = (content or '')[:500]
-                tool_trace = tool_trace or []
-            except Exception as e:
-                olog.warn('ai_seek', f'LLM pilot step failed: {e}', error=str(e)[:200], step=step)
-                tool_trace, reply = _seek_fallback_drive(str(e)[:80], step=step)
-                if not tool_trace:
-                    _halt('failed', f'LLM and fallback failed: {reply}', step=step, error=reply[:300])
-                    return
-
             if ctrl.should_stop():
-                _halt('stopped', 'Stopped by user', step=step, last_llm_reply=reply[:500], last_tools=tool_trace)
+                _halt('stopped', 'Stopped by user', step=step)
                 return
 
-            tool_names = {(t.get('name') or '') for t in tool_trace}
+            # 2) Triple view capture (left / straight / right)
+            views = _seek_capture_triple_views(ctrl, step, steps_label)
+            if ctrl.should_stop():
+                _halt('stopped', 'Stopped by user', step=step)
+                return
 
-            # Scan phase: no driving — strip accidental motor cmds and force the scan pose
-            if phase == 'scan':
-                if 'send_motor_command' in tool_names:
-                    try:
-                        _execute_agent_tool('stop_motors', {})
-                    except Exception:
-                        pass
-                    tool_trace = [t for t in tool_trace if t.get('name') != 'send_motor_command']
-                    tool_trace.append({
-                        'name': 'stop_motors',
-                        'arguments': {},
-                        'result': {'ok': True, 'reason': 'scan_phase_no_drive'},
-                    })
-                    reply = ((reply or '') + ' | blocked drive during SCAN').strip(' |')
-                if 'send_gimbal_command' not in tool_names:
-                    try:
-                        gres = _execute_agent_tool('send_gimbal_command', dict(look_hint))
-                        tool_trace.append({
-                            'name': 'send_gimbal_command',
-                            'arguments': dict(look_hint),
-                            'result': gres if isinstance(gres, dict) else {'ok': True, 'forced_scan': True},
-                        })
-                        reply = ((reply or '') + ' | forced 270° scan pose').strip(' |')
-                        time.sleep(0.45)
-                    except Exception as e:
-                        olog.warn('ai_seek', f'Forced scan look failed: {e}', error=str(e)[:120], step=step)
-            else:
-                # Drive phase: still ensure we looked / centered if LLM only drove
-                if 'send_gimbal_command' not in tool_names:
-                    try:
-                        gres = _execute_agent_tool('send_gimbal_command', dict(look_hint))
-                        tool_trace.append({
-                            'name': 'send_gimbal_command',
-                            'arguments': dict(look_hint),
-                            'result': gres if isinstance(gres, dict) else {'ok': True, 'forced_look': True},
-                        })
-                        reply = ((reply or '') + ' | forced PTZ center/aim').strip(' |')
-                        time.sleep(0.3)
-                    except Exception as e:
-                        olog.warn('ai_seek', f'Forced PTZ look failed: {e}', error=str(e)[:120], step=step)
-
-            if not tool_trace:
-                tool_trace, fb = _seek_fallback_drive('no tool calls', step=step)
-                reply = (reply + ' | ' + fb).strip(' |') if reply else fb
-
-            history.append({'role': 'user', 'content': user_line})
-            history.append({'role': 'assistant', 'content': reply[:400]})
+            # 3) LLM chooses forward / turn_left / turn_right from all three images
             ctrl.update(
-                last_llm_reply=reply[:500],
-                last_tools=tool_trace,
-                message=f'Step {step}/{steps_label}: moved; re-scanning…',
-                history=list(history[-6:]),
+                seek_phase='nav_decide',
+                message=f'Step {step}/{steps_label}: LLM comparing L/straight/R views…',
+                last_views=[{
+                    'name': v['name'], 'pan_deg': v['pan_deg'], 'bytes': v['bytes'],
+                } for v in views],
             )
+            nav = _seek_nav_decide(
+                views,
+                label,
+                labels_hint=check.get('labels_found') or [],
+            )
+            action = nav.get('action') or 'forward'
+            reason = nav.get('reason') or ''
+            ctrl.update(
+                last_nav=nav,
+                last_llm_reply=reason[:500],
+                message=(
+                    f'Step {step}/{steps_label}: nav={action}'
+                    + (f' — {reason[:80]}' if reason else '')
+                ),
+            )
+            olog.info(
+                'ai_seek',
+                f'Nav decision step={step} action={action}',
+                goal=label, step=step, action=action, reason=reason[:120],
+            )
+
+            if ctrl.should_stop():
+                _halt('stopped', 'Stopped by user', step=step)
+                return
+
+            # 4) Drive only after multi-image decision
+            ctrl.update(
+                seek_phase='drive',
+                message=f'Step {step}/{steps_label}: driving {action}…',
+            )
+            try:
+                drive = _seek_execute_nav_action(action)
+                ctrl.update(last_tools=[drive])
+            except Exception as e:
+                olog.warn('ai_seek', f'Drive failed: {e}', error=str(e)[:200], step=step)
+                # fallback alternate turn
+                try:
+                    alt = 'turn_left' if action != 'turn_left' else 'turn_right'
+                    drive = _seek_execute_nav_action(alt)
+                    ctrl.update(last_tools=[drive], message=f'Step {step}: drive fallback {alt}')
+                except Exception as e2:
+                    _halt('failed', f'Drive failed: {e2}', step=step, error=str(e2)[:300])
+                    return
+
+            # Pause before next cycle (goal check again after move)
             for _ in range(int(DEFAULT_SEEK_STEP_PAUSE_S / 0.1) or 1):
                 if ctrl.should_stop():
                     _halt('stopped', 'Stopped by user', step=step)
