@@ -3482,10 +3482,11 @@ def _seek_unified_llm_analysis(current_views, prev_forward_jpeg, goal_label):
     }
 
 
-def _seek_execute_nav_action(action, drive_distance='medium'):
+def _seek_execute_nav_action(action, drive_distance='medium', should_stop=None):
     """Execute body move after nav decision:
-    - Left/Right turns: Fast speed control (angular_z = ±0.8)
-    - Forward/Backward: Middle speed control (linear_x = ±0.15)
+    - Left turn: Combines forward+left then backward+right arc maneuvers repeated <x> times based on drive_distance (short=1, medium=2, long=3).
+    - Right turn: Combines forward+right then backward+left arc maneuvers repeated <x> times based on drive_distance (short=1, medium=2, long=3).
+    - Forward/Backward: Timed linear drive.
     """
     try:
         _seek_look_deg(0.0, 0.0, wait_hw=True)
@@ -3494,32 +3495,68 @@ def _seek_execute_nav_action(action, drive_distance='medium'):
             _seek_look_deg(0.0, 0.0, wait_hw=False, settle_s=0.25)
         except Exception:
             pass
+
     action = (action or 'forward').strip().lower()
     dist = (drive_distance or 'medium').strip().lower()
     if dist not in _SEEK_DRIVE_MS_BY_DIST:
         dist = 'medium'
 
+    # Number of turn maneuver repeats (<x>)
+    repeats = 1 if dist == 'short' else (2 if dist == 'medium' else 3)
+    last_res = None
+    last_args = {}
+
     if action in ('turn_left', 'left'):
-        dur = _SEEK_TURN_MS_BY_DIST.get(dist, 800)
-        args = {'linear_x': 0.0, 'angular_z': 0.8, 'duration_ms': dur}
+        for i in range(repeats):
+            if should_stop and should_stop():
+                break
+            # Step A: Forward + turn left
+            args_a = {'linear_x': 0.12, 'angular_z': 0.7, 'duration_ms': 450}
+            last_res = _execute_agent_tool('send_motor_command', args_a)
+            time.sleep(0.55)
+            if should_stop and should_stop():
+                break
+            # Step B: Backward + turn right (pivot tail)
+            args_b = {'linear_x': -0.12, 'angular_z': -0.7, 'duration_ms': 450}
+            last_res = _execute_agent_tool('send_motor_command', args_b)
+            time.sleep(0.55)
+            last_args = {'action': 'turn_left', 'repeats': repeats, 'cycle': i + 1}
+
     elif action in ('turn_right', 'right'):
-        dur = _SEEK_TURN_MS_BY_DIST.get(dist, 800)
-        args = {'linear_x': 0.0, 'angular_z': -0.8, 'duration_ms': dur}
+        for i in range(repeats):
+            if should_stop and should_stop():
+                break
+            # Step A: Forward + turn right
+            args_a = {'linear_x': 0.12, 'angular_z': -0.7, 'duration_ms': 450}
+            last_res = _execute_agent_tool('send_motor_command', args_a)
+            time.sleep(0.55)
+            if should_stop and should_stop():
+                break
+            # Step B: Backward + turn left (pivot tail)
+            args_b = {'linear_x': -0.12, 'angular_z': 0.7, 'duration_ms': 450}
+            last_res = _execute_agent_tool('send_motor_command', args_b)
+            time.sleep(0.55)
+            last_args = {'action': 'turn_right', 'repeats': repeats, 'cycle': i + 1}
+
     elif action in ('backward', 'back', 'drive_backward'):
         dur = _SEEK_DRIVE_MS_BY_DIST.get(dist, _SEEK_DRIVE_MS)
-        args = {'linear_x': -0.15, 'angular_z': 0.0, 'duration_ms': dur}
-    else:
-        dur = _SEEK_DRIVE_MS_BY_DIST.get(dist, _SEEK_DRIVE_MS)
-        args = {'linear_x': 0.15, 'angular_z': 0.0, 'duration_ms': dur}
+        last_args = {'linear_x': -0.15, 'angular_z': 0.0, 'duration_ms': dur}
+        last_res = _execute_agent_tool('send_motor_command', last_args)
+        time.sleep(float(dur) / 1000.0 + 0.3)
 
-    res = _execute_agent_tool('send_motor_command', args)
-    time.sleep(float(args['duration_ms']) / 1000.0 + 0.3)
+    else:  # forward
+        dur = _SEEK_DRIVE_MS_BY_DIST.get(dist, _SEEK_DRIVE_MS)
+        last_args = {'linear_x': 0.15, 'angular_z': 0.0, 'duration_ms': dur}
+        last_res = _execute_agent_tool('send_motor_command', last_args)
+        time.sleep(float(dur) / 1000.0 + 0.3)
+
     return {
         'name': 'send_motor_command',
-        'arguments': args,
-        'result': res,
-        'drive_distance': dist,
+        'arguments': last_args,
+        'result': last_res,
         'action': action,
+        'drive_distance': dist,
+        'repeats': repeats if action in ('turn_left', 'left', 'turn_right', 'right') else 1,
     }
 
 
@@ -3681,13 +3718,13 @@ def _seek_loop(ctrl, label, conf, max_steps, timeout_s):
             # Drive
             ctrl.update(seek_phase='drive', message=f'Step {step}/{steps_label}: driving {action} ({dist})…')
             try:
-                drive = _seek_execute_nav_action(action, dist)
+                drive = _seek_execute_nav_action(action, dist, should_stop=ctrl.should_stop)
                 ctrl.update(last_tools=[drive])
             except Exception as e:
                 olog.warn('ai_seek', f'Drive failed: {e}', error=str(e)[:200], step=step)
                 try:
                     alt = 'turn_left' if action != 'turn_left' else 'turn_right'
-                    drive = _seek_execute_nav_action(alt, 'short')
+                    drive = _seek_execute_nav_action(alt, 'short', should_stop=ctrl.should_stop)
                     ctrl.update(last_tools=[drive], message=f'Step {step}: drive fallback {alt} short')
                 except Exception as e2:
                     _halt('failed', f'Drive failed: {e2}', step=step, error=str(e2)[:300])
