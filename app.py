@@ -2874,7 +2874,7 @@ def opencv_goal_check(goal_label, conf_threshold=DEFAULT_SEEK_CONF, frame=None):
     return result
 
 
-def llm_goal_check(goal_text):
+def llm_goal_check(goal_text, jpeg=None):
     """Vision LLM oracle: snapshot + structured JSON {found: bool, reason: str}.
 
     Uses response_format json_schema when the server accepts it; falls back to
@@ -2882,7 +2882,8 @@ def llm_goal_check(goal_text):
     parse failure so Seek does not end on garbage.
     """
     goal = (goal_text or '').strip()
-    jpeg = _grab_jpeg_bytes(max_width=640, quality=70)
+    if jpeg is None:
+        jpeg = _grab_jpeg_bytes(max_width=640, quality=70)
     if not jpeg:
         return {
             'found': False,
@@ -2968,12 +2969,19 @@ def llm_goal_check(goal_text):
     }
 
 
-def seek_goal_check(goal, referee=REFEREE_DETECTOR, conf_threshold=DEFAULT_SEEK_CONF):
+def seek_goal_check(goal, referee=REFEREE_DETECTOR, conf_threshold=DEFAULT_SEEK_CONF, jpeg=None):
     """Dispatch to detector or LLM vision referee."""
     ref = parse_seek_referee(referee)
     if ref == REFEREE_LLM:
-        return llm_goal_check(goal)
-    return opencv_goal_check(goal, conf_threshold=conf_threshold)
+        return llm_goal_check(goal, jpeg=jpeg)
+    frame = None
+    if jpeg is not None:
+        try:
+            arr = np.frombuffer(jpeg, np.uint8)
+            frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+        except Exception:
+            pass
+    return opencv_goal_check(goal, conf_threshold=conf_threshold, frame=frame)
 
 
 def _seek_disable_steady():
@@ -3134,12 +3142,13 @@ def _seek_grab_jpeg():
         return None
 
 
-def _seek_capture_triple_views(ctrl, step, steps_label):
-    """For each view: pan → confirm pan completed → take photo. Then re-center.
+def _seek_capture_triple_views(ctrl, step, steps_label, goal_label=None, conf_threshold=DEFAULT_SEEK_CONF, referee=REFEREE_DETECTOR):
+    """For each view: pan → confirm pan completed → take photo → run goal check. Then re-center.
 
-    Order: left → straight → right. Never captures until aim step finished (or timed out).
+    Order: left → straight → right.
     """
     views = []
+    found_check = None
     for i, (name, pan_deg) in enumerate(_SEEK_VIEW_PANS, start=1):
         if ctrl.should_stop():
             break
@@ -3168,11 +3177,24 @@ def _seek_capture_triple_views(ctrl, step, steps_label):
                 'total': len(_SEEK_VIEW_PANS), 'sub': 'shutter',
                 'pan_settled': settled,
                 'hw_pan': arrival.get('hw_pan') if arrival else None,
-                'pan_wait_s': arrival.get('waited_s') if arrival else None,
-                'pan_wait_reason': arrival.get('reason') if arrival else None,
             },
         )
         jpeg = _seek_grab_jpeg()
+        data_url = None
+        has_target = False
+        det_labels = []
+        chk = None
+        if jpeg:
+            b64 = base64.b64encode(jpeg).decode('ascii')
+            data_url = f'data:image/jpeg;base64,{b64}'
+            if goal_label:
+                chk = seek_goal_check(goal_label, referee=referee, conf_threshold=conf_threshold, jpeg=jpeg)
+                if chk.get('found'):
+                    has_target = True
+                    found_check = chk
+                    found_check['found_view'] = name
+                det_labels = chk.get('labels_found') or []
+
         views.append({
             'name': name,
             'pan_deg': pan_deg,
@@ -3185,16 +3207,17 @@ def _seek_capture_triple_views(ctrl, step, steps_label):
             'pan_wait_reason': arrival.get('reason') if arrival else None,
             'jpeg': jpeg,
             'bytes': len(jpeg) if jpeg else 0,
+            'data_url': data_url,
+            'has_target': has_target,
+            'detected_labels': det_labels,
+            'check': chk,
         })
         olog.info(
             'ai_seek',
-            f'Triple view {name}: target={pan_deg} settled={settled} '
-            f'hw_pan={arrival.get("hw_pan") if arrival else None} '
-            f'wait={arrival.get("waited_s") if arrival else None}s '
-            f'reason={arrival.get("reason") if arrival else None}',
-            view=name, pan_deg=pan_deg, settled=settled,
+            f'Triple view {name}: target={pan_deg} settled={settled} has_target={has_target}',
+            view=name, pan_deg=pan_deg, settled=settled, has_target=has_target,
         )
-    # Re-center for drive / next goal check (also wait for pan complete)
+    # Re-center
     try:
         ctrl.update(
             seek_phase='triple_scan',
@@ -3204,7 +3227,7 @@ def _seek_capture_triple_views(ctrl, step, steps_label):
         _seek_look_deg(0.0, 0.0, wait_hw=True, should_stop=ctrl.should_stop)
     except Exception:
         pass
-    return views
+    return views, found_check
 
 
 def _seek_parse_nav_action(raw_text):
@@ -3235,6 +3258,8 @@ def _seek_parse_nav_action(raw_text):
             action = 'turn_left'
         elif a in ('turn_right', 'right'):
             action = 'turn_right'
+        elif a in ('backward', 'back', 'drive_backward'):
+            action = 'backward'
         dd = str(
             parsed.get('drive_distance')
             or parsed.get('distance')
@@ -3253,7 +3278,6 @@ def _seek_parse_nav_action(raw_text):
             path_clear = pc.strip().lower() in ('1', 'true', 'yes')
         elif pc is not None:
             path_clear = bool(pc)
-        # Safety: if model says forward not clear, don't allow long hop
         if action == 'forward' and not path_clear and drive_distance == 'long':
             drive_distance = 'short'
         if action in ('turn_left', 'turn_right') and drive_distance == 'long':
@@ -3267,124 +3291,156 @@ def _seek_parse_nav_action(raw_text):
     }
 
 
-def _seek_nav_decide(views, goal_label, labels_hint=None):
-    """Send LEFT/STRAIGHT/RIGHT stills to the LLM; return structured nav choice."""
-    content = [
+def _parse_json_from_text(text):
+    text = (text or '').strip()
+    if text.startswith('```'):
+        text = re.sub(r'^```(?:json)?\s*', '', text)
+        text = re.sub(r'\s*```$', '', text)
+    try:
+        return json.loads(text)
+    except Exception:
+        m = re.search(r'\{[^{}]+\}', text, re.S)
+        if m:
+            try:
+                return json.loads(m.group(0))
+            except Exception:
+                pass
+    return None
+
+
+def _seek_unified_llm_analysis(current_views, prev_forward_jpeg, goal_label):
+    """Perform single unified LLM query to answer all 4 seek questions in one go:
+    a. Is the goal in the image?
+    b. Is the path forward clear?
+    c. Is the current forward view identical to previous forward view (stuck detection)?
+    d. Which direction to continue in (left/right/forward/backward)?
+    """
+    user_content = [
         {
             'type': 'text',
             'text': (
-                f'Goal being sought (do not claim found): {goal_label}. '
-                f'Detector labels recently seen: {json.dumps(labels_hint or [])}. '
-                'Images follow in order: LEFT, STRAIGHT, RIGHT. '
-                'Choose action (forward|turn_left|turn_right) AND drive_distance '
-                '(short|medium|long) for how far to go before the next scan. JSON only.'
-            ),
-        },
+                f'Target object to seek: "{goal_label}".\n'
+                'Analyze the provided camera view(s) to answer all of the following questions in a single JSON response:\n'
+                'a. Is the target object clearly visible in any of the current views?\n'
+                'b. Is the path directly in front clear and safe for driving forward?\n'
+                'c. Is the current forward view identical/unchanged compared to the previous forward view (indicating the robot is stuck facing a wall/obstacle)?\n'
+                'd. Which direction should the robot drive next (forward|left|right|backward) and at what distance (short|medium|long)?\n\n'
+                'Respond strictly in JSON format with schema:\n'
+                '{\n'
+                '  "goal_found": true|false,\n'
+                '  "goal_found_view": "straight"|"left"|"right"|null,\n'
+                '  "path_forward_clear": true|false,\n'
+                '  "is_identical_to_previous": true|false,\n'
+                '  "recommended_direction": "forward"|"left"|"right"|"backward",\n'
+                '  "drive_distance": "short"|"medium"|"long",\n'
+                '  "reason": "concise explanation"\n'
+                '}'
+            )
+        }
     ]
+
+    if prev_forward_jpeg:
+        b64_prev = base64.b64encode(prev_forward_jpeg).decode('ascii')
+        user_content.append({'type': 'text', 'text': 'PREVIOUS FORWARD VIEW (from previous nav check):'})
+        user_content.append({'type': 'image_url', 'image_url': {'url': f'data:image/jpeg;base64,{b64_prev}'}})
+
     have_any = False
-    for v in views:
+    for v in current_views:
         jpeg = v.get('jpeg')
-        label = (v.get('name') or '?').upper()
-        content.append({'type': 'text', 'text': f'{label} view (pan≈{v.get("pan_deg")}°):'})
+        name = (v.get('name') or 'view').upper()
+        pan = v.get('pan_deg', 0.0)
+        user_content.append({'type': 'text', 'text': f'CURRENT {name} VIEW (pan≈{pan}°):'})
         if jpeg:
             have_any = True
             b64 = base64.b64encode(jpeg).decode('ascii')
-            content.append({
-                'type': 'image_url',
-                'image_url': {'url': f'data:image/jpeg;base64,{b64}'},
-            })
+            user_content.append({'type': 'image_url', 'image_url': {'url': f'data:image/jpeg;base64,{b64}'}})
         else:
-            content.append({'type': 'text', 'text': '(capture failed)'})
+            user_content.append({'type': 'text', 'text': '(capture failed)'})
+
     if not have_any:
         return {
-            'action': 'forward',
+            'goal_found': False,
+            'goal_found_view': None,
+            'path_forward_clear': True,
+            'is_identical_to_previous': False,
+            'recommended_direction': 'forward',
             'drive_distance': 'short',
-            'reason': 'no images; default short forward',
-            'path_clear_forward': True,
-            'fallback': True,
+            'reason': 'no camera images captured'
         }
 
     messages = [
-        {'role': 'system', 'content': _SEEK_NAV_SYSTEM},
-        {'role': 'user', 'content': content},
+        {'role': 'system', 'content': 'You are an AI pilot for an autonomous mobile robot. Output JSON only.'},
+        {'role': 'user', 'content': user_content}
     ]
-    content_out = ''
-    last_err = None
-    for fmt_name, fmt in (
-        ('json_schema', _SEEK_NAV_JSON_SCHEMA),
-        ('json_object', {'type': 'json_object'}),
-        ('plain', None),
-    ):
-        try:
-            msg, _body, _cfg = _openai_chat(
-                messages, max_tokens=160, temperature=0.1, tools=None, response_format=fmt,
-            )
-            content_out = _message_text_content(msg) or ''
-            last_err = None
-            nav = _seek_parse_nav_action(content_out)
-            nav['response_format'] = fmt_name
-            return nav
-        except Exception as e:
-            last_err = e
-            continue
-    return {
-        'action': 'forward',
-        'drive_distance': 'short',
-        'reason': f'nav LLM failed ({last_err}); default short forward',
-        'path_clear_forward': True,
-        'fallback': True,
-        'error': str(last_err)[:200] if last_err else None,
-    }
 
-
-def _seek_execute_nav_action(action, drive_distance='medium'):
-    """Execute body move after multi-view decision; duration from drive_distance tier."""
     try:
-        _seek_look_deg(0.0, 0.0, wait_hw=True)
-    except Exception:
-        try:
-            _seek_look_deg(0.0, 0.0, wait_hw=False, settle_s=0.25)
-        except Exception:
-            pass
-    action = (action or 'forward').strip().lower()
-    dist = (drive_distance or 'medium').strip().lower()
-    if dist not in _SEEK_DRIVE_MS_BY_DIST:
-        dist = 'medium'
-    if action == 'turn_left':
-        dur = _SEEK_TURN_MS_BY_DIST.get(dist, 900)
-        args = {'linear_x': 0.08, 'angular_z': 0.5, 'duration_ms': dur}
-    elif action == 'turn_right':
-        dur = _SEEK_TURN_MS_BY_DIST.get(dist, 900)
-        args = {'linear_x': 0.08, 'angular_z': -0.5, 'duration_ms': dur}
-    else:
-        dur = _SEEK_DRIVE_MS_BY_DIST.get(dist, _SEEK_DRIVE_MS)
-        lin = _SEEK_DRIVE_LIN_BY_DIST.get(dist, 0.15)
-        args = {'linear_x': lin, 'angular_z': 0.0, 'duration_ms': dur}
-    res = _execute_agent_tool('send_motor_command', args)
-    # Wait for timed drive to finish (uses body duration requested)
-    time.sleep(float(args['duration_ms']) / 1000.0 + 0.3)
+        msg, _body, _cfg = _openai_chat(messages, max_tokens=180, temperature=0.1)
+        txt = _message_text_content(msg) or ''
+        parsed = _parse_json_from_text(txt)
+        if isinstance(parsed, dict):
+            found = bool(parsed.get('goal_found'))
+            found_view = str(parsed.get('goal_found_view') or 'straight').lower().strip()
+            fwd_clear = parsed.get('path_forward_clear')
+            if isinstance(fwd_clear, str):
+                fwd_clear = fwd_clear.lower() in ('true', '1', 'yes')
+            elif fwd_clear is None:
+                fwd_clear = True
+            identical = bool(parsed.get('is_identical_to_previous'))
+            direction = str(parsed.get('recommended_direction') or 'forward').lower().strip()
+            if direction in ('turn_left', 'left'):
+                direction = 'left'
+            elif direction in ('turn_right', 'right'):
+                direction = 'right'
+            elif direction in ('backward', 'back', 'drive_backward'):
+                direction = 'backward'
+            else:
+                direction = 'forward'
+
+            if identical and direction == 'forward':
+                direction = 'left'
+
+            dist = str(parsed.get('drive_distance') or 'medium').lower().strip()
+            if dist not in ('short', 'medium', 'long'):
+                dist = 'medium'
+
+            return {
+                'goal_found': found,
+                'goal_found_view': found_view if found else None,
+                'path_forward_clear': bool(fwd_clear),
+                'is_identical_to_previous': identical,
+                'recommended_direction': direction,
+                'drive_distance': dist,
+                'reason': str(parsed.get('reason') or '')[:200]
+            }
+    except Exception as e:
+        olog.warn('ai_seek', f'Unified LLM analysis error: {e}')
+
     return {
-        'name': 'send_motor_command',
-        'arguments': args,
-        'result': res,
-        'drive_distance': dist,
-        'action': action,
+        'goal_found': False,
+        'goal_found_view': None,
+        'path_forward_clear': True,
+        'is_identical_to_previous': False,
+        'recommended_direction': 'forward',
+        'drive_distance': 'short',
+        'reason': 'fallback forward short'
     }
 
 
 def _seek_loop(ctrl, label, conf, max_steps, timeout_s):
-    """Seek loop: goal check → triple-view LLM nav → drive → repeat.
-
-    At start and after every move: capture LEFT/STRAIGHT/RIGHT, ask the LLM which
-    way is acceptable, then drive. Goal found is still OpenCV/LLM referee only.
-    max_steps: 0 = unlimited. timeout_s: 0 = no time limit.
-    """
+    """Seek loop with support for single unified LLM scene navigation & triple scan thumbnail status."""
     t0 = time.time()
     referee = ctrl.referee()
     max_steps = int(max_steps or 0)
     timeout_s = float(timeout_s or 0)
     unlimited = max_steps <= 0
     steps_label = '∞' if unlimited else str(max_steps)
+
+    st_dict = ctrl.status()
+    llm_scene_nav = bool(st_dict.get('llm_scene_nav', True))
+    llm_nav_interval = max(1, int(st_dict.get('llm_nav_interval', 10)))
+
+    prev_center_jpeg = None
+    cached_nav = None
 
     def _halt(phase, message, step=0, **kwargs):
         try:
@@ -3412,99 +3468,154 @@ def _seek_loop(ctrl, label, conf, max_steps, timeout_s):
                 _halt('timeout', f'Timeout after {timeout_s}s', step=step - 1)
                 return
 
-            # 1) Goal referee (authority)
-            ctrl.update(
-                step=step,
-                seek_phase='goal_check',
-                message=f'Step {step}/{steps_label}: goal check ({referee}) for {label}…',
-            )
-            check = seek_goal_check(label, referee=referee, conf_threshold=conf)
-            ctrl.update(last_detection=check)
-            if check.get('found'):
-                reason = check.get('reason') or ''
-                best = check.get('best') or {}
-                conf_s = best.get('confidence', '?')
-                _seek_run_on_found(ctrl, label)
-                _halt(
-                    'found',
-                    message=(
-                        f'Found {label} via {referee}'
-                        + (f' (conf={conf_s})' if referee == REFEREE_DETECTOR else '')
-                        + (f' — {reason}' if reason else '')
-                        + f' at step {step}'
-                    ),
-                    step=step,
-                    last_detection=check,
+            if llm_scene_nav:
+                is_calc_step = (step == 1) or ((step - 1) % llm_nav_interval == 0) or (cached_nav is None)
+                if is_calc_step:
+                    ctrl.update(
+                        step=step,
+                        seek_phase='nav_decide',
+                        message=f'Step {step}/{steps_label}: Single-query LLM analyzing scene & goal…'
+                    )
+                    # 1) Capture forward photo
+                    _seek_look_deg(0.0, 0.0, wait_hw=True, should_stop=ctrl.should_stop)
+                    straight_jpeg = _seek_grab_jpeg()
+                    
+                    # On-device detector referee check first (if detector referee)
+                    chk_det = None
+                    if referee == REFEREE_DETECTOR:
+                        chk_det = seek_goal_check(label, referee=REFEREE_DETECTOR, conf_threshold=conf, jpeg=straight_jpeg)
+                        if chk_det.get('found'):
+                            _seek_run_on_found(ctrl, label)
+                            _halt('found', message=f'Found {label} via detector at step {step}', step=step, last_detection=chk_det)
+                            return
+
+                    # Prepare forward view
+                    b64_straight = base64.b64encode(straight_jpeg).decode('ascii') if straight_jpeg else ''
+                    straight_view = {
+                        'name': 'straight', 'pan_deg': 0.0, 'bytes': len(straight_jpeg) if straight_jpeg else 0,
+                        'data_url': f'data:image/jpeg;base64,{b64_straight}' if b64_straight else '',
+                        'has_target': bool(chk_det and chk_det.get('found')),
+                        'detected_labels': chk_det.get('labels_found') if chk_det else [],
+                        'jpeg': straight_jpeg,
+                    }
+
+                    views_to_analyze = [straight_view]
+
+                    # Perform single unified LLM query
+                    analysis = _seek_unified_llm_analysis(views_to_analyze, prev_center_jpeg, label)
+                    
+                    # If referee is LLM and unified query detected goal, or detector found goal:
+                    if (referee == REFEREE_LLM and analysis.get('goal_found')) or (chk_det and chk_det.get('found')):
+                        found_v = analysis.get('goal_found_view') or 'straight'
+                        straight_view['has_target'] = True
+                        res_check = chk_det or {
+                            'found': True, 'goal_label': label, 'referee': REFEREE_LLM,
+                            'reason': analysis.get('reason') or 'LLM unified query identified goal',
+                            'found_view': found_v
+                        }
+                        _seek_run_on_found(ctrl, label)
+                        _halt('found', message=f'Found {label} via {referee} at step {step}', step=step, last_detection=res_check)
+                        return
+
+                    # Check if forward is blocked -> if so, capture Left and Right views for side decision
+                    if not analysis.get('path_forward_clear') and not analysis.get('is_identical_to_previous'):
+                        ctrl.update(message=f'Step {step}/{steps_label}: Forward blocked! Capturing Left & Right views…')
+                        _seek_look_deg(-70.0, 0.0, wait_hw=True, should_stop=ctrl.should_stop)
+                        left_jpeg = _seek_grab_jpeg()
+                        b64_l = base64.b64encode(left_jpeg).decode('ascii') if left_jpeg else ''
+                        left_view = {
+                            'name': 'left', 'pan_deg': -70.0, 'bytes': len(left_jpeg) if left_jpeg else 0,
+                            'data_url': f'data:image/jpeg;base64,{b64_l}' if b64_l else '',
+                            'has_target': False, 'detected_labels': [], 'jpeg': left_jpeg
+                        }
+
+                        _seek_look_deg(70.0, 0.0, wait_hw=True, should_stop=ctrl.should_stop)
+                        right_jpeg = _seek_grab_jpeg()
+                        b64_r = base64.b64encode(right_jpeg).decode('ascii') if right_jpeg else ''
+                        right_view = {
+                            'name': 'right', 'pan_deg': 70.0, 'bytes': len(right_jpeg) if right_jpeg else 0,
+                            'data_url': f'data:image/jpeg;base64,{b64_r}' if b64_r else '',
+                            'has_target': False, 'detected_labels': [], 'jpeg': right_jpeg
+                        }
+                        _seek_look_deg(0.0, 0.0, wait_hw=True, should_stop=ctrl.should_stop)
+
+                        views_to_analyze = [left_view, straight_view, right_view]
+                        analysis = _seek_unified_llm_analysis(views_to_analyze, prev_center_jpeg, label)
+
+                    raw_dir = analysis.get('recommended_direction') or 'forward'
+                    if raw_dir == 'left':
+                        action = 'turn_left'
+                    elif raw_dir == 'right':
+                        action = 'turn_right'
+                    elif raw_dir == 'backward':
+                        action = 'backward'
+                    else:
+                        action = 'forward'
+
+                    dist = analysis.get('drive_distance') or 'medium'
+                    reason = analysis.get('reason') or ''
+                    if analysis.get('is_identical_to_previous'):
+                        reason = f'STUCK DETECTED (same scene as previous)! Recovery: {action} ({reason})'
+
+                    prev_center_jpeg = straight_jpeg
+                    cached_nav = {'action': action, 'drive_distance': dist, 'reason': reason}
+                    ctrl.update(
+                        last_views=[{
+                            'name': v['name'], 'pan_deg': v['pan_deg'], 'bytes': v['bytes'],
+                            'data_url': v.get('data_url'), 'has_target': v.get('has_target'),
+                            'detected_labels': v.get('detected_labels', []),
+                        } for v in views_to_analyze],
+                        last_nav=cached_nav,
+                        last_llm_reply=reason[:500],
+                        message=f'Step {step}/{steps_label}: Single-query Nav -> {action} ({dist}) — {reason[:60]}',
+                    )
+                else:
+                    # Intermediate step: run 0° goal check and reuse cached_nav
+                    ctrl.update(step=step, seek_phase='goal_check', message=f'Step {step}/{steps_label}: goal check for {label}…')
+                    _seek_look_deg(0.0, 0.0, wait_hw=True, should_stop=ctrl.should_stop)
+                    straight_jpeg = _seek_grab_jpeg()
+                    chk_centre = seek_goal_check(label, referee=referee, conf_threshold=conf, jpeg=straight_jpeg)
+                    if chk_centre.get('found'):
+                        _seek_run_on_found(ctrl, label)
+                        _halt('found', message=f'Found {label} via {referee} at step {step}', step=step, last_detection=chk_centre)
+                        return
+                    action = cached_nav['action']
+                    dist = cached_nav['drive_distance']
+                    reason = cached_nav['reason']
+                    ctrl.update(message=f'Step {step}/{steps_label}: Executing nav action {action} ({dist})…')
+            else:
+                # LLM Scene Nav disabled: use standard 3-view scan every step
+                ctrl.update(step=step, seek_phase='goal_check', message=f'Step {step}/{steps_label}: 3-view scan for {label}…')
+                views, found_chk = _seek_capture_triple_views(ctrl, step, steps_label, goal_label=label, conf_threshold=conf, referee=referee)
+                ctrl.update(
+                    last_views=[{
+                        'name': v['name'], 'pan_deg': v['pan_deg'], 'bytes': v['bytes'],
+                        'data_url': v.get('data_url'), 'has_target': v.get('has_target'),
+                        'detected_labels': v.get('detected_labels', []),
+                    } for v in views]
                 )
-                olog.info(
-                    'ai_seek',
-                    f'Seek found {label} via {referee} at step {step}',
-                    goal=label, step=step, referee=referee,
-                )
-                return
+                if found_chk and found_chk.get('found'):
+                    _seek_run_on_found(ctrl, label)
+                    _halt('found', message=f'Found {label} in {found_chk.get("found_view", "scan")} view at step {step}', step=step, last_detection=found_chk)
+                    return
+
+                nav = _seek_nav_decide(views, label, labels_hint=check.get('labels_found') or [])
+                action = nav.get('action') or 'forward'
+                dist = nav.get('drive_distance') or 'medium'
+                reason = nav.get('reason') or ''
+                ctrl.update(last_nav=nav, last_llm_reply=reason[:500])
 
             if ctrl.should_stop():
                 _halt('stopped', 'Stopped by user', step=step)
                 return
 
-            # 2) Triple view capture (left / straight / right)
-            views = _seek_capture_triple_views(ctrl, step, steps_label)
-            if ctrl.should_stop():
-                _halt('stopped', 'Stopped by user', step=step)
-                return
-
-            # 3) LLM chooses forward / turn_left / turn_right from all three images
-            ctrl.update(
-                seek_phase='nav_decide',
-                message=f'Step {step}/{steps_label}: LLM comparing L/straight/R views…',
-                last_views=[{
-                    'name': v['name'],
-                    'pan_deg': v['pan_deg'],
-                    'bytes': v['bytes'],
-                    'pan_settled': v.get('pan_settled'),
-                    'hw_pan': v.get('hw_pan'),
-                    'pan_wait_s': v.get('pan_wait_s'),
-                    'pan_wait_reason': v.get('pan_wait_reason'),
-                } for v in views],
-            )
-            nav = _seek_nav_decide(
-                views,
-                label,
-                labels_hint=check.get('labels_found') or [],
-            )
-            action = nav.get('action') or 'forward'
-            dist = nav.get('drive_distance') or 'medium'
-            reason = nav.get('reason') or ''
-            ctrl.update(
-                last_nav=nav,
-                last_llm_reply=reason[:500],
-                message=(
-                    f'Step {step}/{steps_label}: nav={action} dist={dist}'
-                    + (f' — {reason[:70]}' if reason else '')
-                ),
-            )
-            olog.info(
-                'ai_seek',
-                f'Nav decision step={step} action={action} dist={dist}',
-                goal=label, step=step, action=action, drive_distance=dist,
-                reason=reason[:120],
-            )
-
-            if ctrl.should_stop():
-                _halt('stopped', 'Stopped by user', step=step)
-                return
-
-            # 4) Drive only after multi-image decision (distance = how far before next scan)
-            ctrl.update(
-                seek_phase='drive',
-                message=f'Step {step}/{steps_label}: driving {action} ({dist})…',
-            )
+            # Drive
+            ctrl.update(seek_phase='drive', message=f'Step {step}/{steps_label}: driving {action} ({dist})…')
             try:
                 drive = _seek_execute_nav_action(action, dist)
                 ctrl.update(last_tools=[drive])
             except Exception as e:
                 olog.warn('ai_seek', f'Drive failed: {e}', error=str(e)[:200], step=step)
-                # fallback alternate turn, short only
                 try:
                     alt = 'turn_left' if action != 'turn_left' else 'turn_right'
                     drive = _seek_execute_nav_action(alt, 'short')
@@ -3513,31 +3624,14 @@ def _seek_loop(ctrl, label, conf, max_steps, timeout_s):
                     _halt('failed', f'Drive failed: {e2}', step=step, error=str(e2)[:300])
                     return
 
-            # Pause before next cycle (goal check again after move)
             for _ in range(int(DEFAULT_SEEK_STEP_PAUSE_S / 0.1) or 1):
                 if ctrl.should_stop():
                     _halt('stopped', 'Stopped by user', step=step)
                     return
                 time.sleep(0.1)
 
-        # Finite max_steps exhausted
-        check = seek_goal_check(label, referee=referee, conf_threshold=conf)
-        if check.get('found'):
-            reason = check.get('reason') or ''
-            _seek_run_on_found(ctrl, label)
-            _halt(
-                'found',
-                message=f'Found {label} via {referee} after final step' + (f' — {reason}' if reason else ''),
-                step=max_steps,
-                last_detection=check,
-            )
-        else:
-            _halt(
-                'timeout',
-                message=f'Gave up after {max_steps} steps without {referee} match for {label}',
-                step=max_steps,
-                last_detection=check,
-            )
+        # Max steps exhausted
+        _halt('timeout', message=f'Gave up after {max_steps} steps without match for {label}', step=max_steps)
     except Exception as e:
         olog.error('ai_seek', f'Seek loop crashed: {e}', error=str(e)[:300])
         try:
@@ -3591,6 +3685,11 @@ def api_ai_seek_start():
     conf = max(0.05, min(0.95, conf))
     on_found = parse_on_found(data.get('on_found') or data.get('upon_found') or DEFAULT_ON_FOUND)
     on_found_tts = data.get('on_found_tts') or data.get('tts_phrase') or DEFAULT_ON_FOUND_TTS
+    llm_scene_nav = bool(data.get('llm_scene_nav', True))
+    try:
+        llm_nav_interval = int(data.get('llm_nav_interval', 10))
+    except (ValueError, TypeError):
+        llm_nav_interval = 10
     result = seek_controller.start(
         goal,
         loop_fn=_seek_loop,
@@ -3600,6 +3699,8 @@ def api_ai_seek_start():
         referee=referee,
         on_found=on_found,
         on_found_tts=on_found_tts,
+        llm_scene_nav=llm_scene_nav,
+        llm_nav_interval=llm_nav_interval,
     )
     code = 200 if result.get('success') else 400
     if result.get('success'):

@@ -317,6 +317,30 @@
     }
   }
 
+  function renderSeekThumbnails(views) {
+    if (!Array.isArray(views) || !views.length) return;
+    views.forEach(function (v) {
+      var name = (v.name || '').toLowerCase();
+      if (name === 'center') name = 'straight';
+      var imgEl = $('seek-thumb-img-' + name);
+      var cardEl = $('seek-thumb-card-' + name);
+      var badgeEl = $('seek-badge-' + name);
+      if (imgEl && v.data_url) {
+        imgEl.src = v.data_url;
+      }
+      if (cardEl) {
+        if (v.has_target) {
+          cardEl.classList.add('has-target');
+        } else {
+          cardEl.classList.remove('has-target');
+        }
+      }
+      if (badgeEl) {
+        badgeEl.hidden = !v.has_target;
+      }
+    });
+  }
+
   function renderSeekStatus(st, opts) {
     var el = $('seek-status');
     if (!el || !st) return;
@@ -391,9 +415,12 @@
       lines.slice(1).join('\n');
 
     updateDetectorBar(st, opts);
+    if (Array.isArray(st.last_views)) {
+      renderSeekThumbnails(st.last_views);
+    }
+
     if (fired && phase === 'running') {
       pulseDetectorFire(st);
-      // brief log line so the fire is visible in the transcript too
       var det = st.last_detection || {};
       var brief =
         'check #' +
@@ -449,6 +476,9 @@
     var referee = getSeekReferee();
     var onFound = getSeekOnFound();
     var onFoundTts = getSeekOnFoundTts();
+    var llmSceneNav = $('seek-llm-scene-nav') ? $('seek-llm-scene-nav').checked : true;
+    var llmNavInterval = parseInt(($('seek-llm-nav-interval') && $('seek-llm-nav-interval').value) || '10', 10);
+    if (isNaN(llmNavInterval) || llmNavInterval < 1) llmNavInterval = 10;
     lastSeekCheckSeq = 0;
     lastSeekStep = -1;
     seekLog(
@@ -456,6 +486,7 @@
         referee +
         ') for: ' +
         goal +
+        ' · scene nav: ' + (llmSceneNav ? 'every ' + llmNavInterval + ' steps' : 'disabled') +
         ' · upon found: ' +
         (onFound === 'tts' ? 'TTS “' + onFoundTts + '”' : 'do nothing')
     );
@@ -470,10 +501,12 @@
       body: JSON.stringify({
         goal: goal,
         referee: referee,
-        max_steps: 0, // unlimited; stop on found / Stop (timeout_s 0 = no time limit)
+        max_steps: 0,
         timeout_s: 0,
         on_found: onFound,
         on_found_tts: onFoundTts,
+        llm_scene_nav: llmSceneNav,
+        llm_nav_interval: llmNavInterval,
       }),
     })
       .then(function (r) {

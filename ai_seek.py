@@ -56,8 +56,10 @@ DEFAULT_SEEK_STEP_PAUSE_S = 0.35
 ON_FOUND_NONE = 'none'
 ON_FOUND_TTS = 'tts'
 VALID_ON_FOUND = frozenset({ON_FOUND_NONE, ON_FOUND_TTS})
-DEFAULT_ON_FOUND = ON_FOUND_NONE
+DEFAULT_ON_FOUND_NONE = 'none'
 DEFAULT_ON_FOUND_TTS = 'I have found the {goal}.'
+DEFAULT_LLM_SCENE_NAV = True
+DEFAULT_LLM_NAV_INTERVAL = 10
 
 
 def parse_on_found(value: str) -> str:
@@ -288,9 +290,12 @@ class SeekController:
             'error': None,
             'message': 'Idle',
             'history': [],
-            'on_found': DEFAULT_ON_FOUND,
+            'on_found': ON_FOUND_NONE,
             'on_found_tts': DEFAULT_ON_FOUND_TTS,
             'on_found_done': False,
+            'llm_scene_nav': DEFAULT_LLM_SCENE_NAV,
+            'llm_nav_interval': DEFAULT_LLM_NAV_INTERVAL,
+            'last_views': [],
         }
 
     def status(self) -> Dict[str, Any]:
@@ -321,8 +326,10 @@ class SeekController:
         timeout_s: float = DEFAULT_SEEK_TIMEOUT_S,
         conf_threshold: float = DEFAULT_SEEK_CONF,
         referee: str = REFEREE_DETECTOR,
-        on_found: str = DEFAULT_ON_FOUND,
+        on_found: str = ON_FOUND_NONE,
         on_found_tts: str = DEFAULT_ON_FOUND_TTS,
+        llm_scene_nav: bool = DEFAULT_LLM_SCENE_NAV,
+        llm_nav_interval: int = DEFAULT_LLM_NAV_INTERVAL,
     ) -> Dict[str, Any]:
         """Start seek. loop_fn(controller, goal_key, conf, max_steps, timeout_s) runs in a thread."""
         referee = parse_seek_referee(referee)
@@ -336,6 +343,10 @@ class SeekController:
         tts_tmpl = (on_found_tts or DEFAULT_ON_FOUND_TTS).strip() or DEFAULT_ON_FOUND_TTS
         if len(tts_tmpl) > 200:
             tts_tmpl = tts_tmpl[:200]
+        try:
+            interval_val = max(1, min(100, int(llm_nav_interval)))
+        except (ValueError, TypeError):
+            interval_val = DEFAULT_LLM_NAV_INTERVAL
         with self._lock:
             if self._state['phase'] == 'running':
                 return {'success': False, 'error': 'seek already running', 'status': dict(self._state)}
@@ -358,6 +369,8 @@ class SeekController:
                 'on_found': on_found,
                 'on_found_tts': tts_tmpl,
                 'on_found_done': False,
+                'llm_scene_nav': bool(llm_scene_nav),
+                'llm_nav_interval': interval_val,
                 'started_at': time.time(),
                 'message': f'Seeking {label} ({referee})…',
             })

@@ -404,6 +404,30 @@
             </div>
             <img class="ugv-preview-img" id="seek-live-preview" src="/video_feed" alt="Live feed" />
             <div class="ugv-seek-status" id="seek-status">Phase: <span class="phase-idle">idle</span></div>
+            <!-- 3-Thumbnail Strip (Left, Centre, Right) -->
+            <div id="seek-thumbnails-strip" class="ugv-seek-thumbs-strip">
+              <div id="seek-thumb-card-left" class="seek-thumb-card">
+                <div class="seek-thumb-title">LEFT (-70°)</div>
+                <div class="seek-thumb-img-wrap">
+                  <img id="seek-thumb-img-left" class="seek-thumb-img" src="" alt="Left view" />
+                  <span id="seek-badge-left" class="seek-target-badge" hidden>🎯 GOAL MATCH</span>
+                </div>
+              </div>
+              <div id="seek-thumb-card-straight" class="seek-thumb-card">
+                <div class="seek-thumb-title">CENTRE (0°)</div>
+                <div class="seek-thumb-img-wrap">
+                  <img id="seek-thumb-img-straight" class="seek-thumb-img" src="" alt="Centre view" />
+                  <span id="seek-badge-straight" class="seek-target-badge" hidden>🎯 GOAL MATCH</span>
+                </div>
+              </div>
+              <div id="seek-thumb-card-right" class="seek-thumb-card">
+                <div class="seek-thumb-title">RIGHT (+70°)</div>
+                <div class="seek-thumb-img-wrap">
+                  <img id="seek-thumb-img-right" class="seek-thumb-img" src="" alt="Right view" />
+                  <span id="seek-badge-right" class="seek-target-badge" hidden>🎯 GOAL MATCH</span>
+                </div>
+              </div>
+            </div>
           </div>
           <div class="ugv-panel-card">
             <h2>Seek mode</h2>
@@ -440,7 +464,21 @@
                   title="Use {goal} for the target name" autocomplete="off" />
               </div>
             </div>
-            <div class="ugv-row-actions">
+
+            <!-- LLM Scene Navigation options -->
+            <div class="ugv-seek-scenenav" style="margin-top: 10px; padding: 8px 10px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px;">
+              <label style="display: flex; align-items: center; gap: 8px; font-weight: 500; font-size: 13px; cursor: pointer;">
+                <input type="checkbox" id="seek-llm-scene-nav" checked />
+                <span>LLM Scene Navigation</span>
+              </label>
+              <div style="margin-top: 6px; font-size: 12px; color: #a0a6b8; display: flex; align-items: center; gap: 6px;">
+                <span>Recalculate every</span>
+                <input type="number" id="seek-llm-nav-interval" value="10" min="1" max="100" style="width: 60px; padding: 2px 6px; font-size: 12px; border-radius: 4px; border: 1px solid #444; background: #161922; color: #fff;" />
+                <span>steps</span>
+              </div>
+            </div>
+
+            <div class="ugv-row-actions" style="margin-top: 12px;">
               <button type="button" id="seek-start-btn">Seek</button>
               <button type="button" class="danger" id="seek-stop-btn">Stop</button>
               <button type="button" class="secondary" id="seek-check-btn">Check once</button>
