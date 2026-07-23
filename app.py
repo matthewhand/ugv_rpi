@@ -667,7 +667,8 @@ def api_ptz():
     """
     if request.method == 'GET':
         snap = _ptz_status_snapshot(request_feedback=True)
-        olog.info(
+        # Polled often (UI/3D twin); keep out of App log at info+
+        olog.debug(
             'ptz_status',
             f'PTZ status hw_pan={snap["hardware"].get("pan_deg")} '
             f'hw_tilt={snap["hardware"].get("tilt_deg")}',
