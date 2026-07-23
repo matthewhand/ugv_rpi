@@ -149,30 +149,34 @@
         // --- 2. Build 3D UGV Rover Model ---
         const robotGroup = new THREE.Group();
 
-        // Base Chassis Box
-        const chassisGeo = new THREE.BoxGeometry(0.32, 0.12, 0.22);
+        // Base Chassis Box (Slimmer Profile)
+        const chassisGeo = new THREE.BoxGeometry(0.20, 0.10, 0.28);
         const chassisMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, metalness: 0.8, roughness: 0.3 });
         const chassis = new THREE.Mesh(chassisGeo, chassisMat);
-        chassis.position.y = 0.12;
+        chassis.position.y = 0.10;
         chassis.castShadow = true;
         robotGroup.add(chassis);
 
         // Top Accent Cover
-        const coverGeo = new THREE.BoxGeometry(0.24, 0.04, 0.18);
+        const coverGeo = new THREE.BoxGeometry(0.16, 0.03, 0.22);
         const coverMat = new THREE.MeshStandardMaterial({ color: 0x0284c7, metalness: 0.5, roughness: 0.4 });
         const cover = new THREE.Mesh(coverGeo, coverMat);
-        cover.position.set(0, 0.18, 0);
+        cover.position.set(0, 0.15, 0);
         robotGroup.add(cover);
 
-        // Wheels
+        // 4 Wheels (2 on Left side X=-0.11, 2 on Right side X=+0.11)
         const wheels = [];
         const wheelGeo = new THREE.CylinderGeometry(0.05, 0.05, 0.04, 24);
         const wheelMat = new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.9 });
         wheelGeo.rotateZ(Math.PI / 2);
 
         const wheelPositions = [
-            [-0.14, 0.05,  0.13], [0, 0.05,  0.13], [0.14, 0.05,  0.13],
-            [-0.14, 0.05, -0.13], [0, 0.05, -0.13], [0.14, 0.05, -0.13]
+            // Left side wheels (2)
+            [-0.11, 0.05,  0.09],
+            [-0.11, 0.05, -0.09],
+            // Right side wheels (2)
+            [ 0.11, 0.05,  0.09],
+            [ 0.11, 0.05, -0.09]
         ];
 
         wheelPositions.forEach(pos => {
@@ -183,11 +187,11 @@
             wheels.push(w);
         });
 
-        // Pan-Tilt Gimbal Assembly
+        // Pan-Tilt Gimbal Assembly (Centered on Body X=0, Z=0)
         const panBaseMat = new THREE.MeshStandardMaterial({ color: 0x38bdf8, metalness: 0.6 });
         
         const panLink = new THREE.Group();
-        panLink.position.set(0.08, 0.20, 0);
+        panLink.position.set(0.0, 0.17, 0.0);
         
         const panBaseMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.04, 16), panBaseMat);
         panLink.add(panBaseMesh);
@@ -204,10 +208,22 @@
 
         scene.add(robotGroup);
 
-        // --- 3. Live Animation & ROS 2 Bridge ---
+        // --- 3. Live Animation & Telemetry Sync ---
         let currentPan = 0;
         let currentTilt = 0;
         let isConnected = false;
+
+        // Fetch PTZ fallback when ROS 2 bridge is not active
+        function fetchPtzFallback() {
+            if (isConnected) return;
+            fetch('/api/ptz')
+                .then(r => r.json())
+                .then(d => {
+                    if (d && typeof d.pan === 'number') currentPan = THREE.MathUtils.degToRad(d.pan);
+                    if (d && typeof d.tilt === 'number') currentTilt = THREE.MathUtils.degToRad(d.tilt);
+                }).catch(() => {});
+        }
+        setInterval(fetchPtzFallback, 1000);
 
         // ROS 2 WebSocket Connection
         try {
@@ -220,11 +236,11 @@
             });
 
             ros.on('error', function(error) {
-                document.getElementById('bridge-status').innerText = 'Standalone Sim Mode';
+                document.getElementById('bridge-status').innerText = 'Direct Serial Mode';
             });
 
             ros.on('close', function() {
-                document.getElementById('bridge-status').innerText = 'Disconnected';
+                document.getElementById('bridge-status').innerText = 'Direct Serial Mode';
             });
 
             const jointListener = new ROSLIB.Topic({
@@ -242,20 +258,12 @@
                 }
             });
         } catch(e) {
-            document.getElementById('bridge-status').innerText = 'Standalone Sim Mode';
+            document.getElementById('bridge-status').innerText = 'Direct Serial Mode';
         }
 
         // Animation Loop
-        let animTime = 0;
         function animate() {
             requestAnimationFrame(animate);
-            animTime += 0.02;
-
-            if (!isConnected) {
-                // Smooth demo oscillation when ROS 2 bridge is offline
-                currentPan = Math.sin(animTime * 0.8) * 0.6;
-                currentTilt = Math.sin(animTime * 1.2) * 0.3;
-            }
 
             panLink.rotation.y = currentPan;
             tiltLink.rotation.x = currentTilt;
