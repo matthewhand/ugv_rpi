@@ -170,6 +170,9 @@
   // ---------- Seek panel ----------
   var seekPollTimer = null;
   var SEEK_REFEREE_KEY = 'ugv_seek_referee';
+  var lastSeekCheckSeq = 0;
+  var lastSeekStep = -1;
+  var seekFireTimer = null;
 
   function seekLog(msg) {
     var log = $('seek-log');
@@ -205,6 +208,9 @@
     try {
       localStorage.setItem(SEEK_REFEREE_KEY, ref);
     } catch (e) {}
+    // Idle badge reflects selected referee type
+    if (!$('seek-detector-bar') || ($('seek-detector-bar').classList.contains('is-running'))) return;
+    setDetectorBar('idle', ref === 'llm' ? 'Judge: idle' : 'Detector: idle', '');
   }
 
   function populateDetectorLabels(labels) {
@@ -222,13 +228,112 @@
     if (!sel.value && sel.options.length) sel.selectedIndex = 0;
   }
 
-  function renderSeekStatus(st) {
+  function setDetectorBar(mode, label, meta) {
+    var bar = $('seek-detector-bar');
+    var lab = $('seek-detector-label');
+    var met = $('seek-detector-meta');
+    if (!bar) return;
+    bar.classList.remove('is-idle', 'is-running', 'is-firing', 'is-found', 'is-checking');
+    bar.classList.add('is-' + (mode || 'idle'));
+    if (lab) lab.textContent = label || '';
+    if (met) met.textContent = meta || '';
+  }
+
+  function pulseDetectorFire(st) {
+    var bar = $('seek-detector-bar');
+    var el = $('seek-status');
+    if (bar) {
+      bar.classList.add('is-firing');
+      if (seekFireTimer) clearTimeout(seekFireTimer);
+      seekFireTimer = setTimeout(function () {
+        bar.classList.remove('is-firing');
+        // restore running/found/idle after flash
+        if (st && st.phase === 'running') bar.classList.add('is-running');
+        else if (st && st.phase === 'found') bar.classList.add('is-found');
+        else bar.classList.add('is-idle');
+      }, 450);
+    }
+    if (el) {
+      el.classList.add('is-firing');
+      setTimeout(function () {
+        el.classList.remove('is-firing');
+      }, 450);
+    }
+  }
+
+  function formatCheckAge(st) {
+    if (!st || !st.last_check_at) return '';
+    var age = Math.max(0, (Date.now() / 1000) - Number(st.last_check_at));
+    if (age < 1.5) return 'just now';
+    if (age < 60) return Math.round(age) + 's ago';
+    return Math.round(age / 60) + 'm ago';
+  }
+
+  function updateDetectorBar(st, opts) {
+    opts = opts || {};
+    var phase = (st && st.phase) || 'idle';
+    var det = (st && st.last_detection) || {};
+    var ref = (st && st.referee) || det.referee || getSeekReferee();
+    var isLlm = ref === 'llm' || det.referee === 'llm';
+    var name = isLlm ? 'Judge' : 'Detector';
+    var meta = [];
+    if (st && st.step) meta.push('step ' + st.step);
+    if (st && st.seek_phase) meta.push(st.seek_phase);
+    if (st && st.last_check_seq) meta.push('#' + st.last_check_seq);
+    var age = formatCheckAge(st);
+    if (age) meta.push(age);
+
+    if (opts.checking) {
+      setDetectorBar('checking', name + ': checking…', meta.join(' · '));
+      return;
+    }
+    if (phase === 'running') {
+      var foundBit = det.found ? 'MATCH' : 'no match';
+      var labels = '';
+      if (!isLlm && det.labels_found && det.labels_found.length) {
+        labels = ' · saw ' + det.labels_found.join(', ');
+      } else if (isLlm && det.reason) {
+        labels = ' · ' + String(det.reason).slice(0, 60);
+      }
+      setDetectorBar(
+        'running',
+        name + ': running (' + foundBit + ')' + labels,
+        meta.join(' · ')
+      );
+    } else if (phase === 'found') {
+      setDetectorBar('found', name + ': FOUND', meta.join(' · '));
+    } else if (phase === 'stopped' || phase === 'timeout' || phase === 'failed') {
+      setDetectorBar(
+        'idle',
+        name + ': ' + phase,
+        meta.join(' · ')
+      );
+    } else {
+      setDetectorBar('idle', name + ': idle', '');
+    }
+  }
+
+  function renderSeekStatus(st, opts) {
     var el = $('seek-status');
     if (!el || !st) return;
+    opts = opts || {};
     var phase = st.phase || 'idle';
     var cls = 'phase-' + phase;
     var det = st.last_detection || {};
     var ref = st.referee || det.referee || '—';
+    var seq = st.last_check_seq || 0;
+    var step = st.step || 0;
+    var fired = false;
+    if (seq && seq !== lastSeekCheckSeq) {
+      fired = true;
+      lastSeekCheckSeq = seq;
+    } else if (step && step !== lastSeekStep && phase === 'running') {
+      // step advanced even if seq missing (older server)
+      fired = lastSeekStep >= 0;
+      lastSeekStep = step;
+    }
+    if (step) lastSeekStep = step;
+
     var lines = [
       'Phase: ' + phase,
       'Seek cycle: ' + (st.seek_phase || '—'),
@@ -240,6 +345,13 @@
         (st.max_steps === 0 || st.max_steps === '0' ? '∞' : st.max_steps || '—'),
       'Message: ' + (st.message || ''),
     ];
+    if (st.last_check_seq) {
+      lines.push(
+        'Detector fires: #' +
+          st.last_check_seq +
+          (st.last_check_at ? ' · ' + formatCheckAge(st) : '')
+      );
+    }
     if (det && typeof det === 'object' && Object.keys(det).length) {
       if (ref === 'llm' || det.referee === 'llm') {
         lines.push(
@@ -267,6 +379,24 @@
       lines[0] +
       '</span>\n' +
       lines.slice(1).join('\n');
+
+    updateDetectorBar(st, opts);
+    if (fired && phase === 'running') {
+      pulseDetectorFire(st);
+      // brief log line so the fire is visible in the transcript too
+      var det = st.last_detection || {};
+      var brief =
+        'check #' +
+        (st.last_check_seq || '?') +
+        ' step ' +
+        (st.step || '?') +
+        ' found=' +
+        !!det.found;
+      if (det.labels_found && det.labels_found.length) {
+        brief += ' labels=' + det.labels_found.join(',');
+      }
+      seekLog(brief);
+    }
   }
 
   function pollSeek() {
@@ -281,6 +411,7 @@
           clearInterval(seekPollTimer);
           seekPollTimer = null;
           seekLog('Seek ended: ' + st.phase + ' — ' + (st.message || ''));
+          updateDetectorBar(st);
         }
       })
       .catch(function () {});
@@ -289,7 +420,14 @@
   function seekStart() {
     var goal = getSeekGoal();
     var referee = getSeekReferee();
+    lastSeekCheckSeq = 0;
+    lastSeekStep = -1;
     seekLog('Starting seek (' + referee + ') for: ' + goal);
+    setDetectorBar(
+      'running',
+      (referee === 'llm' ? 'Judge' : 'Detector') + ': starting…',
+      goal
+    );
     fetch('/api/ai/seek/start', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -306,14 +444,18 @@
       .then(function (d) {
         if (!d.success) {
           seekLog('Start failed: ' + (d.error || 'unknown'));
+          setDetectorBar('idle', 'Detector: idle', '');
           return;
         }
         renderSeekStatus(d.status || {});
         if (seekPollTimer) clearInterval(seekPollTimer);
-        seekPollTimer = setInterval(pollSeek, 800);
+        // Poll faster so each detector fire is visible
+        seekPollTimer = setInterval(pollSeek, 400);
+        pollSeek();
       })
       .catch(function (e) {
         seekLog(String(e.message || e));
+        setDetectorBar('idle', 'Detector: idle', '');
       });
   }
 
@@ -334,6 +476,9 @@
   function seekCheckOnce() {
     var goal = getSeekGoal();
     var referee = getSeekReferee();
+    var name = referee === 'llm' ? 'Judge' : 'Detector';
+    setDetectorBar('checking', name + ': checking…', goal);
+    seekLog(name + ' check once: ' + goal);
     fetch('/api/ai/seek/check', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -345,9 +490,22 @@
       .then(function (d) {
         if (!d.success) {
           seekLog('Check failed: ' + (d.error || ''));
+          setDetectorBar('idle', name + ': idle', 'error');
           return;
         }
         var c = d.check || {};
+        // One-shot: flash fire + result in bar
+        setDetectorBar(
+          c.found ? 'found' : 'idle',
+          name + ': ' + (c.found ? 'FOUND' : 'no match'),
+          c.labels_found && c.labels_found.length
+            ? c.labels_found.join(', ')
+            : c.reason || ''
+        );
+        pulseDetectorFire({ phase: c.found ? 'found' : 'idle' });
+        setTimeout(function () {
+          if (!seekPollTimer) setDetectorBar('idle', name + ': idle', '');
+        }, 1200);
         if ((d.referee || referee) === 'llm') {
           seekLog(
             'LLM judge ' +
@@ -372,6 +530,7 @@
       })
       .catch(function (e) {
         seekLog(String(e.message || e));
+        setDetectorBar('idle', name + ': idle', 'error');
       });
   }
 

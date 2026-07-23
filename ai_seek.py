@@ -253,6 +253,8 @@ class SeekController:
             'started_at': None,
             'finished_at': None,
             'last_detection': None,
+            'last_check_at': None,  # unix time of last referee fire (for UX pulse)
+            'last_check_seq': 0,    # increments each detector/judge call
             'last_llm_reply': None,
             'last_tools': [],
             'error': None,
@@ -332,6 +334,11 @@ class SeekController:
 
     def update(self, **kwargs) -> None:
         with self._lock:
+            # Bump detector UX counters when a new referee result is attached
+            if 'last_detection' in kwargs and kwargs['last_detection'] is not None:
+                kwargs = dict(kwargs)
+                kwargs.setdefault('last_check_at', time.time())
+                kwargs['last_check_seq'] = int(self._state.get('last_check_seq') or 0) + 1
             self._state.update(kwargs)
 
     def finish(self, phase: str, message: str = '', **kwargs) -> None:

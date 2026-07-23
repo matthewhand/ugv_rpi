@@ -1232,6 +1232,79 @@ ul.video-list li a:hover div .normal_btn_play::before{background-image: url('./i
   opacity: 0.5;
   cursor: wait;
 }
+.ugv-seek-detector-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #12151d;
+  border: 1px solid #2a2f3d;
+  color: #9aa3b2;
+  transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
+}
+.ugv-seek-detector-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #4b5563;
+  flex-shrink: 0;
+}
+.ugv-seek-detector-bar.is-idle .ugv-seek-detector-dot { background: #4b5563; }
+.ugv-seek-detector-bar.is-running .ugv-seek-detector-dot {
+  background: #5b8cff;
+  box-shadow: 0 0 0 0 rgba(91, 140, 255, 0.7);
+  animation: ugv-seek-pulse 1.1s ease-out infinite;
+}
+.ugv-seek-detector-bar.is-running {
+  border-color: #3a5a9a;
+  color: #c4d0e0;
+  background: #12182a;
+}
+.ugv-seek-detector-bar.is-firing {
+  border-color: #5b8cff;
+  box-shadow: 0 0 0 2px rgba(91, 140, 255, 0.35);
+  background: #152038;
+  color: #e8eaef;
+}
+.ugv-seek-detector-bar.is-firing .ugv-seek-detector-dot {
+  background: #8eb6ff;
+  animation: none;
+}
+.ugv-seek-detector-bar.is-found {
+  border-color: #2a7a52;
+  background: #0f1f18;
+  color: #b8f0d4;
+}
+.ugv-seek-detector-bar.is-found .ugv-seek-detector-dot {
+  background: #3dd68c;
+  animation: none;
+  box-shadow: none;
+}
+.ugv-seek-detector-bar.is-checking {
+  border-color: #c4b5fd;
+  background: #1a1630;
+  color: #e8eaef;
+}
+.ugv-seek-detector-bar.is-checking .ugv-seek-detector-dot {
+  background: #c4b5fd;
+  animation: ugv-seek-pulse 0.7s ease-out infinite;
+}
+.ugv-seek-detector-label { font-weight: 700; }
+.ugv-seek-detector-meta {
+  font-weight: 500;
+  color: #9aa3b2;
+  font-size: 11px;
+  margin-left: auto;
+}
+@keyframes ugv-seek-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(91, 140, 255, 0.55); }
+  70% { box-shadow: 0 0 0 8px rgba(91, 140, 255, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(91, 140, 255, 0); }
+}
 .ugv-seek-status {
   font-size: 12px;
   color: #c4d0e0;
@@ -1240,11 +1313,21 @@ ul.video-list li a:hover div .normal_btn_play::before{background-image: url('./i
   padding: 10px;
   line-height: 1.5;
   white-space: pre-wrap;
+  transition: border-color 0.15s, box-shadow 0.15s;
+  border: 1px solid transparent;
+}
+.ugv-seek-status.is-firing {
+  border-color: #5b8cff;
+  box-shadow: 0 0 0 1px rgba(91, 140, 255, 0.25);
 }
 .ugv-seek-status .phase-found { color: #3dd68c; font-weight: 700; }
 .ugv-seek-status .phase-running { color: #5b8cff; font-weight: 700; }
 .ugv-seek-status .phase-failed,
 .ugv-seek-status .phase-timeout { color: #ff6b6b; font-weight: 700; }
+.ugv-seek-status .det-fire {
+  color: #8eb6ff;
+  font-weight: 700;
+}
 .ugv-preview-img {
   width: 100%;
   max-height: 280px;
