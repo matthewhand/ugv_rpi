@@ -2182,7 +2182,8 @@ def _execute_motion_via_mode(name, args):
         return out
 
     if name == 'send_gimbal_command':
-        pan = _clamp(float(args.get('pan_rad', 0.0)), -1.2, 1.2)
+        # ±2.6 rad ≈ ±149° — enough for a ~270°+ sweep (hardware pan is ±180°)
+        pan = _clamp(float(args.get('pan_rad', 0.0)), -2.6, 2.6)
         tilt = _clamp(float(args.get('tilt_rad', 0.0)), -1.0, 0.6)
         # Inverse of ros_motion.ui_xy_to_radians
         x_deg = -pan * 180.0 / math.pi
@@ -2694,15 +2695,17 @@ from ai_seek import (
 )
 
 _SEEK_PILOT_SHARED = (
-    "You are a seek pilot on a UGV rover. Search by DRIVING and regularly LOOKING with the pan-tilt camera. "
+    "You are a seek pilot on a UGV rover. Search by looking with the pan-tilt camera, then driving. "
     "IMPORTANT: You are inside a multi-step outer loop. Another user message means the target is still NOT found — keep searching. "
     "Never claim success or that you are finished. "
     "CRITICAL: You MUST call tools every turn. Prefer function/tool calls over prose. "
-    "PTZ (required often): call send_gimbal_command on most turns to scan — pan left/right and slight tilt up/down "
-    "(pan_rad roughly ±0.3–0.9, tilt_rad roughly -0.2–0.4). Do not leave the camera fixed straight ahead for many steps. "
-    "A good pattern: look left → look right → look slightly up → center → drive a short hop → repeat. "
-    "Drive: short timed send_motor_command (duration_ms 800–1500, linear_x 0.12–0.18); turn with angular_z ±0.4 if needed. "
-    "You may call send_gimbal_command and send_motor_command in the same turn. "
+    "SCAN BEFORE YOU DRIVE: Before choosing a drive direction, complete a ~270° horizontal look "
+    "(pan the camera across left → slightly left → center → slightly right → right, about ±2.0–2.4 rad pan). "
+    "While SCANNING: call ONLY send_gimbal_command (no drive). Wait for the scan to finish across steps. "
+    "After the full sweep: pick the most promising side (or straight if unclear), center the camera, "
+    "THEN short send_motor_command hops (duration_ms 800–1500, linear_x 0.12–0.18; angular_z ±0.4 to face that way). "
+    "If still not found after a hop or two, do another ~270° pan sweep before driving again. "
+    "Also use slight tilt (tilt_rad -0.2–0.4) during or after the sweep. "
     "Gimbal Steady is off during Seek — absolute look commands work. "
     "One short plan line after tools. No long analysis."
 )
@@ -2893,33 +2896,62 @@ def _seek_force_tools_on():
         olog.warn('ai_seek', f'Could not enable seek tools: {e}', error=str(e)[:200])
 
 
-# Deterministic look pattern when the pilot LLM skips tools (pan/tilt in radians)
-_SEEK_LOOK_PATTERN = (
-    {'pan_rad': -0.7, 'tilt_rad': 0.05},   # left
-    {'pan_rad': 0.7, 'tilt_rad': 0.05},    # right
-    {'pan_rad': 0.0, 'tilt_rad': 0.35},    # up a bit
-    {'pan_rad': 0.0, 'tilt_rad': -0.15},   # slight down
-    {'pan_rad': 0.0, 'tilt_rad': 0.0},     # center
-)
+# ~270° horizontal sweep: pan X degrees -135 … +135 (tool uses pan_rad = -deg * pi/180)
+_SEEK_SCAN_PAN_DEG = (-135, -90, -45, 0, 45, 90, 135)
+_SEEK_DRIVE_STEPS_BETWEEN_SCANS = 3  # short hops, then re-sweep
+
+
+def _seek_pan_deg_to_rad(pan_deg, tilt_deg=0.0):
+    """Match send_gimbal_command convention: x_deg = -pan_rad * 180/pi."""
+    pan_rad = -float(pan_deg) * math.pi / 180.0
+    tilt_rad = float(tilt_deg) * math.pi / 180.0
+    return {'pan_rad': round(pan_rad, 4), 'tilt_rad': round(tilt_rad, 4)}
+
+
+def _seek_scan_look(step_index, tilt_deg=5.0):
+    """Look target for scan step (1-based index into the 270° sweep)."""
+    i = (max(1, int(step_index)) - 1) % len(_SEEK_SCAN_PAN_DEG)
+    return _seek_pan_deg_to_rad(_SEEK_SCAN_PAN_DEG[i], tilt_deg)
+
+
+def _seek_phase(step):
+    """Return ('scan'|'drive', look_dict, meta).
+
+    Pattern: full 270° pan scan (look-only), then a few drive steps, then re-scan.
+    """
+    n_scan = len(_SEEK_SCAN_PAN_DEG)
+    cycle = n_scan + _SEEK_DRIVE_STEPS_BETWEEN_SCANS
+    pos = (max(1, int(step)) - 1) % cycle
+    if pos < n_scan:
+        look = _seek_scan_look(pos + 1)
+        return 'scan', look, {
+            'scan_index': pos + 1,
+            'scan_total': n_scan,
+            'pan_deg': _SEEK_SCAN_PAN_DEG[pos],
+            'span_deg': 270,
+        }
+    look = _seek_pan_deg_to_rad(0.0, 0.0)  # center for driving
+    return 'drive', look, {
+        'drive_index': pos - n_scan + 1,
+        'drive_total': _SEEK_DRIVE_STEPS_BETWEEN_SCANS,
+    }
 
 
 def _seek_fallback_drive(reason='', step=1):
-    """Deterministic look-around + short drive when pilot LLM is down or skipped tools."""
+    """Deterministic scan look or short drive when pilot LLM is down / skips tools."""
+    phase, look, meta = _seek_phase(step)
     trace = []
-    look = _SEEK_LOOK_PATTERN[(max(1, int(step)) - 1) % len(_SEEK_LOOK_PATTERN)]
     try:
         gres = _execute_agent_tool('send_gimbal_command', dict(look))
         trace.append({
             'name': 'send_gimbal_command',
             'arguments': dict(look),
-            'result': gres if isinstance(gres, dict) else {'ok': True, 'fallback': True},
+            'result': gres if isinstance(gres, dict) else {'ok': True, 'fallback': True, 'phase': phase},
         })
-        time.sleep(0.35)  # let PT settle before drive / next frame
+        time.sleep(0.45 if phase == 'scan' else 0.25)
     except Exception as e:
         olog.warn('ai_seek', f'Fallback gimbal failed: {e}', error=str(e)[:120])
-    # Alternate: look-only some steps; drive on others so we still explore space
-    do_drive = (int(step) % 3) != 0
-    if do_drive:
+    if phase == 'drive':
         args = {
             'linear_x': 0.15,
             'angular_z': 0.35 if (int(step) % 2) else -0.35,
@@ -2938,7 +2970,7 @@ def _seek_fallback_drive(reason='', step=1):
             return trace, f'fallback look ok; drive failed ({e})'
     if not trace:
         return [], f'fallback failed ({reason or "no tools"})'
-    return trace, f'fallback look+{"drive" if do_drive else "look-only"} ({reason or "no tools"})'
+    return trace, f'fallback phase={phase} {meta} ({reason or "no tools"})'
 
 
 def _seek_loop(ctrl, label, conf, max_steps, timeout_s):
@@ -2980,10 +3012,23 @@ def _seek_loop(ctrl, label, conf, max_steps, timeout_s):
 
             # Referee (authority): detector class list OR LLM JSON found bool
             check = seek_goal_check(label, referee=referee, conf_threshold=conf)
+            phase, look_hint, phase_meta = _seek_phase(step)
+            if phase == 'scan':
+                status_msg = (
+                    f'Step {step}/{steps_label}: SCAN {phase_meta["scan_index"]}/'
+                    f'{phase_meta["scan_total"]} pan≈{phase_meta["pan_deg"]}° ({referee}) for {label}…'
+                )
+            else:
+                status_msg = (
+                    f'Step {step}/{steps_label}: DRIVE after 270° scan '
+                    f'({phase_meta["drive_index"]}/{phase_meta["drive_total"]}) ({referee}) for {label}…'
+                )
             ctrl.update(
                 step=step,
                 last_detection=check,
-                message=f'Step {step}/{steps_label}: scanning ({referee}) for {label}…',
+                message=status_msg,
+                seek_phase=phase,
+                phase_meta=phase_meta,
             )
             if check.get('found'):
                 reason = check.get('reason') or ''
@@ -3007,51 +3052,71 @@ def _seek_loop(ctrl, label, conf, max_steps, timeout_s):
                 )
                 return
 
-            # Suggest a concrete look target this step (LLM should still call the tool)
-            look_hint = _SEEK_LOOK_PATTERN[(step - 1) % len(_SEEK_LOOK_PATTERN)]
-            look_line = (
-                f"This step: prefer send_gimbal_command pan_rad≈{look_hint['pan_rad']}, "
-                f"tilt_rad≈{look_hint['tilt_rad']} (or a nearby scan), "
-                f"THEN optionally send_motor_command for a short hop. "
-                f"Do not skip the gimbal look."
-            )
+            if phase == 'scan':
+                look_line = (
+                    f"PHASE=SCAN (~270° sweep before driving). "
+                    f"Scan pose {phase_meta['scan_index']}/{phase_meta['scan_total']}: "
+                    f"pan≈{phase_meta['pan_deg']}° → send_gimbal_command "
+                    f"pan_rad≈{look_hint['pan_rad']}, tilt_rad≈{look_hint['tilt_rad']}. "
+                    f"Do NOT call send_motor_command this turn — finish the look-around first."
+                )
+            else:
+                look_line = (
+                    f"PHASE=DRIVE (scan complete for this cycle). "
+                    f"Center or aim toward the best side seen during the 270° sweep, then "
+                    f"send_motor_command for a short hop (duration_ms 800–1500). "
+                    f"Optional send_gimbal_command to face the chosen direction first. "
+                    f"After a few hops you will scan 270° again."
+                )
 
-            # Pilot LLM: drive + PTZ (not the success oracle)
+            # Pilot LLM: scan-first, then drive (not the success oracle)
             if referee == REFEREE_LLM:
                 det_summary = {
                     'goal': label,
                     'step': step,
+                    'phase': phase,
+                    'phase_meta': phase_meta,
                     'max_steps': max_steps if not unlimited else None,
                     'unlimited_steps': unlimited,
                     'referee': referee,
                     'judge_found': False,
                     'judge_reason': check.get('reason') or '',
-                    'note': 'Vision judge said found=false. Look around with PTZ, then move.',
+                    'note': (
+                        'SCAN: look only across ~270° pan before choosing a drive direction.'
+                        if phase == 'scan'
+                        else 'DRIVE: short hop after scan; re-scan soon if still not found.'
+                    ),
                 }
                 user_line = (
                     f"Loop continues: vision judge still has NOT confirmed goal '{label}' "
                     f"(step {step}/{steps_label}, found=false). You have not finished. "
                     f"{look_line} "
                     f"Judge note: {json.dumps(det_summary)}. "
-                    f"MUST call tools (gimbal look + optional drive), then one-line next plan."
+                    f"MUST call tools now, then one-line next plan."
                 )
             else:
                 det_summary = {
                     'goal': label,
                     'step': step,
+                    'phase': phase,
+                    'phase_meta': phase_meta,
                     'max_steps': max_steps if not unlimited else None,
                     'unlimited_steps': unlimited,
                     'referee': referee,
                     'labels_seen': check.get('labels_found') or [],
                     'all_count': check.get('all_count', 0),
-                    'note': 'Detector has not matched goal class yet. Scan with PTZ.',
+                    'note': (
+                        'SCAN: pan ~270° before driving.'
+                        if phase == 'scan'
+                        else 'DRIVE: short hop after scan.'
+                    ),
                 }
                 user_line = (
                     f"Loop continues: detector still has NOT found class '{label}' "
                     f"(step {step}/{steps_label}). You have not finished. "
                     f"{look_line} "
                     f"Detections summary: {json.dumps(det_summary)}. "
-                    f"MUST call tools (gimbal look + optional drive), then one-line next plan."
+                    f"MUST call tools now, then one-line next plan."
                 )
             messages = [
                 {'role': 'system', 'content': pilot_system},
@@ -3079,20 +3144,48 @@ def _seek_loop(ctrl, label, conf, max_steps, timeout_s):
                 _halt('stopped', 'Stopped by user', step=step, last_llm_reply=reply[:500], last_tools=tool_trace)
                 return
 
-            # If LLM drove but never looked, force a look so the camera actually scans
             tool_names = {(t.get('name') or '') for t in tool_trace}
-            if 'send_gimbal_command' not in tool_names:
-                try:
-                    gres = _execute_agent_tool('send_gimbal_command', dict(look_hint))
+
+            # Scan phase: no driving — strip accidental motor cmds and force the scan pose
+            if phase == 'scan':
+                if 'send_motor_command' in tool_names:
+                    try:
+                        _execute_agent_tool('stop_motors', {})
+                    except Exception:
+                        pass
+                    tool_trace = [t for t in tool_trace if t.get('name') != 'send_motor_command']
                     tool_trace.append({
-                        'name': 'send_gimbal_command',
-                        'arguments': dict(look_hint),
-                        'result': gres if isinstance(gres, dict) else {'ok': True, 'forced_look': True},
+                        'name': 'stop_motors',
+                        'arguments': {},
+                        'result': {'ok': True, 'reason': 'scan_phase_no_drive'},
                     })
-                    reply = ((reply or '') + ' | forced PTZ look').strip(' |')
-                    time.sleep(0.35)
-                except Exception as e:
-                    olog.warn('ai_seek', f'Forced PTZ look failed: {e}', error=str(e)[:120], step=step)
+                    reply = ((reply or '') + ' | blocked drive during SCAN').strip(' |')
+                if 'send_gimbal_command' not in tool_names:
+                    try:
+                        gres = _execute_agent_tool('send_gimbal_command', dict(look_hint))
+                        tool_trace.append({
+                            'name': 'send_gimbal_command',
+                            'arguments': dict(look_hint),
+                            'result': gres if isinstance(gres, dict) else {'ok': True, 'forced_scan': True},
+                        })
+                        reply = ((reply or '') + ' | forced 270° scan pose').strip(' |')
+                        time.sleep(0.45)
+                    except Exception as e:
+                        olog.warn('ai_seek', f'Forced scan look failed: {e}', error=str(e)[:120], step=step)
+            else:
+                # Drive phase: still ensure we looked / centered if LLM only drove
+                if 'send_gimbal_command' not in tool_names:
+                    try:
+                        gres = _execute_agent_tool('send_gimbal_command', dict(look_hint))
+                        tool_trace.append({
+                            'name': 'send_gimbal_command',
+                            'arguments': dict(look_hint),
+                            'result': gres if isinstance(gres, dict) else {'ok': True, 'forced_look': True},
+                        })
+                        reply = ((reply or '') + ' | forced PTZ center/aim').strip(' |')
+                        time.sleep(0.3)
+                    except Exception as e:
+                        olog.warn('ai_seek', f'Forced PTZ look failed: {e}', error=str(e)[:120], step=step)
 
             if not tool_trace:
                 tool_trace, fb = _seek_fallback_drive('no tool calls', step=step)

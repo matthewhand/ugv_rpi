@@ -231,6 +231,7 @@
     var ref = st.referee || det.referee || '—';
     var lines = [
       'Phase: ' + phase,
+      'Seek cycle: ' + (st.seek_phase || '—'),
       'Referee: ' + ref,
       'Goal: ' + (st.goal_label || st.goal_text || '—'),
       'Step: ' +
