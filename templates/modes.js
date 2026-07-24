@@ -5,9 +5,165 @@
   'use strict';
 
   var STORAGE_KEY = 'ugv_app_mode';
+  var VIDEO_FEED_URL = '/video_feed';
+  var lastSeekPanoDataUrl = '';
+  var imgRetryTimers = {};
+  // Pan overlay animation — match real gimbal rate (~54°/s, same as app._SEEK_PAN_EST_DPS)
+  var PAN_EST_DPS = 54;
+  var panAnim = {
+    from: 0,
+    to: 0,
+    startMs: 0,
+    durMs: 0,
+    active: false,
+    lastCmd: null,
+    lastNeedle: 0,
+    raf: null,
+    settling: false,
+  };
 
   function $(id) {
     return document.getElementById(id);
+  }
+
+  /** Cache-bust a stream URL so the browser reopens MJPEG. */
+  function videoFeedUrl() {
+    return VIDEO_FEED_URL + '?t=' + Date.now();
+  }
+
+  /**
+   * Wire automatic reload when an <img> fails or stalls.
+   * opts:
+   *   baseUrl  - stream base (default /video_feed)
+   *   maxRetries - default 12
+   *   minDelayMs - default 800
+   *   maxDelayMs - default 8000
+   *   isStream   - if true, always use cache-busted baseUrl (MJPEG)
+   *   label      - for title tooltip
+   */
+  function wireImageRetry(img, opts) {
+    if (!img || img._ugvRetryWired) return img;
+    opts = opts || {};
+    var maxRetries = opts.maxRetries != null ? opts.maxRetries : 12;
+    var minDelay = opts.minDelayMs != null ? opts.minDelayMs : 800;
+    var maxDelay = opts.maxDelayMs != null ? opts.maxDelayMs : 8000;
+    var isStream = !!opts.isStream;
+    var baseUrl = opts.baseUrl || VIDEO_FEED_URL;
+    var key = img.id || ('img_' + Math.random().toString(36).slice(2));
+    img._ugvRetryWired = true;
+    img._ugvRetryCount = 0;
+    img._ugvLastGoodSrc = '';
+    img._ugvBaseUrl = baseUrl;
+    img._ugvIsStream = isStream;
+
+    function clearTimer() {
+      if (imgRetryTimers[key]) {
+        clearTimeout(imgRetryTimers[key]);
+        delete imgRetryTimers[key];
+      }
+    }
+
+    function scheduleRetry(reason) {
+      if (img._ugvRetryCount >= maxRetries) {
+        img.title = (opts.label || 'Image') + ' failed after ' + maxRetries + ' retries';
+        return;
+      }
+      clearTimer();
+      var n = img._ugvRetryCount++;
+      var delay = Math.min(maxDelay, minDelay * Math.pow(1.45, n));
+      img.title = (opts.label || 'Image') + ' reloading… (try ' + (n + 1) + ')';
+      imgRetryTimers[key] = setTimeout(function () {
+        reloadImage(reason || 'retry');
+      }, delay);
+    }
+
+    function reloadImage(reason) {
+      clearTimer();
+      var next;
+      if (img._ugvIsStream) {
+        next = baseUrl + (baseUrl.indexOf('?') >= 0 ? '&' : '?') + 't=' + Date.now() + '&r=' + img._ugvRetryCount;
+      } else if (img._ugvLastGoodSrc) {
+        // static/data-url: re-apply last good (or pending) source
+        next = img._ugvLastGoodSrc;
+        // force reload even if same string
+        if (img.src === next && next.indexOf('data:') !== 0) {
+          next = next.split('#')[0] + '#r=' + Date.now();
+        }
+      } else if (opts.fallbackUrl) {
+        next = opts.fallbackUrl + (opts.fallbackUrl.indexOf('?') >= 0 ? '&' : '?') + 't=' + Date.now();
+      } else {
+        return;
+      }
+      try {
+        img.src = next;
+      } catch (e) {
+        scheduleRetry('set-src-error');
+      }
+    }
+
+    img.addEventListener('load', function () {
+      // Streams fire load once connection opens; treat as healthy
+      if (img.naturalWidth > 0 || img._ugvIsStream) {
+        img._ugvRetryCount = 0;
+        clearTimer();
+        if (!img._ugvIsStream && img.src) {
+          img._ugvLastGoodSrc = img.getAttribute('src') || img.src;
+        }
+        img.title = opts.label || '';
+        img.classList.remove('ugv-img-broken');
+      }
+    });
+
+    img.addEventListener('error', function () {
+      img.classList.add('ugv-img-broken');
+      scheduleRetry('error');
+    });
+
+    img.addEventListener('abort', function () {
+      scheduleRetry('abort');
+    });
+
+    // Periodic stall check for streams (no frames / zero size)
+    if (isStream) {
+      setInterval(function () {
+        if (document.hidden) return;
+        if (!img.isConnected) return;
+        // If img is visible but has no dimensions, re-open stream
+        if (img.offsetParent === null && img.hidden) return;
+        if (img.complete && img.naturalWidth === 0 && img.src) {
+          scheduleRetry('stall');
+        }
+      }, 6000);
+    }
+
+    img._ugvReload = reloadImage;
+    img._ugvSetSrc = function (src, asStream) {
+      if (asStream != null) img._ugvIsStream = !!asStream;
+      img._ugvRetryCount = 0;
+      clearTimer();
+      if (src) {
+        img._ugvLastGoodSrc = src;
+        img.src = src;
+      }
+    };
+    return img;
+  }
+
+  function refreshLiveFeeds() {
+    ['seek-live-preview', 'chat-live-preview'].forEach(function (id) {
+      var img = $(id);
+      if (!img) return;
+      if (img._ugvReload) img._ugvReload('mode-enter');
+      else img.src = videoFeedUrl();
+    });
+    // Raw dashboard feed if present
+    var raw = document.querySelector('.video img[src*="video_feed"], #video_feed_frame img, .feed_section img');
+    if (raw) {
+      if (!raw._ugvRetryWired) {
+        wireImageRetry(raw, { isStream: true, baseUrl: VIDEO_FEED_URL, label: 'Live camera' });
+      }
+      if (raw._ugvReload) raw._ugvReload('refresh');
+    }
   }
 
   function setMode(mode) {
@@ -35,12 +191,9 @@
     try {
       localStorage.setItem(STORAGE_KEY, mode);
     } catch (e) {}
-    // Bust-cache MJPEG when entering chat/seek previews
-    if (mode === 'chat' && $('chat-live-preview')) {
-      $('chat-live-preview').src = '/video_feed?t=' + Date.now();
-    }
-    if (mode === 'seek' && $('seek-live-preview')) {
-      $('seek-live-preview').src = '/video_feed?t=' + Date.now();
+    // Re-open MJPEG when entering chat/seek (or any mode switch)
+    if (mode === 'chat' || mode === 'seek' || mode === 'raw') {
+      refreshLiveFeeds();
     }
   }
 
@@ -172,16 +325,209 @@
   var SEEK_REFEREE_KEY = 'ugv_seek_referee';
   var lastSeekCheckSeq = 0;
   var lastSeekStep = -1;
+  var lastSeekLogSeq = 0;
+  var lastSeenSeekPhase = 'idle';
   var seekFireTimer = null;
+  var seekHydrated = false;
 
-  function seekLog(msg) {
+  function startSeekPolling() {
+    if (seekPollTimer) clearInterval(seekPollTimer);
+    // Faster poll so pan overlay tracks HW while gimbal is moving
+    seekPollTimer = setInterval(pollSeek, 200);
+  }
+
+  function stopSeekPolling() {
+    if (seekPollTimer) {
+      clearInterval(seekPollTimer);
+      seekPollTimer = null;
+    }
+  }
+
+  function setSeekControlsRunning(running) {
+    var start = $('seek-start-btn');
+    var check = $('seek-check-btn');
+    if (start) {
+      start.disabled = !!running;
+      start.title = running ? 'Seek already running — Stop first' : '';
+    }
+    if (check) check.disabled = !!running;
+  }
+
+  function applySeekFormFromStatus(st) {
+    if (!st) return;
+    var referee = st.referee || 'detector';
+    var sceneNav = st.llm_scene_nav !== false && st.llm_scene_nav !== 0;
+    var mode = 'detector_llm_nav';
+    if (referee === 'llm') mode = 'llm_vision';
+    else if (!sceneNav) mode = 'detector';
+
+    var rDet = $('seek-mode-detector');
+    var rDetLlm = $('seek-mode-detector-llm');
+    var rLlm = $('seek-mode-llm-vision');
+    if (mode === 'detector' && rDet) rDet.checked = true;
+    else if (mode === 'llm_vision' && rLlm) rLlm.checked = true;
+    else if (rDetLlm) rDetLlm.checked = true;
+    try {
+      localStorage.setItem(SEEK_REFEREE_KEY, mode);
+    } catch (e) {}
+    syncSeekRefereeUI();
+
+    var goal = st.goal_label || st.goal_text || '';
+    if (mode === 'llm_vision') {
+      var t = $('seek-goal-text');
+      if (t && goal) t.value = goal;
+    } else {
+      var s = $('seek-goal-select');
+      if (s && goal) {
+        // select if option exists; else add temporary option
+        var found = false;
+        for (var i = 0; i < s.options.length; i++) {
+          if (s.options[i].value === goal) {
+            s.selectedIndex = i;
+            found = true;
+            break;
+          }
+        }
+        if (!found && goal) {
+          var opt = document.createElement('option');
+          opt.value = goal;
+          opt.textContent = goal;
+          opt.selected = true;
+          s.appendChild(opt);
+        }
+      }
+    }
+
+    var onFoundSel = $('seek-on-found');
+    if (onFoundSel && st.on_found) {
+      onFoundSel.value = st.on_found === 'tts' ? 'tts' : 'none';
+      syncSeekOnFoundUI();
+    }
+    var ttsInp = $('seek-on-found-tts');
+    if (ttsInp && st.on_found_tts) ttsInp.value = st.on_found_tts;
+
+    var sceneCb = $('seek-llm-scene-nav');
+    if (sceneCb) sceneCb.checked = !!sceneNav;
+    var intervalInp = $('seek-llm-nav-interval');
+    if (intervalInp && st.llm_nav_interval) {
+      intervalInp.value = String(st.llm_nav_interval);
+    }
+  }
+
+  function replaySeekLogFromStatus(st, opts) {
+    opts = opts || {};
+    var logEl = $('seek-log');
+    if (opts.clear && logEl) logEl.innerHTML = '';
+    // Replay entire server ring buffer
+    lastSeekLogSeq = 0;
+    drainSeekEventLog(st || {});
+  }
+
+  function hydrateSeekFromServer(opts) {
+    opts = opts || {};
+    var soft = !!opts.soft; // tab-focus: don't wipe log / re-banner
+    return fetch('/api/ai/seek/status')
+      .then(function (r) {
+        return r.json();
+      })
+      .then(function (d) {
+        var st = (d && d.status) || {};
+        var phase = st.phase || 'idle';
+        var prevPhase = lastSeenSeekPhase;
+        lastSeekCheckSeq = Math.max(lastSeekCheckSeq, st.last_check_seq || 0);
+        if (st.step !== undefined) lastSeekStep = st.step;
+
+        if (phase === 'idle' && !st.started_at && !st.finished_at) {
+          lastSeenSeekPhase = phase;
+          setSeekControlsRunning(false);
+          seekHydrated = true;
+          return st;
+        }
+
+        applySeekFormFromStatus(st);
+
+        if (!soft) {
+          // Full page load: rebuild log + status from server ring buffer
+          replaySeekLogFromStatus(st, { clear: true });
+        } else {
+          // Catch up any new events only
+          drainSeekEventLog(st);
+        }
+
+        if (phase === 'running') {
+          if (!soft) {
+            setMode('seek');
+            seekLog(
+              '↻ Resumed live seek after refresh · goal=' +
+                (st.goal_label || st.goal_text || '?') +
+                ' · step ' +
+                (st.step || 0) +
+                (st.elapsed_s != null ? ' · ' + st.elapsed_s + 's elapsed' : ''),
+              'start'
+            );
+          }
+          setSeekControlsRunning(true);
+          renderSeekStatus(st);
+          if (!seekPollTimer) startSeekPolling();
+        } else {
+          setSeekControlsRunning(false);
+          renderSeekStatus(st);
+          if (!soft) {
+            seekLog(
+              'Last seek: ' +
+                phase +
+                (st.message ? ' — ' + st.message : '') +
+                (st.goal_label ? ' · goal=' + st.goal_label : ''),
+              phase === 'found' ? 'found' : phase === 'failed' ? 'warn' : 'sys'
+            );
+          } else if (prevPhase === 'running' && phase !== 'running') {
+            // ended while tab was hidden
+            var endKind = phase === 'found' ? 'found' : phase === 'failed' ? 'warn' : 'sys';
+            seekLog('Seek ended: ' + phase + ' — ' + (st.message || ''), endKind);
+            stopSeekPolling();
+          }
+        }
+        lastSeenSeekPhase = phase;
+        seekHydrated = true;
+        return st;
+      })
+      .catch(function () {
+        seekHydrated = true;
+        return null;
+      });
+  }
+
+  function seekLog(msg, kind) {
     var log = $('seek-log');
     if (!log) return;
     var div = document.createElement('div');
-    div.className = 'ugv-chat-msg sys';
+    var k = (kind || 'sys').toLowerCase();
+    div.className = 'ugv-chat-msg sys ugv-seek-log-' + k;
+    if (k === 'found' || k === 'tts') div.style.color = '#00e676';
+    else if (k === 'nav') div.style.color = '#80d8ff';
+    else if (k === 'drive') div.style.color = '#ffd54f';
+    else if (k === 'detect') div.style.color = '#ce93d8';
+    else if (k === 'warn' || k === 'error') div.style.color = '#ff8a80';
     div.textContent = msg;
     log.appendChild(div);
+    // Cap DOM lines so long seeks stay snappy
+    while (log.childNodes.length > 200) {
+      log.removeChild(log.firstChild);
+    }
     log.scrollTop = log.scrollHeight;
+  }
+
+  function drainSeekEventLog(st) {
+    var events = (st && st.event_log) || [];
+    if (!events.length) return;
+    for (var i = 0; i < events.length; i++) {
+      var ev = events[i];
+      if (!ev || typeof ev.seq !== 'number') continue;
+      if (ev.seq <= lastSeekLogSeq) continue;
+      lastSeekLogSeq = ev.seq;
+      var prefix = ev.kind ? '[' + String(ev.kind).toUpperCase() + '] ' : '';
+      seekLog(prefix + (ev.text || ''), ev.kind || 'info');
+    }
   }
 
   function getSelectedSeekMode() {
@@ -289,8 +635,12 @@
     if (st && st.step) meta.push('step ' + st.step);
     if (st && st.seek_phase) meta.push(String(st.seek_phase));
     if (st && st.last_nav && st.last_nav.action) {
-      var nd = st.last_nav.drive_distance ? '/' + st.last_nav.drive_distance : '';
-      meta.push('nav ' + st.last_nav.action + nd);
+      if (st.last_nav.summary) {
+        meta.push(st.last_nav.summary);
+      } else {
+        var nd = st.last_nav.drive_distance ? '/' + st.last_nav.drive_distance : '';
+        meta.push('nav ' + st.last_nav.action + nd);
+      }
     }
     if (st && st.last_check_seq) meta.push('#' + st.last_check_seq);
     var age = formatCheckAge(st);
@@ -326,6 +676,214 @@
     }
   }
 
+  function formatPanDeg(deg) {
+    if (deg == null || deg === '' || isNaN(Number(deg))) return '—';
+    var n = Number(deg);
+    var s = (n >= 0 ? '+' : '') + n.toFixed(Math.abs(n) % 1 === 0 ? 0 : 1);
+    return s + '°';
+  }
+
+  function panLabelFromDeg(deg) {
+    if (deg == null || isNaN(Number(deg))) return '—';
+    var p = Number(deg);
+    if (Math.abs(p) < 15) return 'FRONT';
+    if (p <= -90) return 'REAR-L';
+    if (p >= 90) return 'REAR-R';
+    if (p < 0) return 'LEFT';
+    return 'RIGHT';
+  }
+
+  function easeInOut(t) {
+    return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+  }
+
+  /** Duration ms for a pan span at the real gimbal rate (~54°/s). */
+  function panDurationMs(fromDeg, toDeg) {
+    var span = Math.abs(Number(toDeg) - Number(fromDeg));
+    if (!isFinite(span) || span < 0.5) return 0;
+    // Match physical pan; small pad so UI finishes with the servo, not before
+    var ms = (span / PAN_EST_DPS) * 1000 * 1.05;
+    return Math.max(180, Math.min(5500, Math.round(ms)));
+  }
+
+  /** Start or retarget needle animation toward toDeg from current needle. */
+  function startPanAnim(toDeg) {
+    toDeg = Number(toDeg);
+    if (isNaN(toDeg)) return;
+    var from = panAnim.lastNeedle;
+    // Already at target
+    if (Math.abs(toDeg - from) < 0.8 && !panAnim.active) {
+      panAnim.lastNeedle = toDeg;
+      panAnim.lastCmd = toDeg;
+      panAnim.to = toDeg;
+      return;
+    }
+    // Same target already animating — keep going
+    if (panAnim.active && Math.abs(panAnim.to - toDeg) < 1.5) {
+      return;
+    }
+    panAnim.from = from;
+    panAnim.to = toDeg;
+    panAnim.startMs = Date.now();
+    panAnim.durMs = panDurationMs(from, toDeg);
+    panAnim.active = panAnim.durMs > 0;
+    panAnim.lastCmd = toDeg;
+    if (panAnim.active && !panAnim.raf) {
+      panAnim.raf = requestAnimationFrame(tickPanOverlayAnim);
+    }
+    if (!panAnim.active) {
+      panAnim.lastNeedle = toDeg;
+    }
+  }
+
+  /** Current animated angle (call every frame while active). */
+  function samplePanAnim() {
+    if (!panAnim.active) return panAnim.lastNeedle;
+    if (panAnim.durMs <= 0) {
+      panAnim.active = false;
+      panAnim.lastNeedle = panAnim.to;
+      return panAnim.to;
+    }
+    var t = (Date.now() - panAnim.startMs) / panAnim.durMs;
+    if (t >= 1) {
+      panAnim.active = false;
+      panAnim.lastNeedle = panAnim.to;
+      return panAnim.to;
+    }
+    // Mild ease so it doesn't look robotic, still finishes in panDurationMs
+    var e = easeInOut(Math.min(1, Math.max(0, t)));
+    var a = panAnim.from + (panAnim.to - panAnim.from) * e;
+    panAnim.lastNeedle = a;
+    return a;
+  }
+
+  function paintPanNeedle(showDeg, settled, cmd, hw, isEst) {
+    var labelEl = $('seek-pan-label');
+    var degEl = $('seek-pan-deg');
+    var hwEl = $('seek-pan-hw');
+    var needle = $('seek-pan-needle');
+    var overlay = $('seek-pan-overlay');
+    if (!overlay) return;
+
+    var label = panLabelFromDeg(showDeg);
+    var targetLabel = panLabelFromDeg(cmd);
+
+    if (labelEl) {
+      if (!settled && cmd != null && Math.abs(Number(cmd) - showDeg) > 8) {
+        labelEl.textContent = (label || '—') + ' → ' + (targetLabel || '');
+      } else {
+        labelEl.textContent = targetLabel || label || '—';
+      }
+    }
+    if (degEl) degEl.textContent = formatPanDeg(showDeg);
+    if (hwEl) {
+      var bits = [];
+      if (!settled && cmd != null) bits.push('cmd ' + formatPanDeg(cmd));
+      if (hw != null && !isNaN(Number(hw))) bits.push('hw ' + formatPanDeg(hw));
+      if (isEst && !settled) bits.push('anim');
+      if (settled) bits.push('ok');
+      // Show remaining anim time while panning
+      if (panAnim.active && panAnim.durMs > 0) {
+        var left = Math.max(0, panAnim.durMs - (Date.now() - panAnim.startMs));
+        bits.push((left / 1000).toFixed(1) + 's');
+      }
+      hwEl.textContent = bits.join(' · ');
+    }
+    if (needle && showDeg != null && !isNaN(Number(showDeg))) {
+      needle.style.transition = 'none';
+      needle.style.transform = 'rotate(' + Number(showDeg) + 'deg)';
+    }
+    overlay.classList.toggle('is-settling', !settled || panAnim.active);
+    overlay.classList.toggle(
+      'is-rear',
+      label === 'REAR-L' ||
+        label === 'REAR-R' ||
+        targetLabel === 'REAR-L' ||
+        targetLabel === 'REAR-R'
+    );
+  }
+
+  function tickPanOverlayAnim() {
+    if (!panAnim.active) {
+      panAnim.raf = null;
+      paintPanNeedle(
+        panAnim.lastNeedle,
+        !panAnim.settling,
+        panAnim.lastCmd,
+        null,
+        true
+      );
+      return;
+    }
+    var a = samplePanAnim();
+    paintPanNeedle(a, false, panAnim.lastCmd, null, true);
+    if (panAnim.active) {
+      panAnim.raf = requestAnimationFrame(tickPanOverlayAnim);
+    } else {
+      panAnim.raf = null;
+      paintPanNeedle(panAnim.lastNeedle, !panAnim.settling, panAnim.lastCmd, null, false);
+    }
+  }
+
+  /**
+   * Pan overlay — status.cam_aim is SoT for target; needle animates to cmd
+   * at ~54°/s (same rate as physical pan) so motion matches pan time.
+   */
+  function renderSeekPanOverlay(st) {
+    st = st || {};
+    var overlay = $('seek-pan-overlay');
+    if (!overlay) return;
+
+    var aim = st.cam_aim || null;
+    if (!aim && st.cam_pan_deg != null) {
+      aim = {
+        cmd: st.cam_pan_deg,
+        live: st.cam_pan_live_deg != null ? st.cam_pan_live_deg : st.cam_pan_deg,
+        hw: st.cam_pan_hw_deg,
+        settled: st.cam_pan_settled,
+      };
+    }
+    if (!aim || aim.cmd == null) {
+      overlay.classList.remove('is-settling');
+      return;
+    }
+
+    var cmd = Number(aim.cmd);
+    var hw = aim.hw != null ? Number(aim.hw) : null;
+    var settled = aim.settled === true;
+    panAnim.settling = !settled;
+
+    if (settled) {
+      // Arrived — ease remaining gap quickly if any, else snap
+      if (Math.abs(panAnim.lastNeedle - cmd) > 2) {
+        // Short finish anim (~0.25s) so it doesn't jump
+        panAnim.from = panAnim.lastNeedle;
+        panAnim.to = cmd;
+        panAnim.startMs = Date.now();
+        panAnim.durMs = Math.min(280, panDurationMs(panAnim.from, cmd) || 200);
+        panAnim.active = true;
+        panAnim.lastCmd = cmd;
+        if (!panAnim.raf) panAnim.raf = requestAnimationFrame(tickPanOverlayAnim);
+      } else {
+        panAnim.active = false;
+        panAnim.lastCmd = cmd;
+        panAnim.lastNeedle = cmd;
+        paintPanNeedle(cmd, true, cmd, hw, false);
+      }
+      return;
+    }
+
+    // New command while panning: animate needle to cmd over physical pan time
+    startPanAnim(cmd);
+    if (panAnim.active) {
+      if (!panAnim.raf) panAnim.raf = requestAnimationFrame(tickPanOverlayAnim);
+      // paint current frame immediately (rAF will continue)
+      paintPanNeedle(samplePanAnim(), false, cmd, hw, true);
+    } else {
+      paintPanNeedle(cmd, false, cmd, hw, false);
+    }
+  }
+
   function renderSeekPanorama(st) {
     var imgEl = $('seek-pano-img');
     var cardEl = $('seek-panorama-card');
@@ -339,9 +897,29 @@
       hasTarget = true;
     }
 
-    if (imgEl && dataUrl) {
-      imgEl.src = dataUrl;
-      imgEl.style.display = 'block';
+    if (imgEl) {
+      if (!imgEl._ugvRetryWired) {
+        wireImageRetry(imgEl, {
+          isStream: false,
+          label: 'Panorama',
+          maxRetries: 6,
+          minDelayMs: 400,
+        });
+      }
+      if (dataUrl) {
+        lastSeekPanoDataUrl = dataUrl;
+        // Only re-assign if changed — avoids flicker; retry handler re-applies on error
+        if (imgEl._ugvLastGoodSrc !== dataUrl || imgEl.naturalWidth === 0) {
+          if (imgEl._ugvSetSrc) imgEl._ugvSetSrc(dataUrl, false);
+          else imgEl.src = dataUrl;
+        }
+        imgEl.style.display = 'block';
+      } else if (lastSeekPanoDataUrl && (!imgEl.src || imgEl.naturalWidth === 0)) {
+        // Status lost the pano blob briefly — re-show last good frame
+        if (imgEl._ugvSetSrc) imgEl._ugvSetSrc(lastSeekPanoDataUrl, false);
+        else imgEl.src = lastSeekPanoDataUrl;
+        imgEl.style.display = 'block';
+      }
     }
     if (cardEl) {
       if (hasTarget) {
@@ -376,6 +954,7 @@
     var cls = 'phase-' + phase;
     var ref = st.referee || 'detector';
     var det = st.last_detection;
+    var nav = st.last_nav || {};
     var lines = [
       'Phase: ' + phase.toUpperCase(),
       'Referee: ' + ref,
@@ -402,15 +981,59 @@
             (det.response_format ? ' [' + det.response_format + ']' : '')
         );
       } else {
+        var raw = det.raw_detections || [];
         lines.push(
           'Detector found: ' +
             !!det.found +
-            ' | labels: ' +
-            JSON.stringify(det.labels_found || []) +
             ' | matches: ' +
-            (det.match_count || 0)
+            (det.match_count || 0) +
+            (raw.length ? ' | saw: ' + raw.join(', ') : '') +
+            (!raw.length && det.labels_found
+              ? ' | labels: ' + JSON.stringify(det.labels_found)
+              : '')
         );
       }
+    }
+    if (nav && nav.action) {
+      var navLine =
+        'Nav: ' +
+        (nav.summary ||
+          nav.action + '/' + (nav.drive_distance || '?') +
+          (nav.magnitude ? ' ' + nav.magnitude : ''));
+      if (nav.drive_distance) {
+        navLine += ' · tier=' + nav.drive_distance;
+      }
+      if (nav.turn_deg) navLine += ' · ~' + nav.turn_deg + '°';
+      if (nav.duration_ms && !nav.turn_deg) navLine += ' · ' + nav.duration_ms + 'ms';
+      if (nav.source) navLine += ' [' + nav.source + ']';
+      if (nav.obstacle_range) navLine += ' · obstacle=' + nav.obstacle_range;
+      if (nav.open_side) navLine += ' · open=' + nav.open_side;
+      if (nav.path_clear_forward === false) navLine += ' · path BLOCKED';
+      if (nav.stuck) navLine += ' · STUCK';
+      if (nav.safety_override) navLine += ' · SAFETY';
+      if (nav.reason) navLine += ' — ' + String(nav.reason).slice(0, 120);
+      lines.push(navLine);
+    }
+    if (st.on_found_phrase) {
+      lines.push(
+        'TTS: ' +
+          (st.on_found_done ? 'spoken' : 'pending/failed') +
+          ' — “' +
+          st.on_found_phrase +
+          '”' +
+          (st.on_found_error ? ' ERR: ' + st.on_found_error : '')
+      );
+    }
+    if (st.cam_aim && st.cam_aim.cmd != null) {
+      var aim = st.cam_aim;
+      lines.push(
+        'Cam pan: ' +
+          (aim.label || panLabelFromDeg(aim.cmd)) +
+          ' ' +
+          formatPanDeg(aim.cmd) +
+          (aim.settled === false ? ' (moving)' : '') +
+          (aim.hw != null ? ' (hw ' + formatPanDeg(aim.hw) + ')' : '')
+      );
     }
     if (st.error) lines.push('Error: ' + st.error);
     el.innerHTML =
@@ -423,21 +1046,11 @@
 
     updateDetectorBar(st, opts);
     renderSeekPanorama(st);
+    renderSeekPanOverlay(st);
+    drainSeekEventLog(st);
 
     if (fired && phase === 'running') {
       pulseDetectorFire(st);
-      var det = st.last_detection || {};
-      var brief =
-        'check #' +
-        (st.last_check_seq || '?') +
-        ' step ' +
-        (st.step || '?') +
-        ' found=' +
-        !!det.found;
-      if (det.labels_found && det.labels_found.length) {
-        brief += ' labels=' + det.labels_found.join(',');
-      }
-      seekLog(brief);
     }
   }
 
@@ -448,20 +1061,40 @@
       })
       .then(function (d) {
         var st = (d && d.status) || {};
+        var phase = st.phase || 'idle';
         renderSeekStatus(st);
-        if (st.phase && st.phase !== 'running' && seekPollTimer) {
-          clearInterval(seekPollTimer);
-          seekPollTimer = null;
-          seekLog('Seek ended: ' + st.phase + ' — ' + (st.message || ''));
+        setSeekControlsRunning(phase === 'running');
+
+        // Only announce end on transition out of running (not on every poll)
+        if (lastSeenSeekPhase === 'running' && phase !== 'running') {
+          stopSeekPolling();
+          drainSeekEventLog(st);
+          var endKind = phase === 'found' ? 'found' : phase === 'failed' ? 'warn' : 'sys';
+          seekLog('Seek ended: ' + phase + ' — ' + (st.message || ''), endKind);
+          if (phase === 'found' && st.on_found_phrase) {
+            seekLog(
+              'Announcement: ' +
+                (st.on_found_done ? 'OK' : 'FAILED') +
+                ' — “' +
+                st.on_found_phrase +
+                '”' +
+                (st.on_found_error ? ' (' + st.on_found_error + ')' : ''),
+              'tts'
+            );
+          }
           updateDetectorBar(st);
+        } else if (phase === 'running' && !seekPollTimer) {
+          // Server still running but poll was lost (e.g. tab background) — resume
+          startSeekPolling();
         }
+        lastSeenSeekPhase = phase;
       })
       .catch(function () {});
   }
 
   function getSeekOnFound() {
     var sel = $('seek-on-found');
-    return (sel && sel.value) || 'none';
+    return (sel && sel.value) || 'tts';
   }
 
   function getSeekOnFoundTts() {
@@ -487,6 +1120,10 @@
     if (isNaN(llmNavInterval) || llmNavInterval < 1) llmNavInterval = 10;
     lastSeekCheckSeq = 0;
     lastSeekStep = -1;
+    lastSeekLogSeq = 0;
+    lastSeenSeekPhase = 'running';
+    var logEl = $('seek-log');
+    if (logEl) logEl.innerHTML = '';
     seekLog(
       'Starting seek [' + mode + '] (' +
         referee +
@@ -494,13 +1131,15 @@
         goal +
         ' · scene nav: ' + (llmSceneNav ? 'every ' + llmNavInterval + ' steps' : 'disabled') +
         ' · upon found: ' +
-        (onFound === 'tts' ? 'TTS “' + onFoundTts + '”' : 'do nothing')
+        (onFound === 'tts' ? 'TTS “' + onFoundTts + '”' : 'do nothing'),
+      'start'
     );
     setDetectorBar(
       'running',
       (referee === 'llm' ? 'Judge' : 'Detector') + ': starting…',
       goal
     );
+    setSeekControlsRunning(true);
     fetch('/api/ai/seek/start', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -522,17 +1161,23 @@
         if (!d.success) {
           seekLog('Start failed: ' + (d.error || 'unknown'));
           setDetectorBar('idle', 'Detector: idle', '');
+          setSeekControlsRunning(false);
+          lastSeenSeekPhase = 'idle';
           return;
         }
-        renderSeekStatus(d.status || {});
-        if (seekPollTimer) clearInterval(seekPollTimer);
-        // Poll faster so each detector fire is visible
-        seekPollTimer = setInterval(pollSeek, 400);
+        // If server already had a run, adopt its log after start response
+        var st = d.status || {};
+        lastSeenSeekPhase = st.phase || 'running';
+        renderSeekStatus(st);
+        drainSeekEventLog(st);
+        startSeekPolling();
         pollSeek();
       })
       .catch(function (e) {
         seekLog(String(e.message || e));
         setDetectorBar('idle', 'Detector: idle', '');
+        setSeekControlsRunning(false);
+        lastSeenSeekPhase = 'idle';
       });
   }
 
@@ -542,8 +1187,11 @@
         return r.json();
       })
       .then(function (d) {
-        renderSeekStatus((d && d.status) || {});
-        seekLog('Stop requested');
+        var st = (d && d.status) || {};
+        renderSeekStatus(st);
+        seekLog('Stop requested', 'warn');
+        // Keep polling until phase leaves running so end message + TTS status appear
+        if (!seekPollTimer && st.phase === 'running') startSeekPolling();
       })
       .catch(function (e) {
         seekLog(String(e.message || e));
@@ -640,6 +1288,8 @@
       'cow', 'diningtable', 'dog', 'horse', 'motorbike', 'person', 'pottedplant',
       'sheep', 'sofa', 'train', 'tvmonitor',
     ]);
+
+    // Load labels, then rehydrate live seek state from the server (survives refresh)
     fetch('/api/ai/seek/labels')
       .then(function (r) {
         return r.json();
@@ -649,17 +1299,72 @@
           populateDetectorLabels(d.detector_labels);
         }
       })
-      .catch(function () {});
+      .catch(function () {})
+      .then(function () {
+        return hydrateSeekFromServer();
+      })
+      .then(function (st) {
+        if (!st || ((st.phase || 'idle') === 'idle' && !st.started_at)) {
+          seekLog(
+            'Seek ready. Detector = closed class list; LLM vision = free-text + JSON found true/false.'
+          );
+        }
+      });
 
-    seekLog(
-      'Seek ready. Detector = closed class list; LLM vision = free-text + JSON found true/false.'
+    // Re-sync when tab becomes visible again (laptop sleep / background tab)
+    document.addEventListener('visibilitychange', function () {
+      if (document.visibilityState === 'visible') {
+        hydrateSeekFromServer({ soft: true });
+        refreshLiveFeeds();
+        // Re-apply last panorama if the img went blank while hidden
+        var pano = $('seek-pano-img');
+        if (pano && lastSeekPanoDataUrl && pano.naturalWidth === 0) {
+          if (pano._ugvSetSrc) pano._ugvSetSrc(lastSeekPanoDataUrl, false);
+          else pano.src = lastSeekPanoDataUrl;
+        }
+      }
+    });
+  }
+
+  function initLiveImageRetries() {
+    wireImageRetry($('seek-live-preview'), {
+      isStream: true,
+      baseUrl: VIDEO_FEED_URL,
+      label: 'Seek live camera',
+      maxRetries: 24,
+    });
+    wireImageRetry($('chat-live-preview'), {
+      isStream: true,
+      baseUrl: VIDEO_FEED_URL,
+      label: 'Chat live camera',
+      maxRetries: 24,
+    });
+    wireImageRetry($('seek-pano-img'), {
+      isStream: false,
+      label: 'Panorama',
+      maxRetries: 8,
+      minDelayMs: 400,
+    });
+    // Raw dashboard MJPEG if present
+    var rawImgs = document.querySelectorAll(
+      '.video img[src*="video_feed"], #video_feed_frame img, img[src*="video_feed"]'
     );
+    rawImgs.forEach(function (img) {
+      wireImageRetry(img, {
+        isStream: true,
+        baseUrl: VIDEO_FEED_URL,
+        label: 'Live camera',
+        maxRetries: 24,
+      });
+    });
   }
 
   function boot() {
     initModeTabs();
+    initLiveImageRetries();
     initChat();
     initSeek();
+    refreshLiveFeeds();
   }
 
   if (document.readyState === 'loading') {
@@ -670,4 +1375,5 @@
 
   // export for tests / console
   window.ugvSetMode = setMode;
+  window.ugvRefreshLiveFeeds = refreshLiveFeeds;
 })();

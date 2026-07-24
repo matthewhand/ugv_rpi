@@ -6,7 +6,7 @@
     <script src="./jquery-3.7.1.min.js"></script>
     <script src="./js-yaml.min.js"></script>
     <script src="./socket.io.js"></script>
-    <link rel="stylesheet" type="text/css" href="./style.css">
+    <link rel="stylesheet" type="text/css" href="./style.css?v=pan-overlay-4">
     <style type="text/css">
       .seek-pano-card {
         margin-top: 8px;
@@ -445,101 +445,126 @@
     <div id="mode-panel-seek" class="mode-panel" role="tabpanel" aria-labelledby="mode-tab-seek" hidden>
       <div class="mode-panel-seek">
         <div class="ugv-seek-layout">
-          <div class="ugv-panel-card">
-            <h2>Live camera</h2>
-            <p class="hint" id="seek-hint-camera">
-              Each cycle: L/straight/R photos → LLM picks <strong>direction</strong> and
-              <strong>short/medium/long</strong> distance, then drive, then re-scan.
-              Referee decides “found”.
-            </p>
-            <div class="ugv-seek-detector-bar" id="seek-detector-bar" aria-live="polite">
-              <span class="ugv-seek-detector-dot" id="seek-detector-dot" aria-hidden="true"></span>
-              <span class="ugv-seek-detector-label" id="seek-detector-label">Detector: idle</span>
-              <span class="ugv-seek-detector-meta" id="seek-detector-meta"></span>
+          <!-- Top row: previews | live log side-by-side -->
+          <div class="ugv-seek-top">
+            <div class="ugv-panel-card ugv-seek-preview-card">
+              <h2>Live camera</h2>
+              <p class="hint" id="seek-hint-camera">
+                Each cycle: L/straight/R photos → LLM picks <strong>direction</strong> and
+                <strong>short/medium/long</strong> distance, then drive, then re-scan.
+                Referee decides “found”.
+              </p>
+              <div class="ugv-seek-detector-bar" id="seek-detector-bar" aria-live="polite">
+                <span class="ugv-seek-detector-dot" id="seek-detector-dot" aria-hidden="true"></span>
+                <span class="ugv-seek-detector-label" id="seek-detector-label">Detector: idle</span>
+                <span class="ugv-seek-detector-meta" id="seek-detector-meta"></span>
+              </div>
+              <div class="ugv-seek-preview-wrap">
+                <img class="ugv-preview-img" id="seek-live-preview" src="/video_feed" alt="Live feed" />
+                <div class="ugv-seek-pan-overlay" id="seek-pan-overlay" aria-live="polite">
+                  <div class="ugv-seek-pan-compass" id="seek-pan-compass" aria-hidden="true">
+                    <div class="ugv-seek-pan-dial">
+                      <span class="ugv-seek-pan-tick ugv-seek-pan-tick-n" title="Front 0°">F</span>
+                      <span class="ugv-seek-pan-tick ugv-seek-pan-tick-l" title="Rear-left −135°">−135</span>
+                      <span class="ugv-seek-pan-tick ugv-seek-pan-tick-r" title="Rear-right +135°">+135</span>
+                      <div class="ugv-seek-pan-needle" id="seek-pan-needle"></div>
+                    </div>
+                  </div>
+                  <div class="ugv-seek-pan-readout" id="seek-pan-readout">
+                    <span class="ugv-seek-pan-label" id="seek-pan-label">FRONT</span>
+                    <span class="ugv-seek-pan-deg" id="seek-pan-deg">0°</span>
+                    <span class="ugv-seek-pan-hw" id="seek-pan-hw"></span>
+                  </div>
+                </div>
+              </div>
+              <div class="ugv-seek-status" id="seek-status">Phase: <span class="phase-idle">idle</span></div>
+              <!-- Near-360° stitch: L/R at ±135° look into the rear -->
+              <div id="seek-panorama-card" class="seek-pano-card">
+                <div class="seek-pano-header">
+                  <span>NEAR-360° [ REAR-L (−135°) | FRONT (0°) | REAR-R (+135°) ]</span>
+                  <span id="seek-pano-badge" class="seek-target-badge" hidden>🎯 GOAL MATCH</span>
+                </div>
+                <div class="seek-pano-img-wrap">
+                  <img id="seek-pano-img" class="seek-pano-img" src="" alt="Near-360° panoramic view" />
+                </div>
+              </div>
             </div>
-            <img class="ugv-preview-img" id="seek-live-preview" src="/video_feed" alt="Live feed" />
-            <div class="ugv-seek-status" id="seek-status">Phase: <span class="phase-idle">idle</span></div>
-            <!-- 180° Panoramic View Thumbnail -->
-            <div id="seek-panorama-card" class="seek-pano-card">
-              <div class="seek-pano-header">
-                <span>180° PANORAMIC SCAN [ LEFT (-90°) | CENTRE (0°) | RIGHT (+90°) ]</span>
-                <span id="seek-pano-badge" class="seek-target-badge" hidden>🎯 GOAL MATCH</span>
-              </div>
-              <div class="seek-pano-img-wrap">
-                <img id="seek-pano-img" class="seek-pano-img" src="" alt="180° Panoramic view" />
-              </div>
+            <div class="ugv-panel-card ugv-seek-log-card">
+              <h2>Seek log</h2>
+              <p class="hint">Live decisions, detections, and drives (updates while seeking).</p>
+              <div class="ugv-seek-log" id="seek-log"></div>
             </div>
           </div>
-          <div class="ugv-panel-card">
+
+          <!-- Bottom: config settings full width -->
+          <div class="ugv-panel-card ugv-seek-config-card">
             <h2>Seek mode</h2>
             <p class="hint" id="seek-hint-form">
-              <strong>Detector</strong>: closed class list (MobileNet-SSD). 
+              <strong>Detector</strong>: closed class list (MobileNet-SSD).
               <strong>LLM vision</strong>: free-text goal; model returns JSON <code>found: true|false</code>.
             </p>
-            <div class="ugv-seek-mode-selector" role="radiogroup" aria-label="Seek mode configuration" style="display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px;">
-              <label class="ugv-seek-radio-card" style="display: flex; align-items: center; gap: 8px; padding: 8px 10px; background: #161922; border: 1px solid #2a2f3d; border-radius: 6px; cursor: pointer;">
-                <input type="radio" name="seek-mode-type" value="detector" id="seek-mode-detector" />
-                <div style="display: flex; flex-direction: column;">
-                  <strong style="font-size: 12px; color: #fff;">a. Object Detector</strong>
-                  <span style="font-size: 10px; color: #9aa3b2;">MobileNet-SSD detector + classic navigation</span>
+            <div class="ugv-seek-config-grid">
+              <div class="ugv-seek-mode-selector" role="radiogroup" aria-label="Seek mode configuration">
+                <label class="ugv-seek-radio-card">
+                  <input type="radio" name="seek-mode-type" value="detector" id="seek-mode-detector" />
+                  <div>
+                    <strong>a. Object Detector</strong>
+                    <span>MobileNet-SSD + classic navigation</span>
+                  </div>
+                </label>
+                <label class="ugv-seek-radio-card ugv-seek-radio-card--default">
+                  <input type="radio" name="seek-mode-type" value="detector_llm_nav" id="seek-mode-detector-llm" checked />
+                  <div>
+                    <strong>b. Object Detector + LLM Navigation (Default)</strong>
+                    <span>MobileNet-SSD + ±135° near-360° LLM nav</span>
+                  </div>
+                </label>
+                <label class="ugv-seek-radio-card">
+                  <input type="radio" name="seek-mode-type" value="llm_vision" id="seek-mode-llm-vision" />
+                  <div>
+                    <strong>c. LLM Detection &amp; Vision</strong>
+                    <span>Free-text goal + Vision LLM referee &amp; scene pilot</span>
+                  </div>
+                </label>
+              </div>
+              <div class="ugv-seek-config-controls">
+                <div class="ugv-seek-form" id="seek-goal-detector-wrap">
+                  <select id="seek-goal-select" aria-label="Detector goal class"></select>
                 </div>
-              </label>
-
-              <label class="ugv-seek-radio-card" style="display: flex; align-items: center; gap: 8px; padding: 8px 10px; background: #161922; border: 1px solid #00e676; border-radius: 6px; cursor: pointer;">
-                <input type="radio" name="seek-mode-type" value="detector_llm_nav" id="seek-mode-detector-llm" checked />
-                <div style="display: flex; flex-direction: column;">
-                  <strong style="font-size: 12px; color: #00e676;">b. Object Detector + LLM Navigation (Default)</strong>
-                  <span style="font-size: 10px; color: #9aa3b2;">MobileNet-SSD detector + 180° LLM scene navigation</span>
+                <div class="ugv-seek-form" id="seek-goal-llm-wrap" hidden>
+                  <input type="text" id="seek-goal-text" placeholder="e.g. red fire extinguisher by the door" autocomplete="off" />
                 </div>
-              </label>
-
-              <label class="ugv-seek-radio-card" style="display: flex; align-items: center; gap: 8px; padding: 8px 10px; background: #161922; border: 1px solid #2a2f3d; border-radius: 6px; cursor: pointer;">
-                <input type="radio" name="seek-mode-type" value="llm_vision" id="seek-mode-llm-vision" />
-                <div style="display: flex; flex-direction: column;">
-                  <strong style="font-size: 12px; color: #fff;">c. LLM Detection & Vision</strong>
-                  <span style="font-size: 10px; color: #9aa3b2;">Free-text goal + Vision LLM referee & scene pilot</span>
+                <div class="ugv-seek-onfound">
+                  <label class="hint" for="seek-on-found">Upon found</label>
+                  <select id="seek-on-found" aria-label="Upon found action">
+                    <option value="tts" selected>TTS announcement</option>
+                    <option value="none">Do nothing</option>
+                  </select>
+                  <div id="seek-on-found-tts-wrap" class="ugv-seek-form">
+                    <input type="text" id="seek-on-found-tts" maxlength="200"
+                      value="I have found the {goal}."
+                      placeholder="I have found the {goal}."
+                      title="Use {goal} for the target name" autocomplete="off" />
+                  </div>
                 </div>
-              </label>
-            </div>
-            <div class="ugv-seek-form" id="seek-goal-detector-wrap">
-              <select id="seek-goal-select" aria-label="Detector goal class"></select>
-            </div>
-            <div class="ugv-seek-form" id="seek-goal-llm-wrap" hidden>
-              <input type="text" id="seek-goal-text" placeholder="e.g. red fire extinguisher by the door" autocomplete="off" />
-            </div>
-            <div class="ugv-seek-onfound">
-              <label class="hint" for="seek-on-found">Upon found</label>
-              <select id="seek-on-found" aria-label="Upon found action">
-                <option value="tts" selected>TTS announcement</option>
-                <option value="none">Do nothing</option>
-              </select>
-              <div id="seek-on-found-tts-wrap" class="ugv-seek-form">
-                <input type="text" id="seek-on-found-tts" maxlength="200"
-                  value="I have found the {goal}."
-                  placeholder="I have found the {goal}."
-                  title="Use {goal} for the target name" autocomplete="off" />
+                <div class="ugv-seek-scenenav">
+                  <label class="ugv-seek-scenenav-label">
+                    <input type="checkbox" id="seek-llm-scene-nav" checked />
+                    <span>LLM Scene Navigation</span>
+                  </label>
+                  <div class="ugv-seek-scenenav-interval">
+                    <span>Recalculate every</span>
+                    <input type="number" id="seek-llm-nav-interval" value="10" min="1" max="100" />
+                    <span>steps</span>
+                  </div>
+                </div>
+                <div class="ugv-row-actions">
+                  <button type="button" id="seek-start-btn">Seek</button>
+                  <button type="button" class="danger" id="seek-stop-btn">Stop</button>
+                  <button type="button" class="secondary" id="seek-check-btn">Check once</button>
+                </div>
               </div>
             </div>
-
-            <!-- LLM Scene Navigation options -->
-            <div class="ugv-seek-scenenav" style="margin-top: 10px; padding: 8px 10px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px;">
-              <label style="display: flex; align-items: center; gap: 8px; font-weight: 500; font-size: 13px; cursor: pointer;">
-                <input type="checkbox" id="seek-llm-scene-nav" checked />
-                <span>LLM Scene Navigation</span>
-              </label>
-              <div style="margin-top: 6px; font-size: 12px; color: #a0a6b8; display: flex; align-items: center; gap: 6px;">
-                <span>Recalculate every</span>
-                <input type="number" id="seek-llm-nav-interval" value="10" min="1" max="100" style="width: 60px; padding: 2px 6px; font-size: 12px; border-radius: 4px; border: 1px solid #444; background: #161922; color: #fff;" />
-                <span>steps</span>
-              </div>
-            </div>
-
-            <div class="ugv-row-actions" style="margin-top: 12px;">
-              <button type="button" id="seek-start-btn">Seek</button>
-              <button type="button" class="danger" id="seek-stop-btn">Stop</button>
-              <button type="button" class="secondary" id="seek-check-btn">Check once</button>
-            </div>
-            <div class="ugv-seek-log" id="seek-log"></div>
           </div>
         </div>
       </div>
@@ -621,7 +646,7 @@
         <div style="background-image: url('./img/grey/delete.svg');"></div>
     </footer>
     <!-- <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.7.0/jquery.min.js"></script> -->
-    <script src="./modes.js"></script>
+    <script src="./modes.js?v=pan-overlay-5"></script>
     <script src="./control.js"></script>
     <script src="./main.js"></script>
 </body>

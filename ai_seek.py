@@ -290,26 +290,78 @@ class SeekController:
             'last_check_at': None,  # unix time of last referee fire (for UX pulse)
             'last_check_seq': 0,    # increments each detector/judge call
             'last_llm_reply': None,
+            'last_nav': None,
             'last_tools': [],
             'error': None,
             'message': 'Idle',
             'history': [],
+            # Ring buffer of human-readable seek log lines for the UI
+            'event_log': [],
+            'log_seq': 0,
             'on_found': ON_FOUND_NONE,
             'on_found_tts': DEFAULT_ON_FOUND_TTS,
             'on_found_done': False,
+            'on_found_phrase': None,
+            'on_found_error': None,
             'llm_scene_nav': DEFAULT_LLM_SCENE_NAV,
             'llm_nav_interval': DEFAULT_LLM_NAV_INTERVAL,
             'last_views': [],
             'panorama_data_url': None,
+            # Single SoT for live pan overlay (written only by app._seek_publish_cam_aim)
+            'cam_aim': None,
         }
 
     def status(self) -> Dict[str, Any]:
         with self._lock:
             snap = dict(self._state)
+            # status() must not retain huge binary blobs if present on views
+            if isinstance(snap.get('last_views'), list):
+                slim_views = []
+                for v in snap['last_views']:
+                    if not isinstance(v, dict):
+                        continue
+                    slim_views.append({
+                        k: v.get(k) for k in (
+                            'name', 'pan_deg', 'bytes', 'data_url', 'has_target',
+                            'detected_labels', 'raw_detections', 'pan_settled',
+                        ) if k in v or k in ('name', 'pan_deg', 'has_target', 'detected_labels')
+                    })
+                snap['last_views'] = slim_views
             snap['cancel_requested'] = self._cancel.is_set()
             if snap.get('started_at') and snap['phase'] == 'running':
                 snap['elapsed_s'] = round(time.time() - float(snap['started_at']), 2)
             return snap
+
+    def append_log(self, kind: str, text: str, **fields) -> None:
+        """Append a UI-visible seek log event (ring buffer, newest last)."""
+        kind = (kind or 'info').strip().lower()[:32]
+        text = (text or '').strip()
+        if not text:
+            return
+        if len(text) > 500:
+            text = text[:497] + '…'
+        with self._lock:
+            seq = int(self._state.get('log_seq') or 0) + 1
+            self._state['log_seq'] = seq
+            entry = {
+                'seq': seq,
+                't': round(time.time(), 3),
+                'kind': kind,
+                'text': text,
+            }
+            for k, v in fields.items():
+                if v is None:
+                    continue
+                if isinstance(v, (str, int, float, bool)):
+                    entry[k] = v
+                else:
+                    entry[k] = str(v)[:200]
+            log = list(self._state.get('event_log') or [])
+            log.append(entry)
+            # Keep last 200 events so a page refresh can rebuild a long seek log
+            if len(log) > 200:
+                log = log[-200:]
+            self._state['event_log'] = log
 
     def stop(self) -> Dict[str, Any]:
         self._cancel.set()
@@ -378,8 +430,16 @@ class SeekController:
                 'llm_nav_interval': interval_val,
                 'started_at': time.time(),
                 'message': f'Seeking {label} ({referee})…',
+                'event_log': [],
+                'log_seq': 0,
             })
             start_ms, start_ts, start_conf = ms, ts, float(conf_threshold)
+        self.append_log(
+            'start',
+            f'Seek started · goal={label} · referee={referee} · on_found={on_found}'
+            f' · scene_nav={bool(llm_scene_nav)} · nav_interval={interval_val}',
+            goal=label, referee=referee, on_found=on_found,
+        )
         t = threading.Thread(
             target=loop_fn,
             args=(self, label, start_conf, start_ms, start_ts),
