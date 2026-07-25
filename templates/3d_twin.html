@@ -5,17 +5,20 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>UGV Rover - 3D Digital Twin</title>
     <style>
-        body {
+        html, body {
             margin: 0;
             padding: 0;
+            width: 100%;
+            height: 100%;
             overflow: hidden;
             background-color: #0b0f19;
             font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
             color: #e2e8f0;
         }
         #canvas-container {
-            width: 100vw;
-            height: 100vh;
+            width: 100%;
+            height: 100%;
+            min-height: 200px;
         }
         .hud-panel {
             position: absolute;
@@ -102,7 +105,7 @@
         <div class="joint-val">Pan Angle: <span id="pan-val">0.0°</span></div>
         <div class="joint-val">Tilt Angle: <span id="tilt-val">0.0°</span></div>
         <div class="joint-val">Wheel Velocity: <span id="wheel-val">0.0 m/s</span></div>
-        <a href="/" class="back-btn">← Back to Dashboard</a>
+        <a href="/" class="back-btn" id="back-btn">← Back to Dashboard</a>
     </div>
 
     <div class="controls-info">
@@ -112,17 +115,36 @@
     <div id="canvas-container"></div>
 
     <script>
+        // Embedded in dashboard popup? parent can close via postMessage
+        const EMBEDDED = (function () {
+            try { return window.self !== window.top; } catch (e) { return true; }
+        })() || /[?&]embed=1(?:&|$)/.test(window.location.search || '');
+
+        (function setupEmbedChrome() {
+            // In dashboard popup: hide Back/Close — parent drawer already has ✕
+            if (!EMBEDDED) return;
+            const back = document.getElementById('back-btn');
+            if (back) back.style.display = 'none';
+        })();
+
         // --- 1. Three.js Scene Setup ---
         const container = document.getElementById('canvas-container');
         const scene = new THREE.Scene();
         scene.background = new THREE.Color(0x0b0f19);
         scene.fog = new THREE.FogExp2(0x0b0f19, 0.03);
 
-        const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 100);
+        function viewSize() {
+            // Prefer container (iframe/popup); fall back to window
+            const w = container.clientWidth || window.innerWidth || 640;
+            const h = container.clientHeight || window.innerHeight || 480;
+            return { w: Math.max(120, w), h: Math.max(120, h) };
+        }
+        const _vs0 = viewSize();
+        const camera = new THREE.PerspectiveCamera(50, _vs0.w / _vs0.h, 0.1, 100);
         camera.position.set(1.2, 1.0, 1.5);
 
         const renderer = new THREE.WebGLRenderer({ antialias: true });
-        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setSize(_vs0.w, _vs0.h);
         renderer.setPixelRatio(window.devicePixelRatio);
         renderer.shadowMap.enabled = true;
         renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -281,10 +303,21 @@
         animate();
 
         window.addEventListener('resize', () => {
-            camera.aspect = window.innerWidth / window.innerHeight;
+            const vs = viewSize();
+            camera.aspect = vs.w / vs.h;
             camera.updateProjectionMatrix();
-            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setSize(vs.w, vs.h);
         });
+        // Also observe container (popup iframe resize without full window event)
+        if (typeof ResizeObserver !== 'undefined' && container) {
+            const _ro = new ResizeObserver(function () {
+                const vs = viewSize();
+                camera.aspect = vs.w / vs.h;
+                camera.updateProjectionMatrix();
+                renderer.setSize(vs.w, vs.h);
+            });
+            _ro.observe(container);
+        }
     </script>
 </body>
 </html>

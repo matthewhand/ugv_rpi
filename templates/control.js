@@ -1612,6 +1612,122 @@ function toggleEsp32Wifi() {
     .catch(function (e) { console.warn('esp32_wifi failed', e); });
 }
 
+// ---- 3D Twin popup pane (iframe of /3d) ----
+var _twinState = { open: false, large: false, loaded: false };
+
+function toggleTwinPane(force) {
+    var drawer = document.getElementById('twin-drawer');
+    var btn = document.getElementById('twin-btn');
+    var frame = document.getElementById('twin-frame');
+    var ph = document.getElementById('twin-placeholder');
+    if (!drawer) return;
+    if (typeof force === 'boolean') {
+        _twinState.open = force;
+    } else {
+        _twinState.open = !_twinState.open;
+    }
+    if (_twinState.open) {
+        // Keep only one heavy pane open at a time
+        if (window.toggleOpsLogPane) {
+            try { toggleOpsLogPane(false); } catch (e) { /* ignore */ }
+        }
+        drawer.classList.add('open');
+        if (btn) {
+            btn.style.color = '#93c5fd';
+            btn.textContent = '3D Twin ▴';
+        }
+        if (frame && (!_twinState.loaded || !frame.src || frame.src === 'about:blank' || frame.getAttribute('src') === 'about:blank')) {
+            frame.src = '/3d?embed=1';
+            _twinState.loaded = true;
+            if (ph) ph.style.display = 'none';
+        } else if (ph) {
+            ph.style.display = 'none';
+        }
+    } else {
+        drawer.classList.remove('open');
+        if (btn) {
+            btn.style.color = '#5b8cff';
+            btn.textContent = '3D Twin';
+        }
+        // Unload WebGL when closed to free GPU/CPU
+        if (frame) {
+            try { frame.src = 'about:blank'; } catch (e) { /* ignore */ }
+            _twinState.loaded = false;
+        }
+        if (ph) ph.style.display = '';
+    }
+}
+
+function _twinNudgeFrameResize() {
+    var frame = document.getElementById('twin-frame');
+    if (frame && frame.contentWindow) {
+        try {
+            frame.contentWindow.dispatchEvent(new Event('resize'));
+        } catch (e) { /* ignore */ }
+    }
+}
+
+function _twinToggleSize() {
+    var drawer = document.getElementById('twin-drawer');
+    var sizeBtn = document.getElementById('twin-size-btn');
+    if (!drawer) return;
+    _twinState.large = !_twinState.large;
+    drawer.classList.toggle('twin-large', _twinState.large);
+    // Clear inline size so CSS preset wins when toggling larger/smaller
+    if (_twinState.large) {
+        drawer.style.width = '';
+        drawer.style.height = '';
+    }
+    if (sizeBtn) sizeBtn.textContent = _twinState.large ? 'smaller' : 'larger';
+    setTimeout(_twinNudgeFrameResize, 50);
+}
+
+function _initTwinPane() {
+    var close = document.getElementById('twin-close');
+    var reload = document.getElementById('twin-reload-btn');
+    var sizeBtn = document.getElementById('twin-size-btn');
+    var drawer = document.getElementById('twin-drawer');
+    if (close) {
+        close.addEventListener('click', function () { toggleTwinPane(false); });
+    }
+    if (reload) {
+        reload.addEventListener('click', function () {
+            var frame = document.getElementById('twin-frame');
+            var ph = document.getElementById('twin-placeholder');
+            if (!frame) return;
+            if (ph) ph.style.display = 'none';
+            frame.src = '/3d?embed=1&t=' + Date.now();
+            _twinState.loaded = true;
+        });
+    }
+    if (sizeBtn) {
+        sizeBtn.addEventListener('click', _twinToggleSize);
+    }
+    // After user drags the resize corner, refresh Three.js viewport
+    if (drawer && typeof ResizeObserver !== 'undefined') {
+        var _twinRoTimer = null;
+        var ro = new ResizeObserver(function () {
+            if (!_twinState.open) return;
+            clearTimeout(_twinRoTimer);
+            _twinRoTimer = setTimeout(_twinNudgeFrameResize, 80);
+        });
+        ro.observe(drawer);
+    }
+    // Close request from iframe "Back" button
+    window.addEventListener('message', function (ev) {
+        if (!ev || !ev.data) return;
+        if (ev.data === 'ugv-close-twin' || (ev.data && ev.data.type === 'ugv-close-twin')) {
+            toggleTwinPane(false);
+        }
+    });
+}
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', _initTwinPane);
+} else {
+    _initTwinPane();
+}
+
 // ---- Ops log pane (server ring buffer) ----
 var _opsLogState = {
     open: false,
@@ -1631,6 +1747,10 @@ function toggleOpsLogPane(force) {
         _opsLogState.open = !_opsLogState.open;
     }
     if (_opsLogState.open) {
+        // Keep only one heavy pane open at a time
+        if (window.toggleTwinPane) {
+            try { toggleTwinPane(false); } catch (e) { /* ignore */ }
+        }
         drawer.classList.add('open');
         if (btn) { btn.style.color = '#a78bfa'; btn.innerHTML = 'App log ▴'; }
         refreshOpsLog(true);
