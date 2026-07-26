@@ -7,8 +7,63 @@ This is a Raspberry Pi example for the [Waveshare](https://www.waveshare.com/) U
 
 ![](./media/UGV-Rover-details-23.jpg)
 
-> **Fork:** [effectsmachine/ugv_rpi](https://github.com/effectsmachine/ugv_rpi) — forked from [waveshareteam/ugv_rpi](https://github.com/waveshareteam/ugv_rpi).  
-> Changes relative to upstream are documented below alongside the commits that introduced them.
+> **Fork:** [matthewhand/ugv_rpi](https://github.com/matthewhand/ugv_rpi) (also [effectsmachine/ugv_rpi](https://github.com/effectsmachine/ugv_rpi)) — based on [waveshareteam/ugv_rpi](https://github.com/waveshareteam/ugv_rpi).  
+> The stock Waveshare app is still the base. This fork adds **Seek mode**, **ROS 2 control routing**, **ops tooling**, and UI polish. An honest status of that work is below.
+
+## Fork modifications — status
+
+### What we set out to improve
+Make the stock dashboard usable for **autonomous “find a thing” pilots** (Seek), safer **AI/ROS motion**, clearer **operator feedback** (logs, pan aim, 3D twin), and less friction when switching **Direct serial ↔ ROS 2**.
+
+### Honest assessment
+Seek is **usable as a pilot**, not a finished robot product. OpenAI-compatible scene nav often falls back to **vision heuristics** when the local LLM is slow or fails. Obstacle handling is **camera-only** (no lidar fusion on this stack by default). Recovery prefers **short turns** over long reverse after hard-wall lessons. Exploration uses a **dead-reckoning trail + heading**, not a real map. ROS 2 mode **does** drive chassis and PTZ when rosbridge + `ugv_bringup` are up (auto-started on mode toggle when Docker is available); wheel odometry may still report zeros if the ESP32 stream lacks encoder ticks. Secrets stay in **gitignored `.env`** — do not commit camera dumps or keys.
+
+### Achieved
+
+- [x] **Seek mode** in the multi-mode shell (Raw / Chat / Seek): goal text, detector and/or LLM referee, optional TTS on found  
+- [x] **Triple-view pan** (L / centre / R ≈ ±135°) with wait-for-pan before shutter; near-360 stitch for LLM  
+- [x] **Nav tiers** short/medium/long for drives and turns; Fast T:1 tank turns calibrated smaller to reduce overshoot  
+- [x] **Safety / recovery**: forbids forward into “near” centre; turn-to-open preferred; reverse capped short (avoid rear walls)  
+- [x] **Corridor bias**: longer hops when centre looks open; aim short turn toward emptier lane in FOV  
+- [x] **Exploration trail**: record moves + rough heading; leave overused headings; inject trail into LLM prompt  
+- [x] **Pan overlay** (`cam_aim` SoT): live needle with timed animation when HW pan feedback sticks near 0°  
+- [x] **Seek UI**: live status, event log, panorama card, image reload/retry, OLED 3-line seek context where available  
+- [x] **Control mode Direct ↔ ROS 2**: UART release/reclaim; body→hardware drive signs configurable  
+- [x] **On ROS mode toggle**: auto-start **rosbridge** (`:9090`) and **ugv_bringup** in `ugv_ros2` when missing (env-gated)  
+- [x] **AI agent** (`/ai`): OpenAI-compatible tools, capability tree, timed drives, motion lock vs UI “Freq. stop”  
+- [x] **Ops log** pane: ring-buffer server log for control mode, WiFi session stop, AI motion, errors  
+- [x] **3D Twin** as resizable in-page popup (iframe of `/3d`), not only a full-page tab  
+- [x] **Serial robustness**: open/close guards when ROS owns UART; session ESP32 WiFi stop (non-persistent T:408)  
+- [x] **TTS path** hardened when `pyttsx3` missing; on-found speech optional  
+- [x] **`.env` / capabilities / control_mode** gitignored; `ai_proof/` removed and ignored (no camera dumps in git)
+
+### Remaining (todo)
+
+- [ ] **Reliable scene LLM**: stable JSON nav under load; less heuristic fallback; better latency on local Ollama  
+- [ ] **True localization**: fuse `/odom` (wheel + lidar EKF) when lidar present; explore by map cells, not heading-only trail  
+- [ ] **Encoder odom on this firmware**: confirm `odl`/`odr` (or equivalent) so `/odom_wheel` moves when the robot does  
+- [ ] **Lidar-aware seek**: use `/scan` for near obstacles instead of centre-image Canny only  
+- [ ] **Stuck / contact detection**: better than identical-frame + edge density (IMU jolt, motor current, bumper)  
+- [ ] **Turn calibration**: per-surface yaw feedback (odom/IMU) instead of open-loop ms tables  
+- [ ] **Pan feedback**: trustworthy HW pan degrees (or closed-loop aim) without synthetic estimate  
+- [ ] **ROS mode exit**: stop/kill bringup automatically when switching back to Direct so UART reclaim is clean  
+- [ ] **Container entrypoint**: start rosbridge + bringup with `ugv_ros2` boot, not only on UI toggle  
+- [ ] **Seek product polish**: better goal labels UX, cancel mid-pan, map of where it looked, battery gate before long runs  
+- [ ] **Security defaults**: change stock hotspot passwords; don’t leave Jupyter with empty token on shared LANs  
+- [ ] **Tests / CI**: unit coverage for nav plan safety, exploration trail, control_mode autostart mocks  
+- [ ] **Docs**: single operator runbook (Direct vs ROS, Seek modes, Freq. stop, capability toggles)
+
+### Quick operator notes
+
+| Mode | Use for |
+|------|---------|
+| **Raw** | Manual sticks, stock CV buttons (**AUTODRIVE** = line-follow only, needs a floor line) |
+| **Chat / AI** | Conversational tools; enable motion caps first; Freq. stop OFF for timed drives |
+| **Seek** | “Find *goal*” loops: scan → decide → drive → re-scan |
+| **Control: Direct** | Flask owns UART (default for simple seek) |
+| **Control: ROS 2** | Flask → rosbridge → bringup; needs Docker + `ugv_ros2` |
+
+Detailed historical notes follow.
 
 ## Changes from upstream
 
