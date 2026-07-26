@@ -11,3 +11,4 @@ templates/videos/video*
 .kilo/
 *.log
 hailort.log
+ai_proof/
