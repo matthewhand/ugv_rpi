@@ -6,7 +6,7 @@
     <script src="./jquery-3.7.1.min.js"></script>
     <script src="./js-yaml.min.js"></script>
     <script src="./socket.io.js"></script>
-    <link rel="stylesheet" type="text/css" href="./style.css?v=ui-catalog-1">
+    <link rel="stylesheet" type="text/css" href="./style.css?v=chat-live-1">
     <style type="text/css">
       .seek-pano-card {
         margin-top: 8px;
@@ -441,7 +441,13 @@
           <div class="ugv-panel-card">
             <h2>Live camera</h2>
             <p class="hint">Same MJPEG feed as Raw mode. Snapshots attach when you send.</p>
-            <img class="ugv-preview-img" id="chat-live-preview" src="/video_feed" alt="Live feed" />
+            <div class="ugv-live-preview-wrap" id="chat-live-wrap">
+              <img class="ugv-preview-img" id="chat-live-preview" alt="Live feed" />
+              <div class="ugv-live-fail ugv-live-fail--overlay" id="chat-live-fail" hidden>
+                <p class="ugv-live-fail-msg">Live camera unavailable</p>
+                <button type="button" class="secondary" id="chat-live-retry">Retry stream</button>
+              </div>
+            </div>
             <div class="ugv-row-actions">
               <button type="button" class="secondary" id="chat-snap-btn">Grab still</button>
               <label class="hint" style="display:flex;align-items:center;gap:6px;color:#9aa3b2">
@@ -478,9 +484,9 @@
             <div class="ugv-panel-card ugv-seek-preview-card">
               <h2>Live camera</h2>
               <p class="hint" id="seek-hint-camera">
-                Each cycle: L/straight/R photos → LLM picks <strong>direction</strong> and
-                <strong>short/medium/long</strong> distance, then drive, then re-scan.
-                Referee decides “found”.
+                Mode <strong>b</strong> (detector + LLM nav): each cycle L/straight/R photos → LLM picks
+                <strong>direction</strong> and <strong>short/medium/long</strong> distance, then drive, then re-scan.
+                MobileNet-SSD referee decides “found”.
               </p>
               <div class="ugv-seek-detector-bar" id="seek-detector-bar" aria-live="polite">
                 <span class="ugv-seek-detector-dot" id="seek-detector-dot" aria-hidden="true"></span>
@@ -488,7 +494,11 @@
                 <span class="ugv-seek-detector-meta" id="seek-detector-meta"></span>
               </div>
               <div class="ugv-seek-preview-wrap">
-                <img class="ugv-preview-img" id="seek-live-preview" src="/video_feed" alt="Live feed" />
+                <img class="ugv-preview-img" id="seek-live-preview" alt="Live feed" />
+                <div class="ugv-live-fail ugv-live-fail--overlay" id="seek-live-fail" hidden>
+                  <p class="ugv-live-fail-msg">Live camera unavailable</p>
+                  <button type="button" class="secondary" id="seek-live-retry">Retry stream</button>
+                </div>
                 <div class="ugv-seek-pan-overlay" id="seek-pan-overlay" aria-live="polite">
                   <div class="ugv-seek-pan-compass" id="seek-pan-compass" aria-hidden="true">
                     <div class="ugv-seek-pan-dial">
@@ -769,7 +779,7 @@
         <div style="background-image: url('./img/grey/delete.svg');"></div>
     </footer>
     <!-- <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.7.0/jquery.min.js"></script> -->
-    <script src="./modes.js?v=ui-iter-10"></script>
+    <script src="./modes.js?v=chat-live-1"></script>
     <script src="./control.js?v=ui-iter-10"></script>
     <script src="./main.js"></script>
 </body>

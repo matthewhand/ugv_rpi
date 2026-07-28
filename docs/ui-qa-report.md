@@ -22,7 +22,9 @@
 | Captured | **53 / 54** |
 | Missing | `shell.path_direct` (server was on **ROS2** at capture; catalog does not thrash path) |
 
-**Intentionally not flipped in automation:** ROS2↔Direct toggle (UART), ESP32 WiFi confirm, Seek start (motors), stack restart.
+**Path chips (`shell.path_direct` / `shell.path_ros2`):** catalog capture is **manual / env-dependent** — the suite records whichever path the server is on and **never** auto-flips Direct↔ROS2 (no UART thrash). Capture the other state by hand if needed.
+
+**Intentionally not flipped in automation:** ROS2↔Direct toggle (UART thrash), ESP32 WiFi confirm, Seek start (motors), stack restart.
 
 ## What the catalog walks
 
@@ -43,7 +45,7 @@
 | `shell.stop` | Red **STOP** always present |
 | `shell.hb_on` / chips | Compact RTSP/Direct|ROS2/HB/WiFi/Log/Twin |
 | `seek.pano_empty` | “No scan yet…” placeholder, not broken image |
-| `seek.running_chrome` | Pill **Seek running · 3/30** visible next to STOP |
+| `seek.running_chrome` | Pill **Seek running · 3/30** next to STOP; config locked (`is-locked` / disabled inputs) via sim lock path (**simulated**; phase may stay **idle**) |
 | `chat.link_ai` | “Open full AI agent →” present |
 | `chat.still_empty` | “No still yet — Grab still” (good) |
 | `seek.limits` | Max steps 30 / timeout 300 |
@@ -57,7 +59,7 @@
 | **P1** | Chat “Live camera” often **missing MJPEG** (only Grab still) | `desktop__chat_still_empty.png` ~42KB vs grab ~280KB | Live feed visible | Investigate `#chat-live-preview` not rendering / failed load; not fixed this pass |
 | **P2** | Seek camera hint always describes LLM L/C/R cycle | `seek_mode_a` | Mode-specific hint | Dynamic hint (still open) |
 | **P2** | Phase shows **idle** while pill says running | simulated chrome only | Real running would update phase | OK for sim; real run needs poll |
-| **P3** | Catalog path chip state depends on server | missing `path_direct` when ROS2 live | Both path states in guide | Manual flip or mock for CI |
+| **P3** | `path_direct`/`path_ros2` catalog is manual/env-dependent (no UART thrash) | missing `path_direct` when ROS2 live | Both path states in guide | Manual flip or mock for CI — by design, not a catalog bug |
 | **P3** | Steady ON click previously hit restart banner | catalog log | Scoped steady selector | Improved selectors |
 
 ### Out of scope (by design)

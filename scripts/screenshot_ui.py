@@ -317,11 +317,20 @@ def run_catalog(base: str, out: Path, viewports: list[str]) -> list[dict]:
                 print(f"  scenenav toggle fail: {e}")
 
             # Simulated running chrome (UI only — does not start Seek / motors)
+            # Uses real lock path: config disabled + is-locked + pill + body class
             try:
                 page.evaluate(
-                    "() => { document.body.classList.add('seek-running');"
-                    " var p = document.getElementById('seek-running-pill');"
-                    " if (p) { p.removeAttribute('hidden'); p.textContent = 'Seek running · 3/30'; } }"
+                    "() => {"
+                    " if (typeof window.ugvSetSeekControlsRunning === 'function')"
+                    "   window.ugvSetSeekControlsRunning(true);"
+                    " else document.body.classList.add('seek-running');"
+                    " if (typeof window.ugvSetSeekRunningIndicator === 'function')"
+                    "   window.ugvSetSeekRunningIndicator(true, { step: 3, max_steps: 30 });"
+                    " else {"
+                    "   var p = document.getElementById('seek-running-pill');"
+                    "   if (p) { p.removeAttribute('hidden'); p.textContent = 'Seek running · 3/30'; }"
+                    " }"
+                    "}"
                 )
                 page.wait_for_timeout(350)
                 record(
@@ -331,12 +340,20 @@ def run_catalog(base: str, out: Path, viewports: list[str]) -> list[dict]:
                     page,
                     "seek_running_chrome",
                     "seek.running_chrome",
-                    "Simulated body.seek-running + pill (no real seek)",
+                    "Simulated running chrome: lock config + pill (no real seek / motors)",
                 )
                 page.evaluate(
-                    "() => { document.body.classList.remove('seek-running');"
-                    " var p = document.getElementById('seek-running-pill');"
-                    " if (p) { p.setAttribute('hidden', ''); } }"
+                    "() => {"
+                    " if (typeof window.ugvSetSeekControlsRunning === 'function')"
+                    "   window.ugvSetSeekControlsRunning(false);"
+                    " else document.body.classList.remove('seek-running');"
+                    " if (typeof window.ugvSetSeekRunningIndicator === 'function')"
+                    "   window.ugvSetSeekRunningIndicator(false);"
+                    " else {"
+                    "   var p = document.getElementById('seek-running-pill');"
+                    "   if (p) { p.setAttribute('hidden', ''); }"
+                    " }"
+                    "}"
                 )
             except Exception as e:
                 print(f"  seek.running_chrome fail: {e}")

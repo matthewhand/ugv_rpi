@@ -1676,6 +1676,61 @@ body.seek-running .ugv-seek-config-card {
   border-radius: 8px;
   background: #000;
   border: 1px solid #2a2f3d;
+  display: block;
+}
+/* Chat (and shared) live MJPEG box — always reserves space; honest fail overlay */
+.ugv-live-preview-wrap {
+  position: relative;
+  width: 100%;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid #2a2f3d;
+  background: #000;
+  min-height: 160px;
+}
+.ugv-live-preview-wrap .ugv-preview-img,
+.ugv-seek-preview-wrap .ugv-preview-img {
+  border: none;
+  border-radius: 0;
+  min-height: 160px;
+  aspect-ratio: 16 / 10;
+}
+.ugv-live-fail {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 16px;
+  text-align: center;
+  background: #12151d;
+  border: 1px dashed #3a4154;
+  border-radius: 8px;
+  color: #c4d0e0;
+  min-height: 120px;
+}
+.ugv-live-fail[hidden] {
+  display: none !important;
+}
+.ugv-live-fail--overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  border-radius: 0;
+  border: none;
+  background: rgba(12, 14, 20, 0.92);
+  min-height: 0;
+  pointer-events: auto;
+}
+.ugv-live-fail-msg {
+  margin: 0;
+  font-size: 12px;
+  color: #f0b4b4;
+  line-height: 1.4;
+  max-width: 28em;
+}
+.ugv-live-fail .secondary {
+  pointer-events: auto;
 }
 /* Seek live feed + pan-angle overlay */
 .ugv-seek-preview-wrap {
@@ -1685,6 +1740,7 @@ body.seek-running .ugv-seek-config-card {
   overflow: hidden;
   border: 1px solid #2a2f3d;
   background: #000;
+  min-height: 160px;
 }
 .ugv-seek-preview-wrap .ugv-preview-img {
   border: none;

@@ -40,6 +40,7 @@
    *   maxDelayMs - default 8000
    *   isStream   - if true, always use cache-busted baseUrl (MJPEG)
    *   label      - for title tooltip
+   *   failEl     - optional element shown after retries exhausted (honest fail)
    */
   function wireImageRetry(img, opts) {
     if (!img || img._ugvRetryWired) return img;
@@ -55,6 +56,9 @@
     img._ugvLastGoodSrc = '';
     img._ugvBaseUrl = baseUrl;
     img._ugvIsStream = isStream;
+    img._ugvPaused = !!img._ugvPaused;
+    img._ugvRetryKey = key;
+    img._ugvFailEl = opts.failEl || null;
 
     function clearTimer() {
       if (imgRetryTimers[key]) {
@@ -63,9 +67,27 @@
       }
     }
 
+    function setFailVisible(on, msg) {
+      var el = img._ugvFailEl || opts.failEl;
+      if (!el) return;
+      if (on) {
+        el.hidden = false;
+        var m = el.querySelector('.ugv-live-fail-msg');
+        if (m && msg) m.textContent = msg;
+      } else {
+        el.hidden = true;
+      }
+    }
+
     function scheduleRetry(reason) {
+      if (img._ugvPaused) return;
       if (img._ugvRetryCount >= maxRetries) {
         img.title = (opts.label || 'Image') + ' failed after ' + maxRetries + ' retries';
+        img.classList.add('ugv-img-broken');
+        setFailVisible(
+          true,
+          (opts.label || 'Live camera') + ' unavailable — check camera / try Retry'
+        );
         return;
       }
       clearTimer();
@@ -78,7 +100,11 @@
     }
 
     function reloadImage(reason) {
+      if (img._ugvPaused && reason !== 'resume' && reason !== 'manual-retry') return;
+      img._ugvPaused = false;
       clearTimer();
+      setFailVisible(false);
+      img.classList.remove('ugv-img-broken');
       var next;
       if (img._ugvIsStream) {
         next = baseUrl + (baseUrl.indexOf('?') >= 0 ? '&' : '?') + 't=' + Date.now() + '&r=' + img._ugvRetryCount;
@@ -102,6 +128,7 @@
     }
 
     img.addEventListener('load', function () {
+      if (img._ugvPaused) return;
       // Streams fire load once connection opens; treat as healthy
       if (img.naturalWidth > 0 || img._ugvIsStream) {
         img._ugvRetryCount = 0;
@@ -111,15 +138,21 @@
         }
         img.title = opts.label || '';
         img.classList.remove('ugv-img-broken');
+        setFailVisible(false);
       }
     });
 
     img.addEventListener('error', function () {
+      if (img._ugvPaused) return;
+      // Empty/cleared src while pausing must not thrash retries
+      var cur = img.getAttribute('src') || '';
+      if (!cur) return;
       img.classList.add('ugv-img-broken');
       scheduleRetry('error');
     });
 
     img.addEventListener('abort', function () {
+      if (img._ugvPaused) return;
       scheduleRetry('abort');
     });
 
@@ -127,20 +160,36 @@
     if (isStream) {
       setInterval(function () {
         if (document.hidden) return;
-        if (!img.isConnected) return;
-        // If img is visible but has no dimensions, re-open stream
-        if (img.offsetParent === null && img.hidden) return;
-        if (img.complete && img.naturalWidth === 0 && img.src) {
+        if (!img.isConnected || img._ugvPaused) return;
+        // Skip hidden panels (display:none → offsetParent null)
+        if (img.offsetParent === null || img.hidden) return;
+        if (img.complete && img.naturalWidth === 0 && img.getAttribute('src')) {
           scheduleRetry('stall');
         }
       }, 6000);
     }
 
     img._ugvReload = reloadImage;
-    img._ugvSetSrc = function (src, asStream) {
-      if (asStream != null) img._ugvIsStream = !!asStream;
+    img._ugvPause = function () {
+      img._ugvPaused = true;
       img._ugvRetryCount = 0;
       clearTimer();
+      setFailVisible(false);
+      img.classList.remove('ugv-img-broken');
+      try {
+        img.removeAttribute('src');
+      } catch (e) {
+        try {
+          img.src = '';
+        } catch (e2) {}
+      }
+    };
+    img._ugvSetSrc = function (src, asStream) {
+      if (asStream != null) img._ugvIsStream = !!asStream;
+      img._ugvPaused = false;
+      img._ugvRetryCount = 0;
+      clearTimer();
+      setFailVisible(false);
       if (src) {
         img._ugvLastGoodSrc = src;
         img.src = src;
@@ -149,20 +198,67 @@
     return img;
   }
 
+  function getRawFeedImg() {
+    return document.querySelector(
+      '.video img, #video_feed_frame img, .feed_section img'
+    );
+  }
+
+  function pauseLiveStream(img) {
+    if (!img) return;
+    if (img._ugvPause) {
+      img._ugvPause();
+      return;
+    }
+    img._ugvPaused = true;
+    try {
+      img.removeAttribute('src');
+    } catch (e) {
+      try {
+        img.src = '';
+      } catch (e2) {}
+    }
+  }
+
+  function resumeLiveStream(img, reason) {
+    if (!img) return;
+    img._ugvPaused = false;
+    if (img._ugvReload) img._ugvReload(reason || 'resume');
+    else img.src = videoFeedUrl();
+  }
+
+  /**
+   * Only one MJPEG consumer at a time: active mode's feed.
+   * Hidden panels must not hold /video_feed open (causes blank Chat/Seek).
+   */
   function refreshLiveFeeds() {
-    ['seek-live-preview', 'chat-live-preview'].forEach(function (id) {
-      var img = $(id);
-      if (!img) return;
-      if (img._ugvReload) img._ugvReload('mode-enter');
-      else img.src = videoFeedUrl();
-    });
-    // Raw dashboard feed if present
-    var raw = document.querySelector('.video img[src*="video_feed"], #video_feed_frame img, .feed_section img');
-    if (raw) {
-      if (!raw._ugvRetryWired) {
-        wireImageRetry(raw, { isStream: true, baseUrl: VIDEO_FEED_URL, label: 'Live camera' });
+    var mode = window.ugvAppMode || getActiveMode();
+    var chat = $('chat-live-preview');
+    var seek = $('seek-live-preview');
+    var raw = getRawFeedImg();
+
+    if (mode === 'chat') {
+      pauseLiveStream(seek);
+      pauseLiveStream(raw);
+      resumeLiveStream(chat, 'mode-enter');
+    } else if (mode === 'seek') {
+      pauseLiveStream(chat);
+      pauseLiveStream(raw);
+      resumeLiveStream(seek, 'mode-enter');
+    } else {
+      pauseLiveStream(chat);
+      pauseLiveStream(seek);
+      if (raw) {
+        if (!raw._ugvRetryWired) {
+          wireImageRetry(raw, {
+            isStream: true,
+            baseUrl: VIDEO_FEED_URL,
+            label: 'Live camera',
+            maxRetries: 24,
+          });
+        }
+        resumeLiveStream(raw, 'mode-enter');
       }
-      if (raw._ugvReload) raw._ugvReload('refresh');
     }
   }
 
@@ -651,6 +747,27 @@
     return (s && s.value) || '';
   }
 
+  var SEEK_CAMERA_HINTS = {
+    detector:
+      'Mode <strong>a</strong> (classic detector): MobileNet-SSD scans for the selected class, ' +
+      'then drives with classic CV navigation. No LLM L/C/R scene pilot.',
+    detector_llm_nav:
+      'Mode <strong>b</strong> (detector + LLM nav): each cycle L/straight/R photos → LLM picks ' +
+      '<strong>direction</strong> and <strong>short/medium/long</strong> distance, then drive, then re-scan. ' +
+      'MobileNet-SSD referee decides “found”.',
+    llm_vision:
+      'Mode <strong>c</strong> (LLM vision): free-text goal. Each cycle L/straight/R photos → Vision LLM ' +
+      'pilots <strong>direction</strong>/<strong>distance</strong> and judges “found” against your goal.'
+  };
+
+  function syncSeekCameraHint() {
+    var el = $('seek-hint-camera');
+    if (!el) return;
+    var mode = getSelectedSeekMode();
+    var html = SEEK_CAMERA_HINTS[mode] || SEEK_CAMERA_HINTS.detector_llm_nav;
+    el.innerHTML = html;
+  }
+
   function syncSeekRefereeUI() {
     var mode = getSelectedSeekMode();
     var ref = getSeekReferee();
@@ -675,6 +792,8 @@
     if (intervalInp) {
       intervalInp.disabled = mode === 'detector' || (sceneCb && !sceneCb.checked);
     }
+
+    syncSeekCameraHint();
 
     try {
       localStorage.setItem(SEEK_REFEREE_KEY, mode);
@@ -1516,42 +1635,60 @@
     });
   }
 
+  function wireManualRetry(btn, img) {
+    if (!btn || !img || btn._ugvRetryClick) return;
+    btn._ugvRetryClick = true;
+    btn.addEventListener('click', function () {
+      img._ugvPaused = false;
+      img._ugvRetryCount = 0;
+      if (img._ugvFailEl) img._ugvFailEl.hidden = true;
+      img.classList.remove('ugv-img-broken');
+      if (img._ugvReload) img._ugvReload('manual-retry');
+      else img.src = videoFeedUrl();
+    });
+  }
+
   function initLiveImageRetries() {
-    wireImageRetry($('seek-live-preview'), {
+    var seekImg = $('seek-live-preview');
+    var chatImg = $('chat-live-preview');
+    wireImageRetry(seekImg, {
       isStream: true,
       baseUrl: VIDEO_FEED_URL,
       label: 'Seek live camera',
       maxRetries: 24,
+      failEl: $('seek-live-fail'),
     });
-    wireImageRetry($('chat-live-preview'), {
+    wireImageRetry(chatImg, {
       isStream: true,
       baseUrl: VIDEO_FEED_URL,
       label: 'Chat live camera',
       maxRetries: 24,
+      failEl: $('chat-live-fail'),
     });
+    wireManualRetry($('chat-live-retry'), chatImg);
+    wireManualRetry($('seek-live-retry'), seekImg);
     wireImageRetry($('seek-pano-img'), {
       isStream: false,
       label: 'Panorama',
       maxRetries: 8,
       minDelayMs: 400,
     });
-    // Raw dashboard MJPEG if present
-    var rawImgs = document.querySelectorAll(
-      '.video img[src*="video_feed"], #video_feed_frame img, img[src*="video_feed"]'
-    );
-    rawImgs.forEach(function (img) {
-      wireImageRetry(img, {
+    // Raw dashboard MJPEG if present (do not match chat/seek — those are mode-gated)
+    var raw = getRawFeedImg();
+    if (raw) {
+      wireImageRetry(raw, {
         isStream: true,
         baseUrl: VIDEO_FEED_URL,
         label: 'Live camera',
         maxRetries: 24,
       });
-    });
+    }
   }
 
   function boot() {
-    initModeTabs();
+    // Wire retries before first mode enter so refreshLiveFeeds uses _ugvReload
     initLiveImageRetries();
+    initModeTabs();
     initChat();
     initSeek();
     refreshLiveFeeds();
@@ -1571,10 +1708,12 @@
     hydrateSeekFromServer({ soft: true });
   };
 
-  // export for tests / console
+  // export for tests / console / screenshot catalog
   window.ugvSetMode = setMode;
   window.ugvGetActiveMode = getActiveMode;
   window.ugvRefreshLiveFeeds = refreshLiveFeeds;
   window.ugvSeekStop = seekStop;
   window.ugvSetSeekRunningIndicator = setSeekRunningIndicator;
+  // Locks Seek config (mode/goal/limits/etc.) while running — Stop to edit
+  window.ugvSetSeekControlsRunning = setSeekControlsRunning;
 })();

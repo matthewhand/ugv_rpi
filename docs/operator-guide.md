@@ -17,8 +17,8 @@ Visual QA source of truth for Playwright feature catalog.
 | `shell.stop` | Global STOP | Red **STOP** always in navbar (Raw/Chat/Seek) |
 | `shell.rtsp_off` | RTSP chip OFF | Chip **RTSP** red/`is-off` |
 | `shell.rtsp_on` | RTSP chip ON | Chip **RTSP** green/`is-on` (stream enabled server-side) |
-| `shell.path_direct` | Motion path Direct | Chip **Direct** green/`is-on` |
-| `shell.path_ros2` | Motion path ROS2 | Chip **ROS2** blue accent (may show restart banner). **Catalog does not auto-flip** to avoid UART thrash — capture manually when testing ROS. |
+| `shell.path_direct` | Motion path Direct | Chip **Direct** green/`is-on`. **Catalog is env-dependent:** captures the live path only; does **not** flip ROS2↔Direct (no UART thrash). Capture the other state manually. |
+| `shell.path_ros2` | Motion path ROS2 | Chip **ROS2** blue accent (may show restart banner). Same rule: **manual/env-dependent** catalog capture — no auto-flip, no UART thrash. |
 | `shell.hb_on` | Idle heartbeat ON | Chip **HB** green — safety default for manual |
 | `shell.hb_off` | Idle heartbeat OFF | Chip **HB off** amber — for AI timed drives |
 | `shell.wifi_chip` | ESP32 WiFi chip | Chip **WiFi** / **WiFi off** (confirm dialog before stop — do not confirm in QA) |
@@ -30,6 +30,7 @@ Visual QA source of truth for Playwright feature catalog.
 - Prefer **Direct** for simple Seek demos.
 - Leave **HB ON** for stick driving; turn **HB off** only when using AI timed drives.
 - **STOP** zeros wheels, cancels Seek, clears AI motion lock.
+- `shell.path_direct` / `shell.path_ros2` catalog shots depend on server path at capture time; flip the chip yourself if you need the other PNG (catalog never thrash-flips UART).
 
 ---
 
@@ -88,10 +89,11 @@ Visual QA source of truth for Playwright feature catalog.
 | `seek.limits` | Finite limits | Max steps + timeout inputs visible |
 | `seek.pano_empty` | Panorama empty | Hint “No scan yet…”; no broken image |
 | `seek.actions` | Action bar | Seek / Stop / Check once (sticky on phone) |
-| `seek.running_chrome` | Simulated running chrome | Optional: body class or pill if hydrated running |
+| `seek.running_chrome` | Simulated running chrome | Catalog-only (no motors): pill **Seek running · 3/30**; `body.seek-running`; config card `is-locked` + disabled mode/goal/on-found/scene-nav/limits; Start/Check disabled. Live run also updates phase via poll. |
 
 **Operator notes**
 - Defaults are **finite** (30 steps / 300s). Set 0 only for unlimited.
+- **Config is locked while Seek is running** (mode radios, goal, upon-found, scene nav, max steps, timeout). Card tooltip: “Config locked while Seek is running — Stop to edit”. Use **Stop** or navbar **STOP** to unlock and edit.
 - Leaving Seek while running prompts stop confirm.
 - Prefer mode **a** or **b** with `person`/`dog` for demos.
 
@@ -142,5 +144,6 @@ Visual QA source of truth for Playwright feature catalog.
 - ROS stack restart (Docker)
 - JupyterLab external link
 - Live LLM replies (variable latency)
+- Flipping **Direct ↔ ROS2** path during catalog (UART thrash) — `shell.path_direct` / `shell.path_ros2` are **manual / env-dependent**
 
 These appear in the guide as text only; catalog captures **pre-confirm** UI where relevant.
