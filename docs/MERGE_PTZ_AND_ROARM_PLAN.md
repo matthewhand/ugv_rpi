@@ -295,4 +295,10 @@ Do **not** require two codebases—**one tree, two configs**.
 4. Re-porting RoArm into their app/UI shell,  
 5. Updating in-repo + `~/beast-image` markdown so both robots stay documented correctly.
 
-This plan file is the working checklist until Phase G is marked done.
+## Done (2026-07-23)
+
+- Branch `beast/roarm-preserve` @ `c0382cf`
+- Integration branch `integrate/ptz-main-plus-roarm` (merge + docs/tests commits)
+- Seek look-around gated via `arm_usb_enabled()` in `_seek_look_deg`
+- Docs: `docs/CONFIG_PROFILES.md`, `docs/ROARM.md`, README dual-robot section, beast-image MD updates
+- Offline tests: `test_dual_robot_gating`, `test_ai_seek`, `test_roarm_ros2`
