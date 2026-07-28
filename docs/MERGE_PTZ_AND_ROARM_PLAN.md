@@ -235,26 +235,26 @@ Do **not** require two codebases—**one tree, two configs**.
 
 ### PTZ / other robot config
 
-- [ ] Boot, video, stick PTZ (`T:133`)  
-- [ ] Seek mode: pan look-around, triple view, drive  
-- [ ] No open of CP2102 / no RoArm errors if port absent  
-- [ ] `tests/test_ai_seek.py` (or offline subset)
+- [ ] Boot, video, stick PTZ (`T:133`) *(other robot — non-blocking)*  
+- [ ] Seek mode: pan look-around, triple view, drive *(other robot)*  
+- [x] No open of CP2102 / no RoArm errors if port absent *(gated by `arm_usb_enabled` + offline dual tests)*  
+- [x] `tests/test_ai_seek.py` (or offline subset)
 
 ### Beast config
 
-- [ ] Boot → arm **travel_tuck**  
-- [ ] Aim: RoArm moves USB arm; Aim: PT does not break if unused  
-- [ ] Camera survives index change (unplug/replug or restart)  
-- [ ] Control mode ros2: wheels via ROS; arm still USB hybrid  
-- [ ] Seek either disabled, or look-around uses base yaw / safe arm peek only  
-- [ ] Short hop + wall refuse still works  
-- [ ] `python -m py_compile` on touched modules; roarm tests if hardware present
+- [x] Boot → arm **travel_tuck** *(config default + `roarm_ctrl` pose; control proof exercised)*  
+- [x] Aim: RoArm moves USB arm; Aim: PT does not break if unused *(USB path proved via control suite when HW present)*  
+- [ ] Camera survives index change (unplug/replug or restart) *(code present; not re-proved this land)*  
+- [ ] Control mode ros2: wheels via ROS; arm still USB hybrid *(offline ros2 path tests only)*  
+- [x] Seek either disabled, or look-around uses base yaw / safe arm peek only  
+- [ ] Short hop + wall refuse still works *(Seek unit tests offline; live hop not re-run)*  
+- [x] `python -m py_compile` on touched modules; roarm tests if hardware present
 
 ### Regression
 
-- [ ] Single `app.py` process  
-- [ ] No force-push  
-- [ ] Secrets/`.env` not committed  
+- [x] Single `app.py` process *(land does not spawn extras)*  
+- [x] No force-push  
+- [x] Secrets/`.env` not committed  
 
 ---
 
@@ -281,7 +281,7 @@ Do **not** require two codebases—**one tree, two configs**.
 | D | Seek Beast adapter | No PTZ pan on RoArm |
 | E | Dual-config smoke | Green checklist |
 | F | Docs pass (§6) | README + beast-image MD updated |
-| G | Merge to `main`, push | Shared line of development |
+| G | Merge to `main`, push | **Done local** `main` (FF integrate + Phase G docs commit; see `git log -1`); push deferred until asked |
 
 ---
 
@@ -302,3 +302,12 @@ Do **not** require two codebases—**one tree, two configs**.
 - Seek look-around gated via `arm_usb_enabled()` in `_seek_look_deg`
 - Docs: `docs/CONFIG_PROFILES.md`, `docs/ROARM.md`, README dual-robot section, beast-image MD updates
 - Offline tests: `test_dual_robot_gating`, `test_ai_seek`, `test_roarm_ros2`
+
+## Phase G — landed on local `main` (2026-07-28)
+
+- Local `main` fast-forwarded to integrate tip **`1c236b3`**, then Phase G docs commit on `main` (tip = `git rev-parse main`)
+- Integrate branch remains at `1c236b3`; freeze `beast/roarm-preserve` @ `c0382cf`
+- No force-push; **`git push origin main` not done** (non-goal unless requested)
+- Product rules still enforced: USB RoArm Seek look skips PTZ (`path=roarm_look`); default pose `travel_tuck`; PTZ profile shape covered by dual-robot gating tests
+- Offline re-verify on land tip: dual_robot_gating + ai_seek + `tests/test_roarm_ros2.py` script; Beast HW proof also via `tests/test_roarm_control.py` when CP2102 present
+- Live PTZ robot checklist remains open (other bot / non-blocking)
