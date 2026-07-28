@@ -81,26 +81,22 @@ Detailed historical notes follow (some button names in older sections may still 
 - `feedback_data` and `on_data_received` return early / skip reset if serial is None
 - `ReadLine` returns empty bytes immediately when `s` is None rather than blocking
 
-### ROS 2 motor bypass mode (`base_ctrl.py`, `app.py`, `templates/`)
+### ROS 2 control routing (`base_ctrl.py`, `app.py`, `templates/`)
 
-`BaseController` gains an `enable_motor_control` flag (default `True`). When set to `False` (ROS 2 chassis mode), only **wheel/chassis** commands are dropped (`T:1` differential drive, `T:13` X/Z velocity). **Pan/tilt gimbal** commands (`T:133`, `T:141`) still go out so the web UI stick can aim the camera while ROS owns driving.
+Unified **Control: Direct serial | ROS 2 relay** (navbar chips / `POST /api/control_mode`, `GET /api/status`).
 
-Toggled at runtime — no restart required:
+- **Direct:** Flask opens UART; chassis + PTZ serial JSON go to the ESP32.  
+- **ROS 2:** Flask **releases** UART for `ugv_bringup`; stick/AI motion prefer **rosbridge** (`ws://127.0.0.1:9090` by default).  
+- If rosbridge is **down**: commands **fall back to serial** after reclaiming UART (so PTZ is not left on “Dropped serial cmd”).  
+- While mode stays **ROS 2**, a **background autoheal** thread (`UGV_ROS_AUTOHEAL=1`, interval `UGV_ROS_AUTOHEAL_S` ≈15s) retries rosbridge/bringup and re-releases UART when the bridge recovers.  
+- Legacy `enable_motor_control=False` still bypasses chassis-only on serial when the port is open; full ROS mode uses release + relay as above.  
+- Env: `UGV_MOTOR_BYPASS=1` at process start (dev); `UGV_AUTOSTART_ROSBRIDGE` / `UGV_AUTOSTART_BRINGUP` (default on).
 
-- **Web UI:** "Motors: Direct ON / ROS 2 Bypass" button in the dashboard
-- **API:** `POST /api/toggle_motors`, `GET /api/status`
-- **Env:** `UGV_MOTOR_BYPASS=1` at process start
-
-Gimbal kits should set `base_config.module_type: 2` in `config.yaml` (0=None, 1=ARM, 2=Gimbal). Lights and other non-chassis serial commands always pass through.
+Gimbal kits: `base_config.module_type: 2` in `config.yaml`.
 
 ### Pan/tilt via ROS 2 (optional)
 
-With `UGV_MOTION_BACKEND=ros2` and `UGV_PT_BACKEND=auto` (default), the web stick’s `T:133` commands are **routed over rosbridge** when it is up:
-
-- publishes `sensor_msgs/JointState` on `/joint_states` (names `pt_base_link_to_pt_link1`, `pt_link1_to_pt_link2`) for **`ugv_bringup`** → ESP32  
-- also publishes `Float64MultiArray` on `/pt_joint_position_controller/commands` (joy/vision/gazebo path)
-
-If rosbridge is down, Flask **falls back to serial `T:133`**. Force with `UGV_PT_BACKEND=serial` or `ros2`.
+When control mode is ROS 2 and rosbridge is up, UI `T:133` is published over rosbridge (joint_states / PT controller topics → bringup → ESP32). If rosbridge is down, Flask uses **serial fallback** after reclaim (see above).
 
 ### AI vision agent (`/ai`)
 
@@ -114,10 +110,10 @@ OpenAI-compatible chat UI at `/ai` with optional live camera still attach.
 
 ### Drive safety / conventions
 
-- Positive `linear_x` / `T:13` X = forward (ROS unicycle). UI `T:1` positive L/R = forward on stock firmware.
+- Body-frame positive linear = **camera-forward** in software. Hardware polarity is applied once via `drive_linear_sign` / `drive_angular_sign` in `config.yaml` (or `UGV_DRIVE_LINEAR_SIGN` / `UGV_DRIVE_ANGULAR_SIGN`). **This tree defaults linear to `-1`** for the common Waveshare chassis wiring — verify after any change with `GET /api/status` and a short stick test (restart the app after editing yaml).
 - AI chassis drives are **timed by default**; continuous motion requires an explicit continuous flag.
 - Motion tools must be enabled in the AI capability UI before the LLM can call them.
-- **UI “Freq. stop” (2s heartbeat):** the main dashboard re-sends last wheel cmd every 2s (idle = `L=0/R=0` stop). That can cut AI timed drives short if a control tab is open. Toggle **Freq. stop: OFF** for AI sessions. The server also arms an **AI motion lock** during timed AI drives that ignores those zero heartbeats until the maneuver ends.
+- **Idle heartbeat (navbar HB):** every 2s the UI re-sends the last wheel command (idle = L0/R0 stop). Leave **ON** for manual teleop. Set **HB off** for AI timed drives so the heartbeat does not cut them short. The server **AI motion lock** ignores those idle zeros during timed/continuous AI moves; navbar **STOP** always clears the lock and zeros chassis.
 
 ## Basic Description
 The Waveshare UGV robots utilize both an upper computer and a lower computer. This repository contains the program running on the upper computer, which is typically a Raspberry Pi in this setup.  
