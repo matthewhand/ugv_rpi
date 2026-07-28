@@ -426,15 +426,30 @@ enable_rtsp_stream = False
 @app.route('/api/status')
 def api_status():
     mode = get_control_mode()
+    with _ros_autoheal_lock:
+        heal = dict(_ros_autoheal_state)
+    if heal.get('last_tick_at') is not None:
+        try:
+            heal['last_tick_age_s'] = round(time.time() - float(heal['last_tick_at']), 1)
+        except (TypeError, ValueError):
+            pass
+    br_ok = None
+    if mode == 'ros2':
+        br_ok = _rosbridge_reachable()
     return jsonify({
         'enable_rtsp_stream': enable_rtsp_stream,
         'enable_motor_control': base.enable_motor_control,
         'control_mode': mode,  # 'direct' | 'ros2'
         'control_mode_label': 'Direct serial' if mode == 'direct' else 'ROS 2 relay',
-        'uart_owner': 'flask' if mode == 'direct' else 'ros2',
+        'uart_owner': (
+            'flask' if mode == 'direct'
+            else ('flask_fallback' if base.serial_is_open() and not getattr(base, 'serial_released_for_ros', False) else 'ros2')
+        ),
         'serial_open': base.serial_is_open() if hasattr(base, 'serial_is_open') else bool(getattr(base, 'ser', None)),
         'serial_released_for_ros': bool(getattr(base, 'serial_released_for_ros', False)),
         'esp32_wifi_stopped': bool(_esp32_wifi_session.get('stopped')),
+        'rosbridge_ok': br_ok,
+        'ros_autoheal': heal,
     })
 
 @app.route('/api/toggle_rtsp', methods=['POST'])
@@ -775,6 +790,191 @@ def _ensure_ros2_sidecar_stack():
     except Exception as e:
         result['bringup'] = {'wanted': True, 'ok': False, 'detail': str(e)}
     return result
+
+
+# Background ROS2 heal: keep rosbridge/bringup up while control_mode=ros2.
+# Without this, a dead :9090 after a one-shot autostart left PTZ on "dropped serial".
+_ros_autoheal_lock = threading.Lock()
+_ros_autoheal_state = {
+    'enabled': True,
+    'last_tick_at': None,
+    'last_action': None,
+    'last_detail': '',
+    'last_ok': None,
+    'consecutive_down': 0,
+    'heals_attempted': 0,
+    'heals_ok': 0,
+}
+
+
+def _ros2_autoheal_tick():
+    """One heal cycle. Safe to call from a background thread.
+
+    Policy when control_mode is ros2:
+      - rosbridge up  → prefer UART released for bringup; re-release if we held fallback serial
+      - rosbridge down → restart sidecar stack; if still down, reclaim serial (PTZ lives)
+    Disabled with UGV_ROS_AUTOHEAL=0. Interval: UGV_ROS_AUTOHEAL_S (default 15).
+    """
+    global _ros_autoheal_state
+    if not _env_flag('UGV_ROS_AUTOHEAL', '1'):
+        with _ros_autoheal_lock:
+            _ros_autoheal_state['enabled'] = False
+            _ros_autoheal_state['last_action'] = 'disabled'
+        return {'ok': True, 'action': 'disabled'}
+
+    if get_control_mode() != 'ros2':
+        with _ros_autoheal_lock:
+            _ros_autoheal_state['last_action'] = 'skip_not_ros2'
+            _ros_autoheal_state['last_ok'] = True
+            _ros_autoheal_state['consecutive_down'] = 0
+        return {'ok': True, 'action': 'skip_not_ros2'}
+
+    bridge_ok = _rosbridge_reachable()
+    action = 'healthy'
+    detail = ''
+
+    if bridge_ok:
+        # Prefer ROS owning UART when the bridge is healthy.
+        if not getattr(base, 'serial_released_for_ros', False) or base.serial_is_open():
+            # We were on serial fallback — hand UART back so bringup can drive
+            base.enable_motor_control = False
+            base.release_serial_for_ros()
+            try:
+                _ensure_ugv_bringup_running()
+            except Exception as e:
+                detail = f'released serial; bringup ensure: {e}'
+            else:
+                detail = 'rosbridge healthy; UART released for bringup'
+            action = 'released_serial_for_ros'
+            olog.info(
+                'ros_autoheal',
+                detail,
+                rosbridge_ok=True,
+                serial_released=True,
+            )
+        else:
+            detail = 'rosbridge healthy; UART already released'
+            action = 'healthy'
+        with _ros_autoheal_lock:
+            _ros_autoheal_state.update({
+                'enabled': True,
+                'last_tick_at': time.time(),
+                'last_action': action,
+                'last_detail': detail,
+                'last_ok': True,
+                'consecutive_down': 0,
+            })
+        return {'ok': True, 'action': action, 'detail': detail}
+
+    # Bridge down — try restart sidecars (may need UART free for bringup)
+    with _ros_autoheal_lock:
+        _ros_autoheal_state['heals_attempted'] = int(
+            _ros_autoheal_state.get('heals_attempted') or 0
+        ) + 1
+        _ros_autoheal_state['consecutive_down'] = int(
+            _ros_autoheal_state.get('consecutive_down') or 0
+        ) + 1
+        down_n = _ros_autoheal_state['consecutive_down']
+
+    olog.warn(
+        'ros_autoheal',
+        f'rosbridge down (tick #{down_n}) — ensuring sidecar stack',
+        consecutive_down=down_n,
+        serial_open=base.serial_is_open(),
+        serial_released=bool(getattr(base, 'serial_released_for_ros', False)),
+    )
+
+    # Free UART before bringup restart if we hold it
+    if base.serial_is_open() or not getattr(base, 'serial_released_for_ros', False):
+        base.enable_motor_control = False
+        base.release_serial_for_ros()
+
+    try:
+        stack = _ensure_ros2_sidecar_stack()
+    except Exception as e:
+        stack = {'error': str(e)}
+        olog.warn('ros_autoheal', f'sidecar ensure failed: {e}', error=str(e)[:200])
+
+    bridge_ok = _rosbridge_reachable()
+    if bridge_ok:
+        action = 'healed_rosbridge'
+        detail = 'rosbridge restored by autoheal'
+        with _ros_autoheal_lock:
+            _ros_autoheal_state['heals_ok'] = int(
+                _ros_autoheal_state.get('heals_ok') or 0
+            ) + 1
+            _ros_autoheal_state['consecutive_down'] = 0
+        olog.info('ros_autoheal', detail, stack=str(stack)[:200])
+    else:
+        # Stay useful: serial fallback so PTZ is not dead
+        reclaimed = _ensure_flask_serial(reason='ros_autoheal_fallback')
+        action = 'serial_fallback'
+        detail = (
+            'rosbridge still down after ensure — serial reclaimed for PTZ/drive. '
+            f'stack={str(stack)[:160]}'
+        )
+        olog.warn(
+            'ros_autoheal',
+            detail,
+            reclaimed=reclaimed,
+            serial_open=base.serial_is_open(),
+        )
+
+    with _ros_autoheal_lock:
+        _ros_autoheal_state.update({
+            'enabled': True,
+            'last_tick_at': time.time(),
+            'last_action': action,
+            'last_detail': detail[:300],
+            'last_ok': bridge_ok,
+        })
+    return {
+        'ok': bridge_ok,
+        'action': action,
+        'detail': detail,
+        'stack': stack,
+    }
+
+
+def _ros2_autoheal_loop():
+    """Daemon: periodic rosbridge heal while ROS2 control mode is selected."""
+    # First tick after short delay so startup autostart can finish
+    time.sleep(8.0)
+    while True:
+        try:
+            interval = float(os.environ.get('UGV_ROS_AUTOHEAL_S') or 15)
+        except (TypeError, ValueError):
+            interval = 15.0
+        interval = max(5.0, min(120.0, interval))
+        try:
+            if _env_flag('UGV_ROS_AUTOHEAL', '1') and get_control_mode() == 'ros2':
+                _ros2_autoheal_tick()
+        except Exception as e:
+            try:
+                olog.warn('ros_autoheal', f'tick error: {e}', error=str(e)[:200])
+            except Exception:
+                print(f'[ros_autoheal] tick error: {e}')
+        time.sleep(interval)
+
+
+def _start_ros2_autoheal_thread():
+    if getattr(_start_ros2_autoheal_thread, '_started', False):
+        return
+    if not _env_flag('UGV_ROS_AUTOHEAL', '1'):
+        olog.info('ros_autoheal', 'UGV_ROS_AUTOHEAL disabled')
+        return
+    t = threading.Thread(target=_ros2_autoheal_loop, name='ros2-autoheal', daemon=True)
+    t.start()
+    _start_ros2_autoheal_thread._started = True  # type: ignore[attr-defined]
+    olog.info(
+        'ros_autoheal',
+        'ROS2 autoheal thread started '
+        f'(interval≈{os.environ.get("UGV_ROS_AUTOHEAL_S") or 15}s, only when control_mode=ros2)',
+    )
+
+
+# Start after function defs (module load order) — heal while control_mode=ros2
+_start_ros2_autoheal_thread()
 
 
 @app.route('/api/control_mode', methods=['GET', 'POST'])

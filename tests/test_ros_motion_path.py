@@ -29,6 +29,13 @@ class TestPreferredMotionPath(unittest.TestCase):
         self.assertEqual(preferred_motion_path('', False), 'direct')
         self.assertEqual(preferred_motion_path(None, True), 'direct')
 
+    def test_autoheal_policy_matches_path_helper(self):
+        """Document the heal contract: down bridge ⇒ serial path until bridge returns."""
+        # Healthy ROS path
+        self.assertEqual(preferred_motion_path('ros2', True), 'ros2')
+        # Autoheal failed / bridge still dead → UI must use serial_fallback (not drop)
+        self.assertEqual(preferred_motion_path('ros2', False), 'serial_fallback')
+
 
 if __name__ == '__main__':
     unittest.main()
