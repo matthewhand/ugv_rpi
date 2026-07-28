@@ -183,22 +183,36 @@ class BaseController:
 
 	def release_serial_for_ros(self):
 		"""Close UART so ugv_bringup / ROS can own /dev/ttyAMA0 (or serial0)."""
+		# Kill base/head LEDs before releasing — light cmds are dropped after close.
+		try:
+			if self.ser is not None and getattr(self.ser, 'is_open', False):
+				off = {"T": 132, "IO4": 0, "IO5": 0}
+				with self._ser_lock:
+					ser = self.ser
+					if ser and getattr(ser, 'is_open', False):
+						ser.write((json.dumps(off) + '\n').encode("utf-8"))
+						ser.flush()
+				self.base_light_status = 0
+				self.head_light_status = 0
+				time.sleep(0.05)
+		except Exception as e:
+			print(f"[base_ctrl] pre-release lights off failed: {e}")
 		with self._ser_lock:
 			if self.ser is not None:
 				try:
 					self.ser.close()
 				except Exception as e:
 					print(f"[base_ctrl] serial close: {e}")
-				self.ser = None
+			self.ser = None
 			self.rl.s = None
 			self.rl.buf = bytearray()
-			self.serial_released_for_ros = True
+		self.serial_released_for_ros = True
 		# Drain pending writes so they don't fire after reclaim
 		try:
 			while True:
 				self.command_queue.get_nowait()
-		except queue.Empty:
-			pass
+			except queue.Empty:
+				pass
 		print(f"[base_ctrl] Serial RELEASED for ROS ({self.uart_dev})")
 		try:
 			from app_log import app_log as olog
@@ -270,7 +284,7 @@ class BaseController:
 							)
 						except Exception:
 							pass
-						return self.base_data
+					return self.base_data
 			self.rl.clear_buffer()
 			self.data_buffer = json.loads(self.rl.readline().decode('utf-8'))
 			self.base_data = self.data_buffer
@@ -297,20 +311,14 @@ class BaseController:
 			now = time.time()
 			if now - getattr(self, '_release_log_last', 0) > 8.0:
 				self._release_log_last = now
-				t_code = data.get('T') if isinstance(data, dict) else None
-				print(
-					f"[base_ctrl] Serial not owned by Flask (ROS mode) — drop serial cmd T={t_code}. "
-					"If PTZ is dead: start rosbridge or switch UI Control to Direct serial."
-				)
+				print("[base_ctrl] Serial not owned by Flask (ROS mode) — drop serial cmd")
 				try:
 					from app_log import app_log as olog
 					olog.warn(
 						'serial',
-						'Dropped serial cmd — UART released for ROS 2 '
-						'(start rosbridge or switch Control to Direct)',
-						T=t_code,
+						'Dropped serial cmd — UART released for ROS 2',
+						T=(data.get('T') if isinstance(data, dict) else None),
 						owner='ros2',
-						hint='UGV_CONTROL_MODE=direct or UI Control: Direct serial',
 						throttle_s=8.0,
 					)
 				except Exception:
@@ -401,10 +409,26 @@ class BaseController:
 
 
 	def lights_ctrl(self, pwmA, pwmB):
-		data = {"T":132,"IO4":pwmA,"IO5":pwmB}
-		self.send_command(data)
+		"""12V switch / base+head LEDs via T:132.
+
+		In ROS mode Flask does not own UART, so T:132 is published to
+		/ugv/led_ctrl for ugv_driver (same contract as stock ugv_bringup).
+		"""
+		pwmA = int(pwmA)
+		pwmB = int(pwmB)
 		self.base_light_status = pwmA
 		self.head_light_status = pwmB
+		data = {"T": 132, "IO4": pwmA, "IO5": pwmB}
+		if self.serial_released_for_ros or not self.ser:
+			try:
+				import ros_motion
+				result = ros_motion.publish_lights(pwmA, pwmB)
+				if not result.get('ok'):
+					print(f"[base_ctrl.lights_ctrl] ROS light route failed: {result}")
+			except Exception as e:
+				print(f"[base_ctrl.lights_ctrl] cannot send lights (no serial/ROS): {e}")
+			return
+		self.send_command(data)
 
 
 	def base_lights_ctrl(self):
@@ -418,14 +442,22 @@ class BaseController:
 		self.release_serial_for_ros()
 
 	def breath_light(self, input_time):
+		# Abort early if UART is (or becomes) released for ROS mid-animation.
 		breath_start_time = time.time()
 		while time.time() - breath_start_time < input_time:
+			if self.serial_released_for_ros or not self.ser:
+				break
 			for i in range(0, 128, 10):
-				self.lights_ctrl(i, 128-i)
+				if self.serial_released_for_ros or not self.ser:
+					break
+				self.lights_ctrl(i, 128 - i)
 				time.sleep(0.1)
 			for i in range(0, 128, 10):
-				self.lights_ctrl(128-i, i)
+				if self.serial_released_for_ros or not self.ser:
+					break
+				self.lights_ctrl(128 - i, i)
 				time.sleep(0.1)
+		# Always request off (serial or ROS led topic)
 		self.lights_ctrl(0, 0)
 
 
@@ -442,7 +474,7 @@ if __name__ == '__main__':
 	# gimble ctrl, look forward
 	#                x  y  spd acc
 	base.gimbal_ctrl(0, 0, 10, 0)
-    
+	
     # x(-180 ~ 180)
 	# x- look left
 	# x+ look right
