@@ -37,13 +37,15 @@ if is_raspberry_pi5():
 else:
     base = BaseController('/dev/serial0', 115200)
 
-threading.Thread(target=lambda: base.breath_light(15), daemon=True).start()
-
 # config file.
 curpath = os.path.realpath(__file__)
 thisPath = os.path.dirname(curpath)
 with open(thisPath + '/config.yaml', 'r') as yaml_file:
     f = yaml.safe_load(yaml_file)
+
+# Ensure LEDs are off before any control_mode UART release (do not start breath
+# yet — ros2 mode drops serial mid-breath and leaves base lights stuck ON).
+base.lights_ctrl(0, 0)
 
 base.base_oled(0, f["base_config"]["robot_name"])
 base.base_oled(1, f"sbc_version: {f['base_config']['sbc_version']}")
@@ -67,6 +69,298 @@ import audio_ctrl
 import os_info
 import app_log
 from app_log import app_log as olog
+
+# ---------------------------------------------------------------------------
+# RoArm (optional USB serial) — only when arm_config.transport == usb_serial.
+# Other robots leave arm_config absent or transport: base_uart → stock PT/arm.
+# ---------------------------------------------------------------------------
+def _arm_cfg():
+    return f.get('arm_config') or {}
+
+
+def arm_transport():
+    t = (_arm_cfg().get('transport') or 'base_uart').strip().lower()
+    if t in ('usb', 'usb_serial', 'roarm_usb', 'cp2102'):
+        return 'usb_serial'
+    return 'base_uart'
+
+
+def arm_usb_enabled():
+    return arm_transport() == 'usb_serial'
+
+
+# Runtime UI aim: 'roarm' → stick/T:144 arm path; 'pt' → original gimbal T:133.
+_AIM_MODE_PATH = os.path.join(thisPath, '.ui_aim_mode.json')
+_aim_mode_lock = threading.Lock()
+
+
+def _default_ui_aim_mode():
+    raw = (_arm_cfg().get('ui_aim_default') or 'auto').strip().lower()
+    if raw in ('roarm', 'arm', 'usb'):
+        return 'roarm'
+    if raw in ('pt', 'gimbal', 'pan_tilt'):
+        return 'pt'
+    if int(f.get('base_config', {}).get('module_type') or 0) == 1 or arm_usb_enabled():
+        return 'roarm'
+    return 'pt'
+
+
+_ui_aim_mode = _default_ui_aim_mode()
+
+
+def _load_ui_aim_mode():
+    global _ui_aim_mode
+    try:
+        if os.path.isfile(_AIM_MODE_PATH):
+            with open(_AIM_MODE_PATH, 'r') as fh:
+                data = json.load(fh)
+            m = (data.get('mode') or '').strip().lower()
+            if m in ('roarm', 'pt'):
+                _ui_aim_mode = m
+    except Exception as e:
+        print(f'[app.py] load ui_aim_mode: {e}')
+
+
+def _save_ui_aim_mode():
+    try:
+        with open(_AIM_MODE_PATH, 'w') as fh:
+            json.dump({'mode': _ui_aim_mode}, fh)
+    except Exception as e:
+        print(f'[app.py] save ui_aim_mode: {e}')
+
+
+def get_ui_aim_mode():
+    with _aim_mode_lock:
+        return _ui_aim_mode
+
+
+def set_ui_aim_mode(mode, *, source='api'):
+    global _ui_aim_mode
+    mode = (mode or '').strip().lower()
+    if mode in ('arm', 'usb', 'roarm_usb'):
+        mode = 'roarm'
+    if mode in ('gimbal', 'pan_tilt', 'pan-tilt'):
+        mode = 'pt'
+    if mode not in ('roarm', 'pt'):
+        raise ValueError("mode must be 'roarm' or 'pt'")
+    with _aim_mode_lock:
+        prev = _ui_aim_mode
+        _ui_aim_mode = mode
+    _save_ui_aim_mode()
+    olog.info(
+        'ui_aim',
+        f'UI aim mode → {mode} (was {prev})',
+        mode=mode, prev_mode=prev, source=source,
+        arm_transport=arm_transport(),
+    )
+    return mode
+
+
+_load_ui_aim_mode()
+
+
+def _roarm_usb_owner() -> str:
+    """flask (default hybrid) | driver (exclusive ROS/host bridge owns CP2102)."""
+    try:
+        import ros_motion
+        return ros_motion.roarm_usb_owner()
+    except Exception:
+        raw = (os.environ.get('UGV_ROARM_USB_OWNER') or 'flask').strip().lower()
+        if raw in ('driver', 'ros', 'ros2', 'bridge', 'exclusive'):
+            return 'driver'
+        return 'flask'
+
+
+_roarm = None
+if arm_usb_enabled():
+    # Exclusive driver mode: do not open CP2102 here (roarm_driver / host bridge owns it).
+    if _roarm_usb_owner() == 'driver':
+        print('[app.py] RoArm USB owner=driver — Flask will publish joint_command only (no USB open)')
+        olog.info(
+            'roarm',
+            'RoArm USB owner=driver; Flask skips CP2102 open',
+            usb_owner='driver',
+        )
+    else:
+        try:
+            import roarm_ctrl
+            _port = (_arm_cfg().get('serial_port') or '').strip() or None
+            _baud = int(_arm_cfg().get('baud') or roarm_ctrl.DEFAULT_BAUD)
+            _roarm = roarm_ctrl.get_roarm(port=_port, baud=_baud, enabled=True)
+            st = _roarm.status() if _roarm else {}
+            print(f"[app.py] RoArm USB: connected={st.get('connected')} port={st.get('port')}")
+            olog.info(
+                'roarm',
+                f"RoArm USB init connected={st.get('connected')} port={st.get('port')}",
+                connected=st.get('connected'),
+                port=st.get('port'),
+                baud=st.get('baud'),
+                last_error=st.get('last_error'),
+                usb_owner='flask',
+            )
+        except Exception as e:
+            print(f'[app.py] RoArm USB init failed: {e}')
+            olog.error('roarm', f'RoArm USB init failed: {e}', error=str(e))
+            _roarm = None
+
+
+def get_roarm():
+    return _roarm
+
+
+def _route_arm_ui_cmd(cmd):
+    """Handle stock UI T:144 E/Z/R — USB RoArm or base UART.
+
+    Architecture (USB arm is independent of chassis ttyAMA0):
+      control_mode=direct + usb_serial:
+        Flask → CP2102 T:102 always.
+      control_mode=ros2 + usb_serial (default hybrid, UGV_ROARM_USB_OWNER=flask):
+        1) Publish /ugv/roarm/joint_command via rosbridge (for ROS tools / optional driver)
+        2) Write USB via roarm_ctrl (proven UI path — keeps Aim:RoArm working if
+           driver/bridge is down). Also mirror joint_states.
+      control_mode=ros2 + UGV_ROARM_USB_OWNER=driver:
+        Publish joint_command only; roarm_driver_min or host bridge writes USB.
+        Falls back to opening USB if command publish fails and port is free.
+
+    Other robots (no arm_config.transport=usb_serial): unchanged base-UART T:144.
+    """
+    e = float(cmd.get('E', cmd.get('e', f['args_config'].get('arm_default_e', 60))) or 0)
+    z = float(cmd.get('Z', cmd.get('z', f['args_config'].get('arm_default_z', 24))) or 0)
+    r = float(cmd.get('R', cmd.get('r', f['args_config'].get('arm_default_r', 0))) or 0)
+    try:
+        cvf.pan_angle = r
+        cvf.tilt_angle = z
+    except Exception:
+        pass
+
+    chassis_mode = get_control_mode()
+    default_e = float(f['args_config'].get('arm_default_e', 60))
+    default_z = float(f['args_config'].get('arm_default_z', 24))
+    default_r = float(f['args_config'].get('arm_default_r', 0))
+
+    if arm_usb_enabled():
+        import roarm_ctrl
+        joints = roarm_ctrl.e_z_r_to_joints(
+            e, z, r, default_e=default_e, default_z=default_z, default_r=default_r
+        )
+        usb_owner = _roarm_usb_owner()
+        ros_cmd = None
+        ros_mirror = None
+        ok = False
+        text = ''
+        path = 'roarm_usb'
+
+        # --- ROS command publish when chassis is ros2 (or bridge already up) ---
+        if chassis_mode == 'ros2':
+            try:
+                import ros_motion
+                ros_cmd = ros_motion.publish_roarm_joint_command(
+                    joints.get('base', 0),
+                    joints.get('shoulder', 0),
+                    joints.get('elbow', 0),
+                    joints.get('hand', 0),
+                    throttle=True,
+                    also_states=(usb_owner == 'driver'),
+                )
+            except Exception as ex:
+                ros_cmd = {'ok': False, 'error': str(ex)}
+
+        # --- Hardware write policy ---
+        # driver owner: ROS path is primary; USB only as fallback if command failed
+        # flask owner (default hybrid): always write USB so UI works without driver
+        use_usb = True
+        if usb_owner == 'driver' and chassis_mode == 'ros2' and ros_cmd and ros_cmd.get('ok'):
+            use_usb = False
+            ok = True
+            path = 'roarm_ros_command'
+            text = 'published joint_command (USB owned by driver)'
+
+        if use_usb:
+            global _roarm
+            arm = _roarm
+            if arm is None and usb_owner == 'driver':
+                # Late open only for fallback when exclusive driver path failed
+                try:
+                    arm = roarm_ctrl.get_roarm(
+                        port=(_arm_cfg().get('serial_port') or '').strip() or None,
+                        baud=int(_arm_cfg().get('baud') or roarm_ctrl.DEFAULT_BAUD),
+                        enabled=True,
+                    )
+                    _roarm = arm
+                except Exception as ex:
+                    text = f'USB fallback open failed: {ex}'
+                    arm = None
+            if arm is not None:
+                ok, text, joints = arm.set_from_e_z_r(
+                    e, z, r,
+                    default_e=default_e,
+                    default_z=default_z,
+                    default_r=default_r,
+                )
+                path = 'roarm_usb' if path != 'roarm_ros_command' else 'roarm_usb_fallback'
+                if path == 'roarm_usb' and chassis_mode == 'ros2' and ros_cmd and ros_cmd.get('ok'):
+                    path = 'roarm_hybrid'  # command published + USB written
+            else:
+                ok = bool(ros_cmd and ros_cmd.get('ok'))
+                if not ok:
+                    text = text or 'no RoArm USB and ROS command failed'
+                    path = 'roarm_unavailable'
+
+        # State mirror for tools when we wrote USB (or hybrid)
+        if ok and joints and path in ('roarm_usb', 'roarm_hybrid', 'roarm_usb_fallback'):
+            try:
+                import ros_motion
+                if chassis_mode == 'ros2' or ros_motion.rosbridge_status().get('ok'):
+                    ros_mirror = ros_motion.publish_roarm_joints(
+                        joints.get('base', 0),
+                        joints.get('shoulder', 0),
+                        joints.get('elbow', 0),
+                        joints.get('hand', 0),
+                        throttle=True,
+                    )
+            except Exception as ex:
+                ros_mirror = {'ok': False, 'error': str(ex)}
+
+        return {
+            'path': path,
+            'ok': ok,
+            'E': e, 'Z': z, 'R': r,
+            'joints': joints,
+            'ack': (text or '')[:200],
+            'status': (_roarm.status() if _roarm else None),
+            'chassis_mode': chassis_mode,
+            'usb_owner': usb_owner,
+            'ros_command': ros_cmd,
+            'ros_mirror': ros_mirror,
+        }
+
+    # Stock: base ESP32 arm dialect on chassis UART (integrated arm kits only).
+    # In ros2 mode base UART may be released — warn via path name.
+    if chassis_mode == 'ros2' and not base.serial_is_open():
+        return {
+            'path': 'base_uart_unavailable',
+            'ok': False,
+            'error': 'arm transport is base_uart but serial released for ROS; set arm_config.transport=usb_serial for this Beast',
+            'E': e, 'Z': z, 'R': r,
+            'chassis_mode': chassis_mode,
+        }
+    base.base_json_ctrl(cmd)
+    return {'path': 'base_uart', 'ok': True, 'E': e, 'Z': z, 'R': r, 'chassis_mode': chassis_mode}
+
+
+def _route_roarm_raw(cmd):
+    """Forward USB-native RoArm T-codes when transport is USB; else base UART."""
+    if not arm_usb_enabled() or _roarm is None:
+        base.base_json_ctrl(cmd)
+        return {'path': 'base_uart', 'ok': True, 'mode': get_control_mode()}
+    ok, text = _roarm.send_json(cmd, read_s=0.2)
+    return {
+        'path': 'roarm_usb',
+        'ok': ok,
+        'ack': (text or '')[:240],
+        'status': _roarm.status(),
+    }
+
 
 # Get system info
 UPLOAD_FOLDER = thisPath + '/sounds/others'
@@ -199,8 +493,13 @@ def set_control_mode(mode, *, source='api'):
         base.enable_motor_control = (mode == 'direct')
 
     # Port ownership: only one of Flask or ROS may hold the UART.
+    # release_serial_for_ros() forces T:132 lights off before closing the port.
     serial_ok = True
     if mode == 'ros2':
+        try:
+            base.lights_ctrl(0, 0)
+        except Exception:
+            pass
         serial_ok = bool(base.release_serial_for_ros())
     else:
         serial_ok = bool(base.claim_serial_for_flask())
@@ -252,11 +551,14 @@ def set_control_mode(mode, *, source='api'):
 _load_control_mode()
 # Apply side effects for loaded mode (including UART ownership)
 if get_control_mode() == 'ros2':
+    # release_serial_for_ros() turns lights off while UART is still held
     base.enable_motor_control = False
     base.release_serial_for_ros()
 else:
     base.enable_motor_control = True
     base.claim_serial_for_flask()
+    # Cosmetic boot animation only when Flask keeps the UART
+    threading.Thread(target=lambda: base.breath_light(15), daemon=True).start()
 olog.info(
     'startup',
     f'control_mode={get_control_mode()} '
@@ -361,6 +663,12 @@ enable_rtsp_stream = False
 @app.route('/api/status')
 def api_status():
     mode = get_control_mode()
+    roarm_st = None
+    if _roarm is not None:
+        try:
+            roarm_st = _roarm.status()
+        except Exception as e:
+            roarm_st = {'connected': False, 'last_error': str(e)}
     return jsonify({
         'enable_rtsp_stream': enable_rtsp_stream,
         'enable_motor_control': base.enable_motor_control,
@@ -370,6 +678,43 @@ def api_status():
         'serial_open': base.serial_is_open() if hasattr(base, 'serial_is_open') else bool(getattr(base, 'ser', None)),
         'serial_released_for_ros': bool(getattr(base, 'serial_released_for_ros', False)),
         'esp32_wifi_stopped': bool(_esp32_wifi_session.get('stopped')),
+        'ui_aim_mode': get_ui_aim_mode(),  # 'roarm' | 'pt'
+        'arm_transport': arm_transport(),  # 'usb_serial' | 'base_uart'
+        'module_type': f.get('base_config', {}).get('module_type'),
+        'roarm': roarm_st,
+    })
+
+
+@app.route('/api/ui_aim_mode', methods=['GET', 'POST'])
+def api_ui_aim_mode():
+    """Toggle UI overlay target: original pan/tilt (pt) vs RoArm position (roarm).
+
+    Other robots with module_type=2 keep using PT via the stick path in control.js;
+    this API only switches aim when the operator wants PT vs arm on a dual-capable box.
+    """
+    if request.method == 'GET':
+        return jsonify({
+            'success': True,
+            'ui_aim_mode': get_ui_aim_mode(),
+            'arm_transport': arm_transport(),
+            'module_type': f.get('base_config', {}).get('module_type'),
+            'roarm': (_roarm.status() if _roarm else None),
+        })
+    body = request.get_json(silent=True) or {}
+    mode = body.get('mode') or request.form.get('mode') or request.args.get('mode')
+    if not mode:
+        # Toggle when no mode given
+        mode = 'pt' if get_ui_aim_mode() == 'roarm' else 'roarm'
+    try:
+        set_ui_aim_mode(mode, source='api')
+    except ValueError as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+    return jsonify({
+        'success': True,
+        'ui_aim_mode': get_ui_aim_mode(),
+        'arm_transport': arm_transport(),
+        'module_type': f.get('base_config', {}).get('module_type'),
+        'roarm': (_roarm.status() if _roarm else None),
     })
 
 @app.route('/api/toggle_rtsp', methods=['POST'])
@@ -4452,14 +4797,69 @@ def _seek_publish_cam_aim(pan_deg, tilt_deg=0.0, hw_pan=None, settled=None, live
 
 
 def _seek_look_deg(pan_deg, tilt_deg=0.0, settle_s=None, wait_hw=True, should_stop=None):
-    """Point gimbal (degrees), optionally wait until HW pan confirms arrival, then return.
+    """Point camera for Seek look-around.
 
-    Sequence: command → (confirm pan completed | timeout) → ready for photo.
-    settle_s only used as blind fallback when wait_hw is False.
-    Overlay state is only published via cam_aim (not phase_meta / drive args).
+    PTZ robot: gimbal T:133 (or ROS) with optional HW pan wait.
+    Beast USB RoArm: no PTZ head — skip gimbal pans; use compact arm peek when
+    non-zero pan is requested (limited base joint yaw), then settle for photo.
+    Overlay cam_aim is still published for UI feedback.
     """
     look = _seek_pan_deg_to_rad(pan_deg, tilt_deg)
     _seek_publish_cam_aim(pan_deg, tilt_deg, settled=False, force=True)
+
+    # --- Beast / USB RoArm: do not drive PTZ pan as if a gimbal were present ---
+    if arm_usb_enabled():
+        res = {'path': 'roarm_look', 'ok': True, 'skipped_ptz': True, 'pan_deg': pan_deg}
+        try:
+            if _roarm is not None and abs(float(pan_deg)) > 1.0:
+                # Limited arm base yaw peek (±0.35 rad max) from travel_tuck
+                import math as _math
+                import roarm_ctrl as _rc
+                max_b = 0.35
+                base_r = max(-max_b, min(max_b, float(pan_deg) * _math.pi / 180.0 * 0.4))
+                tuck = _rc.POSES.get('travel_tuck') or _rc.POSES.get('tuck') or {}
+                _roarm.set_joints(
+                    base_r,
+                    float(tuck.get('shoulder', -0.62)),
+                    float(tuck.get('elbow', 0.88)),
+                    float(tuck.get('hand', 3.05)),
+                    spd=0,
+                    acc=10,
+                )
+                res['arm_base_rad'] = base_r
+                time.sleep(settle_s if settle_s is not None else 0.55)
+            else:
+                # Straight / zero pan: keep arm tucked; short settle for photo
+                if _roarm is not None:
+                    try:
+                        _roarm.pose('travel_tuck')
+                    except Exception:
+                        pass
+                time.sleep(settle_s if settle_s is not None else 0.25)
+            olog.info(
+                'seek_look',
+                f'Seek look pan={pan_deg}° via RoArm/base-skip (no PTZ)',
+                pan_deg=pan_deg, path='roarm_look',
+                throttle_s=2.0, throttle_key='seek_roarm_look',
+            )
+        except Exception as e:
+            res = {'path': 'roarm_look', 'ok': False, 'error': str(e), 'skipped_ptz': True}
+            olog.warn('seek_look', f'RoArm seek look failed: {e}', error=str(e))
+            time.sleep(0.2)
+        arrival = {
+            'settled': True,
+            'reason': 'roarm_no_ptz',
+            'hw_pan': None,
+        }
+        _seek_publish_cam_aim(
+            pan_deg, tilt_deg,
+            hw_pan=None,
+            settled=True,
+            force=True,
+        )
+        return look, res, arrival
+
+    # --- PTZ / stock gimbal path ---
     res = _execute_agent_tool('send_gimbal_command', look)
     arrival = None
     if wait_hw:
@@ -6581,7 +6981,8 @@ def cmdline_ctrl(args_string):
                 f'CLI base -c T:{t_code}',
                 command=args_string[:200], T=t_code, source='cli',
             )
-            base.base_json_ctrl(payload)
+            # Route chassis/gimbal/arm the same way as the web socket (USB RoArm, ROS, etc.)
+            _route_json_command(payload)
         elif args[1] == '-r' or args[1] == '--recv':
             if args[2] == 'on':
                 cvf.show_recv_info(True)
@@ -6800,6 +7201,8 @@ def _route_json_command(cmd):
 
     - T:1 / T:13  chassis → serial (if direct) or /cmd_vel (if ros2)
     - T:133 / T:141 gimbal → serial or ROS joint_states + pt controller topic
+    - T:144 arm UI (E/Z/R) → USB RoArm when arm_config.transport=usb_serial, else base UART
+    - USB-native arm T:100/102/105/114/121/210 → USB when transport=usb_serial
     - everything else → serial always
     """
     if not isinstance(cmd, dict):
@@ -6814,6 +7217,10 @@ def _route_json_command(cmd):
         f.get('cmd_config', {}).get('cmd_gimbal_base_ctrl'),
     }
     chassis_types = {1, 13, '1', '13', f.get('cmd_config', {}).get('cmd_movition_ctrl')}
+    arm_ui_type = f.get('cmd_config', {}).get('cmd_arm_ctrl_ui', 144)
+    arm_ui_types = {144, '144', arm_ui_type, str(arm_ui_type) if arm_ui_type is not None else None}
+    # Standalone RoArm USB dialect (proven on this Beast)
+    roarm_raw_types = {100, 102, 105, 114, 121, 210, '100', '102', '105', '114', '121', '210'}
 
     # UI 2s idle heartbeat sends T:1 L=0 R=0; do not clobber an in-flight AI drive
     if t in chassis_types and _ai_motion_lock_active() and _chassis_cmd_is_zero(cmd):
@@ -6823,6 +7230,18 @@ def _route_json_command(cmd):
             'reason': 'ai_motion_active',
             'lock_remaining_s': max(0.0, _ai_motion_lock_until - time.time()),
         }
+
+    # ---- Arm UI stick (T:144 E/Z/R) — USB or base; never steal other robots' PT ----
+    if t in arm_ui_types:
+        result = _route_arm_ui_cmd(cmd)
+        result['mode'] = mode
+        return result
+
+    # ---- USB-native RoArm JSON when configured ----
+    if t in roarm_raw_types and arm_usb_enabled():
+        result = _route_roarm_raw(cmd)
+        result['mode'] = mode
+        return result
 
     # ---- Gimbal / pan-tilt ----
     if t in gimbal_types:
@@ -6895,7 +7314,14 @@ def _route_json_command(cmd):
         base.base_json_ctrl(cmd)
         return {'path': 'direct', 'ok': True, 'mode': mode}
 
-    # Non-motion JSON always serial (lights, module select, etc.)
+    # Lights (T:132): use lights_ctrl so ROS mode publishes /ugv/led_ctrl
+    if t in (132, '132'):
+        io4 = cmd.get('IO4', cmd.get('io4', 0))
+        io5 = cmd.get('IO5', cmd.get('io5', 0))
+        base.lights_ctrl(io4, io5)
+        return {'path': 'lights', 'ok': True, 'mode': mode, 'IO4': io4, 'IO5': io5}
+
+    # Non-motion JSON always serial (module select, etc.)
     # Log interesting T codes only (not high-rate noise)
     try:
         t_int = int(t) if t is not None else None
@@ -7091,19 +7517,33 @@ def cmd_on_boot():
 
 # Run the Flask app
 if __name__ == "__main__":
-    # lights off
-    base.lights_ctrl(255, 255)
-    
+    # lights off (stock tree had a misleading "lights off" comment on 255,255)
+    base.lights_ctrl(0, 0)
+
     # play a audio file in /sounds/robot_started/
     audio_ctrl.play_random_audio("robot_started", False)
 
     # update the size of videos and pictures
     si.update_folder(thisPath)
 
-    # pt/arm looks forward
-    if f['base_config']['module_type'] == 1:
-        base.base_json_ctrl({"T":f['cmd_config']['cmd_arm_ctrl_ui'],"E":f['args_config']['arm_default_e'],"Z":f['args_config']['arm_default_z'],"R":f['args_config']['arm_default_r']})
+    # pt/arm looks forward — USB RoArm prefers compact travel_tuck (not inverted-L T:100)
+    if arm_usb_enabled() and _roarm is not None:
+        try:
+            ok, _ = _roarm.pose('travel_tuck')
+            olog.info('roarm', f'Boot pose travel_tuck ok={ok}', ok=ok, pose='travel_tuck')
+        except Exception as e:
+            olog.warn('roarm', f'Boot travel_tuck failed: {e}', error=str(e))
+    elif f['base_config']['module_type'] == 1:
+        home_arm = {
+            "T": f['cmd_config']['cmd_arm_ctrl_ui'],
+            "E": f['args_config']['arm_default_e'],
+            "Z": f['args_config']['arm_default_z'],
+            "R": f['args_config']['arm_default_r'],
+        }
+        # Stock base-UART arm path (integrated module kits)
+        _route_arm_ui_cmd(home_arm)
     else:
+        # Original pan/tilt home for gimbal robots (module_type 2, etc.)
         base.gimbal_ctrl(0, 0, 200, 10)
 
     # feedback loop starts

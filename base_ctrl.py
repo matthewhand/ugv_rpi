@@ -183,6 +183,20 @@ class BaseController:
 
 	def release_serial_for_ros(self):
 		"""Close UART so ugv_bringup / ROS can own /dev/ttyAMA0 (or serial0)."""
+		# Kill base/head LEDs before releasing — light cmds are dropped after close.
+		try:
+			if self.ser is not None and getattr(self.ser, 'is_open', False):
+				off = {"T": 132, "IO4": 0, "IO5": 0}
+				with self._ser_lock:
+					ser = self.ser
+					if ser and getattr(ser, 'is_open', False):
+						ser.write((json.dumps(off) + '\n').encode("utf-8"))
+						ser.flush()
+				self.base_light_status = 0
+				self.head_light_status = 0
+				time.sleep(0.05)
+		except Exception as e:
+			print(f"[base_ctrl] pre-release lights off failed: {e}")
 		with self._ser_lock:
 			if self.ser is not None:
 				try:
@@ -395,10 +409,26 @@ class BaseController:
 
 
 	def lights_ctrl(self, pwmA, pwmB):
-		data = {"T":132,"IO4":pwmA,"IO5":pwmB}
-		self.send_command(data)
+		"""12V switch / base+head LEDs via T:132.
+
+		In ROS mode Flask does not own UART, so T:132 is published to
+		/ugv/led_ctrl for ugv_driver (same contract as stock ugv_bringup).
+		"""
+		pwmA = int(pwmA)
+		pwmB = int(pwmB)
 		self.base_light_status = pwmA
 		self.head_light_status = pwmB
+		data = {"T": 132, "IO4": pwmA, "IO5": pwmB}
+		if self.serial_released_for_ros or not self.ser:
+			try:
+				import ros_motion
+				result = ros_motion.publish_lights(pwmA, pwmB)
+				if not result.get('ok'):
+					print(f"[base_ctrl.lights_ctrl] ROS light route failed: {result}")
+			except Exception as e:
+				print(f"[base_ctrl.lights_ctrl] cannot send lights (no serial/ROS): {e}")
+			return
+		self.send_command(data)
 
 
 	def base_lights_ctrl(self):
@@ -412,14 +442,22 @@ class BaseController:
 		self.release_serial_for_ros()
 
 	def breath_light(self, input_time):
+		# Abort early if UART is (or becomes) released for ROS mid-animation.
 		breath_start_time = time.time()
 		while time.time() - breath_start_time < input_time:
+			if self.serial_released_for_ros or not self.ser:
+				break
 			for i in range(0, 128, 10):
-				self.lights_ctrl(i, 128-i)
+				if self.serial_released_for_ros or not self.ser:
+					break
+				self.lights_ctrl(i, 128 - i)
 				time.sleep(0.1)
 			for i in range(0, 128, 10):
-				self.lights_ctrl(128-i, i)
+				if self.serial_released_for_ros or not self.ser:
+					break
+				self.lights_ctrl(128 - i, i)
 				time.sleep(0.1)
+		# Always request off (serial or ROS led topic)
 		self.lights_ctrl(0, 0)
 
 

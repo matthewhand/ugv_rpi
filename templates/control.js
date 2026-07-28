@@ -11,6 +11,11 @@ var re_none, re_capt, re_reco, led_off, led_aut, led_ton, base_of, base_on;
 var head_ct, base_ct;
 var s_panid, release, set_mid, s_tilid;
 var armZ, armR, armE;
+// UI aim: 'roarm' → stick maps E/Z/R (arm); 'pt' → original pan/tilt gimbal (T:133).
+// Loaded from /api/ui_aim_mode; other robots stay on PT via module_type != 1 + aim=pt.
+var ui_aim_mode = 'pt';
+var arm_transport = 'base_uart';
+var main_type, module_type;
 
 var detect_type = 101, led_mode = 102, detect_react = 103, picture_size = 104, video_size = 105, cpu_load = 106;
 var cpu_temp = 107, ram_usage = 108, pan_angle = 109, tilt_angle = 110, wifi_rssi = 111, base_voltage = 112, video_fps = 113;
@@ -43,6 +48,17 @@ fetch('/config')
 
       main_type = yamlObject.base_config.main_type;
       module_type = yamlObject.base_config.module_type;
+      try {
+        if (yamlObject.arm_config && yamlObject.arm_config.transport) {
+          arm_transport = String(yamlObject.arm_config.transport).toLowerCase();
+        }
+      } catch (e) {}
+      // Default aim before API responds: RoArm when module_type=1 or USB transport
+      if (module_type == 1 || arm_transport.indexOf('usb') >= 0) {
+        ui_aim_mode = 'roarm';
+      } else {
+        ui_aim_mode = 'pt';
+      }
 
       max_res = yamlObject.code.max_res;
       mid_res = yamlObject.code.mid_res;
@@ -477,48 +493,67 @@ document.addEventListener('mousewheel', (e) => {
         cmdJsonCmd({"T":cmd_arm_ctrl_ui,"E":armE,"Z":armZ,"R":armR});
     }
 }, { passive: false });
+function useRoArmOverlay() {
+    // Prefer explicit aim mode; fall back to stock module_type==1 for older servers.
+    if (ui_aim_mode === 'roarm') return true;
+    if (ui_aim_mode === 'pt') return false;
+    return module_type == 1;
+}
+
+function updatePanTiltOverlay(panDeg, tiltDeg) {
+    // Shared raw pan/tilt scale UI (used by both PT gimbal and RoArm aim modes).
+    var x_cmd = Math.max(-180, Math.min(panDeg, 180));
+    var y_cmd = Math.max(-30, Math.min(tiltDeg, 90));
+
+    var panEl = document.getElementById("Pan");
+    if (panEl) panEl.innerHTML = x_cmd.toFixed(2);
+    var panScale = document.getElementById("pan_scale");
+    if (panScale) panScale.style.transform = `rotate(${-x_cmd}deg)`;
+
+    var tiltNum = document.getElementById("Tilt");
+    if (!tiltNum) return;
+    var tiltNumPanel = tiltNum.getBoundingClientRect();
+    var tiltNumMove = y_cmd;
+    tiltNum.innerHTML = y_cmd.toFixed(2);
+
+    var pointer = document.getElementById('tilt_scale_pointer');
+    var tiltScaleOut = document.getElementById('tilt_scale');
+    var tiltScalediv = document.getElementById('tilt_scalediv');
+    if (!pointer || !tiltScaleOut || !tiltScalediv) return;
+    var tiltScaleBase = tiltScaleOut.getBoundingClientRect();
+    var tiltScaleDivBase = tiltScalediv.getBoundingClientRect();
+    var pointerMoveY = tiltScaleBase.height / 135;
+    pointer.style.transform = `translate(${tiltScaleDivBase.width}px, ${pointerMoveY * (90 - tiltNumMove) - tiltNumPanel.height / 2}px)`;
+}
+
 function joyStickCtrl(inputX, inputY) {
-    if (module_type == 1) {
-        var x_cmd = Math.max(-180, Math.min(inputX/7, 180));
-        console.log(inputY);
-        // cmdSend(144, -inputX/7, -inputY/2);
-        var armLimit = pointInCircle(510, armE, -inputY/2);
+    if (useRoArmOverlay()) {
+        // RoArm position via stock E/Z/R UI → server routes to USB or base UART.
+        var x_cmd = Math.max(-180, Math.min(inputX / 7, 180));
+        var armLimit = pointInCircle(510, armE, -inputY / 2);
         armE = armLimit.x;
         armZ = armLimit.y;
-        armR = -inputX/7;
-        cmdJsonCmd({"T":cmd_arm_ctrl_ui,"E":armE,"Z":armZ,"R":armR});
+        armR = -inputX / 7;
+        cmdJsonCmd({"T": cmd_arm_ctrl_ui, "E": armE, "Z": armZ, "R": armR});
 
-        RotateAngle = document.getElementById("Pan").innerHTML = x_cmd.toFixed(2);
-        var panScale = document.getElementById("pan_scale");
-        panScale.style.transform = `rotate(${-RotateAngle}deg)`;
+        // Map arm R→pan, Z→tilt-ish for the raw overlay pointers (same UI as PT).
+        var z_as_tilt = Math.max(-30, Math.min(armZ * 0.6, 90));
+        updatePanTiltOverlay(x_cmd, z_as_tilt);
     } else {
+        // Original pan/tilt gimbal logic (other robots / Aim: PT).
         if (steady_mode == true) {
             inputX = 0;
         }
-        var x_cmd = Math.max(-180, Math.min(inputX/2.5, 180));
-        var y_cmd = Math.max(-30, Math.min(-inputY/2.5, 90));
+        var x_cmd = Math.max(-180, Math.min(inputX / 2.5, 180));
+        var y_cmd = Math.max(-30, Math.min(-inputY / 2.5, 90));
 
         if (steady_mode == false) {
-            cmdJsonCmd({"T":cmd_gimbal_ctrl,"X":inputX/2.5,"Y":-inputY/2.5,"SPD":0,"ACC":128});
+            cmdJsonCmd({"T": cmd_gimbal_ctrl, "X": inputX / 2.5, "Y": -inputY / 2.5, "SPD": 0, "ACC": 128});
         } else {
             steadyCtrl(1, inputY);
         }
 
-        RotateAngle = document.getElementById("Pan").innerHTML = x_cmd.toFixed(2);
-        var panScale = document.getElementById("pan_scale");
-        panScale.style.transform = `rotate(${-RotateAngle}deg)`;
-
-        var tiltNum = document.getElementById("Tilt");
-        var tiltNumPanel = tiltNum.getBoundingClientRect();
-        var tiltNumMove = tiltNum.innerHTML = y_cmd.toFixed(2);;
-
-        var pointer = document.getElementById('tilt_scale_pointer');
-        var tiltScaleOut = document.getElementById('tilt_scale');
-        var tiltScaleBase = tiltScaleOut.getBoundingClientRect();
-        var tiltScalediv = document.getElementById('tilt_scalediv');
-        var tiltScaleDivBase = tiltScalediv.getBoundingClientRect();
-        var pointerMoveY = tiltScaleBase.height/135;
-        pointer.style.transform = `translate(${tiltScaleDivBase.width}px, ${pointerMoveY*(90 - tiltNumMove)-tiltNumPanel.height/2}px)`;
+        updatePanTiltOverlay(x_cmd, y_cmd);
     }
 }
 
@@ -1054,7 +1089,7 @@ document.onkeyup = function (event) {
 }
 
 function lookAhead() {
-    if (module_type == 1) {
+    if (useRoArmOverlay()) {
         armZ = arm_default_z; 
         armR = arm_default_r;
         armE = arm_default_e;
@@ -1063,6 +1098,7 @@ function lookAhead() {
         stickSendX = 0;
         stickSendY = -arm_default_z;
         cmdJsonCmd({"T":cmd_arm_ctrl_ui,"E":armE,"Z":armZ,"R":armR});
+        updatePanTiltOverlay(0, Math.max(-30, Math.min(armZ * 0.6, 90)));
     } else {
         armZ = arm_default_z; 
         armR = arm_default_r;
@@ -1074,6 +1110,59 @@ function lookAhead() {
         joyStickCtrl(0, 0);
     }
 }
+
+function paintUiAimButton() {
+    var btn = document.getElementById('ui-aim-btn');
+    if (!btn) return;
+    // Show toggle when this box can do RoArm (USB transport or module_type 1).
+    var show = (module_type == 1) || (String(arm_transport).indexOf('usb') >= 0);
+    btn.style.display = show ? '' : 'none';
+    if (ui_aim_mode === 'roarm') {
+        btn.textContent = 'Aim: RoArm';
+        btn.style.color = '#7dd3fc';
+        btn.title = 'Overlay stick drives RoArm position (E/Z/R → USB/base). Click for original pan/tilt (T:133).';
+    } else {
+        btn.textContent = 'Aim: PT';
+        btn.style.color = '#fbbf24';
+        btn.title = 'Overlay stick drives pan/tilt gimbal (T:133). Click for RoArm position.';
+    }
+}
+
+function toggleUiAimMode() {
+    fetch('/api/ui_aim_mode', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({}),
+    })
+    .then(function (r) { return r.json(); })
+    .then(function (data) {
+        if (data && data.ui_aim_mode) {
+            ui_aim_mode = data.ui_aim_mode;
+        }
+        if (data && data.arm_transport) {
+            arm_transport = data.arm_transport;
+        }
+        paintUiAimButton();
+        // Center whichever target we switched to
+        lookAhead();
+    })
+    .catch(function (e) { console.error('ui_aim_mode', e); });
+}
+
+function refreshUiAimFromServer() {
+    fetch('/api/ui_aim_mode')
+    .then(function (r) { return r.json(); })
+    .then(function (data) {
+        if (data && data.ui_aim_mode) ui_aim_mode = data.ui_aim_mode;
+        if (data && data.arm_transport) arm_transport = data.arm_transport;
+        if (data && data.module_type != null) module_type = data.module_type;
+        paintUiAimButton();
+    })
+    .catch(function () { paintUiAimButton(); });
+}
+
+// Sync aim mode after config.yaml load settles
+setTimeout(refreshUiAimFromServer, 400);
 
 document.getElementById('sendButton').addEventListener('click', function() {
     var command = document.getElementById('commandInput').value;
@@ -1206,7 +1295,8 @@ function readGamepad() {
         last_gp_picture = gp.buttons[8].pressed;
       }
 
-      if (module_type != 1) {
+      // Gamepad right-stick pan/tilt only when Aim is PT (original gimbal path).
+      if (!useRoArmOverlay()) {
           if(last_gp_rt1 != gp.buttons[5].pressed){
             last_gp_rt1 = gp.buttons[5].pressed;
             gp_pt_x = 0;
@@ -1214,22 +1304,7 @@ function readGamepad() {
             cmdJsonCmd({"T":cmd_gimbal_ctrl,"X":gp_pt_x,"Y":gp_pt_y,"SPD":0,"ACC":0});
             last_gp_pt_x = gp_pt_x;
             last_gp_pt_y = gp_pt_y;
-
-            RotateAngle = document.getElementById("Pan").innerHTML = gp_pt_x.toFixed(2);
-            var panScale = document.getElementById("pan_scale");
-            panScale.style.transform = `rotate(${-RotateAngle}deg)`;
-
-            var tiltNum = document.getElementById("Tilt");
-            var tiltNumPanel = tiltNum.getBoundingClientRect();
-            var tiltNumMove = tiltNum.innerHTML = gp_pt_y.toFixed(2);;
-
-            var pointer = document.getElementById('tilt_scale_pointer');
-            var tiltScaleOut = document.getElementById('tilt_scale');
-            var tiltScaleBase = tiltScaleOut.getBoundingClientRect();
-            var tiltScalediv = document.getElementById('tilt_scalediv');
-            var tiltScaleDivBase = tiltScalediv.getBoundingClientRect();
-            var pointerMoveY = tiltScaleBase.height/135;
-            pointer.style.transform = `translate(${tiltScaleDivBase.width}px, ${pointerMoveY*(90 - tiltNumMove)-tiltNumPanel.height/2}px)`;
+            updatePanTiltOverlay(gp_pt_x, gp_pt_y);
           }
 
           if(last_gp_rt2 != gp.buttons[7].pressed){
