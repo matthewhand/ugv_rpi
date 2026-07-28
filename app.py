@@ -450,6 +450,9 @@ def api_status():
         'esp32_wifi_stopped': bool(_esp32_wifi_session.get('stopped')),
         'rosbridge_ok': br_ok,
         'ros_autoheal': heal,
+        # Effective signs used by body_to_hw_* (UI/AI forward → wheel cmd)
+        'drive_linear_sign': _drive_sign('linear'),
+        'drive_angular_sign': _drive_sign('angular'),
     })
 
 @app.route('/api/toggle_rtsp', methods=['POST'])
