@@ -134,6 +134,23 @@
       object-fit: cover; border-radius: 8px;
       background: #000; border: 1px solid var(--border);
     }
+    #snap-preview:not([src]), #snap-preview[src=""], #snap-preview[hidden] {
+      display: none !important;
+    }
+    .video-still.is-empty .still-placeholder {
+      display: flex; align-items: center; justify-content: center;
+      min-height: 100px; border: 1px dashed var(--border); border-radius: 8px;
+      color: var(--muted); font-size: 12px; background: #12151d;
+    }
+    .video-still:not(.is-empty) .still-placeholder { display: none; }
+    @media (max-height: 500px), (max-width: 900px) and (orientation: landscape) {
+      .cfg { display: none; }
+      .cfg.open { display: block; position: absolute; z-index: 20; inset: 48px 0 auto 0; max-height: 70vh; }
+      .wrap { grid-template-columns: 1fr; }
+      .video-row { grid-template-columns: 1fr; max-height: 42vh; }
+      #live-preview { max-height: 160px; }
+      .snap-meta { display: none; }
+    }
     .video-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
     .snap-meta { font-size: 12px; color: var(--muted); line-height: 1.45; }
     .snap-meta strong { color: var(--ok); }
@@ -249,9 +266,10 @@
             <span class="snap-meta" id="live-info">Same pipeline as the main dashboard `/video_feed`.</span>
           </div>
         </div>
-        <div class="video-still">
+        <div class="video-still is-empty" id="video-still-wrap">
           <div class="label">Still for LLM attach</div>
-          <img id="snap-preview" alt="snapshot for LLM" />
+          <div class="still-placeholder">No still yet — Grab still now</div>
+          <img id="snap-preview" alt="" hidden />
           <div class="snap-meta">
             <div>Last grab: <strong id="snap-status">none</strong></div>
             <div id="snap-info">Used when “Attach live camera snapshot” is checked (or after Grab).</div>
@@ -579,13 +597,21 @@
       }
     }
 
+    function showSnap(dataUrl) {
+      if (!snapPreview || !dataUrl) return;
+      snapPreview.hidden = false;
+      snapPreview.src = dataUrl;
+      const wrap = document.getElementById('video-still-wrap');
+      if (wrap) wrap.classList.remove('is-empty');
+    }
+
     async function refreshSnapshot() {
       snapStatus.textContent = 'loading…';
       try {
         const r = await fetch('/api/snapshot', { headers: aiHeaders() });
         const d = await r.json();
         if (!d.success) throw new Error(d.error || 'snapshot failed');
-        snapPreview.src = d.data_url;
+        showSnap(d.data_url);
         snapStatus.textContent = 'ok';
         snapInfo.textContent = `${d.bytes} bytes JPEG from live pipeline`;
       } catch (e) {
@@ -630,7 +656,7 @@
           return;
         }
         if (d.snapshot_data_url) {
-          snapPreview.src = d.snapshot_data_url;
+          showSnap(d.snapshot_data_url);
           snapStatus.textContent = 'attached';
           const bytes = d.snapshot_bytes || 0;
           snapInfo.textContent = `sent ${bytes} bytes to ${d.model || 'model'}`;

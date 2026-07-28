@@ -6,7 +6,7 @@
     <script src="./jquery-3.7.1.min.js"></script>
     <script src="./js-yaml.min.js"></script>
     <script src="./socket.io.js"></script>
-    <link rel="stylesheet" type="text/css" href="./style.css?v=pan-overlay-4">
+    <link rel="stylesheet" type="text/css" href="./style.css?v=ui-polish-1">
     <style type="text/css">
       .seek-pano-card {
         margin-top: 8px;
@@ -45,6 +45,22 @@
       .seek-pano-img:not([src]), .seek-pano-img[src=""], .seek-pano-img[src="#"] {
         display: none !important;
       }
+      .seek-pano-img-wrap::after {
+        content: "No scan yet — starts after first triple-view capture";
+        position: absolute;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: #6b7280;
+        font-size: 11px;
+        pointer-events: none;
+        text-align: center;
+        padding: 8px;
+      }
+      .seek-pano-img-wrap:has(.seek-pano-img[src]:not([src=""]):not([src="#"]))::after {
+        display: none;
+      }
       .seek-target-badge {
         background: #00e676;
         color: #000;
@@ -82,12 +98,12 @@
         title="Seek is driving the robot. Click to emergency-stop."
         onclick="ugvEmergencyStop()">Seek running</button>
       <div class="ugv-nav-toggles" id="ugv-nav-toggles">
-        <button id="rtsp-toggle-btn" class="normal_btn" onclick="toggleRTSP()" style="padding: 6px 12px; font-size: 12px; background: #222; color: #ff5555; border: 1px solid #555; border-radius: 4px; cursor: pointer;">RTSP Stream: OFF</button>
-        <button id="motor-toggle-btn" class="normal_btn" onclick="toggleMotors()" style="padding: 6px 12px; font-size: 12px; background: #222; color: #5b8cff; border: 1px solid #555; border-radius: 4px; cursor: pointer;" title="Toggle routing for chassis + pan/tilt: Direct serial (UART) or ROS 2 relay (rosbridge).">Control: ROS 2 relay</button>
-        <button id="chassis-heartbeat-btn" class="normal_btn" onclick="toggleChassisHeartbeat()" style="padding: 6px 12px; font-size: 12px; background: #222; color: #ffaa55; border: 1px solid #555; border-radius: 4px; cursor: pointer;" title="Every 2s the UI re-sends last wheel cmd (idle = stop). Turn OFF for AI timed drives so the heartbeat does not cut them short.">Idle heartbeat: ON</button>
-        <button id="esp32-wifi-btn" class="normal_btn" onclick="toggleEsp32Wifi()" style="padding: 6px 12px; font-size: 12px; background: #222; color: #ffaa55; border: 1px solid #555; border-radius: 4px; cursor: pointer;" title="Session-only: send serial T:408 to stop ESP32 WiFi (SoftAP UGV). Does NOT change boot config — AP returns after ESP32 reboot. Never uses T:401 (persistent off).">ESP32 WiFi: on?</button>
-        <button type="button" id="ops-log-btn" class="normal_btn" onclick="toggleOpsLogPane()" style="padding: 6px 12px; font-size: 12px; background: #222; color: #c4b5fd; border: 1px solid #555; border-radius: 4px; cursor: pointer;" title="Show operational app log (control mode, WiFi, AI motion, errors).">App log</button>
-        <button type="button" id="twin-btn" class="normal_btn" onclick="toggleTwinPane()" style="padding: 6px 12px; font-size: 12px; background: #1f2538; color: #5b8cff; border: 1px solid #5b8cff; border-radius: 4px; cursor: pointer; font-weight: 600;" title="Open 3D digital twin as a popup panel (same tab).">3D Twin</button>
+        <button type="button" id="rtsp-toggle-btn" class="ugv-nav-chip is-off" onclick="toggleRTSP()" title="RTSP stream: OFF">RTSP</button>
+        <button type="button" id="motor-toggle-btn" class="ugv-nav-chip" onclick="toggleMotors()" title="Motion path: Direct serial (UART) or ROS 2 relay (rosbridge).">ROS2</button>
+        <button type="button" id="chassis-heartbeat-btn" class="ugv-nav-chip is-on" onclick="toggleChassisHeartbeat()" title="Idle heartbeat: every 2s re-send last wheel cmd (idle = stop). OFF for AI timed drives.">HB</button>
+        <button type="button" id="esp32-wifi-btn" class="ugv-nav-chip is-warn" onclick="toggleEsp32Wifi()" title="Session-only ESP32 SoftAP stop (T:408). Does not change boot config.">WiFi</button>
+        <button type="button" id="ops-log-btn" class="ugv-nav-chip" onclick="toggleOpsLogPane()" title="Operational app log (control mode, WiFi, AI motion, errors).">Log</button>
+        <button type="button" id="twin-btn" class="ugv-nav-chip ugv-nav-chip--accent" onclick="toggleTwinPane()" title="Open 3D digital twin as a popup panel.">Twin</button>
       </div>
     </nav>
 
@@ -431,7 +447,9 @@
                 <input type="checkbox" id="chat-attach" checked /> Attach still on send
               </label>
             </div>
-            <img class="ugv-preview-img" id="chat-snap-preview" alt="last still" style="max-height:160px" />
+            <div class="ugv-still-slot is-empty" id="chat-still-slot">
+              <img class="ugv-preview-img" id="chat-snap-preview" alt="" hidden style="max-height:160px" />
+            </div>
           </div>
           <div class="ugv-panel-card">
             <h2>AI Vision Chat</h2>
@@ -741,8 +759,8 @@
         <div style="background-image: url('./img/grey/delete.svg');"></div>
     </footer>
     <!-- <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.7.0/jquery.min.js"></script> -->
-    <script src="./modes.js?v=roi-stop-1"></script>
-    <script src="./control.js?v=roi-stop-1"></script>
+    <script src="./modes.js?v=ui-polish-1"></script>
+    <script src="./control.js?v=ui-polish-1"></script>
     <script src="./main.js"></script>
 </body>
 </html>

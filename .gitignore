@@ -12,3 +12,7 @@ templates/videos/video*
 *.log
 hailort.log
 ai_proof/
+
+# Playwright UI screenshots & local tooling
+ui_shots/
+.tools/

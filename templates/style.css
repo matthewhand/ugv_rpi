@@ -1067,6 +1067,9 @@ ul.video-list li a:hover div .normal_btn_play::before{background-image: url('./i
   border: 1px solid #2a2f3d;
   border-radius: 10px;
   box-sizing: border-box;
+  position: sticky;
+  top: 0;
+  z-index: 1000;
 }
 .ugv-navbar .nav-brand {
   font-weight: 700;
@@ -1088,6 +1091,7 @@ ul.video-list li a:hover div .normal_btn_play::before{background-image: url('./i
   background: transparent;
   color: #9aa3b2;
   padding: 6px 14px;
+  min-height: 32px;
   border-radius: 6px;
   cursor: pointer;
   font: inherit;
@@ -1108,28 +1112,57 @@ ul.video-list li a:hover div .normal_btn_play::before{background-image: url('./i
   margin-left: auto;
   align-items: center;
 }
+/* Compact system chips — neutral base, state via class (not rainbow inline) */
+.ugv-nav-chip,
 .ugv-nav-toggles .normal_btn {
-  padding: 6px 10px !important;
+  padding: 5px 9px !important;
   font-size: 11px !important;
+  font-weight: 600 !important;
+  font-family: inherit !important;
+  border-radius: 6px !important;
+  border: 1px solid #3a4155 !important;
+  background: #1a1d27 !important;
+  color: #c4d0e0 !important;
+  white-space: nowrap;
+  line-height: 1.2;
+  cursor: pointer;
+  min-height: 30px;
+}
+.ugv-nav-chip.is-on {
+  color: #3dd68c !important;
+  border-color: #2a7a52 !important;
+}
+.ugv-nav-chip.is-off {
+  color: #ff6b6b !important;
+  border-color: #5c2a32 !important;
+}
+.ugv-nav-chip.is-warn {
+  color: #fbbf24 !important;
+  border-color: #5c4a2a !important;
+}
+.ugv-nav-chip--accent {
+  color: #5b8cff !important;
+  border-color: #3a5a9a !important;
 }
 /* Global emergency STOP — always visible in navbar */
 .ugv-global-stop {
   border: 1px solid #ff4d4f;
-  background: #3b1214;
-  color: #ff6b6b;
+  background: #4a1014;
+  color: #ff8a8a;
   font: inherit;
   font-size: 13px;
   font-weight: 800;
-  letter-spacing: 0.06em;
-  padding: 8px 16px;
-  min-height: 36px;
-  min-width: 64px;
+  letter-spacing: 0.08em;
+  padding: 8px 18px;
+  min-height: 38px;
+  min-width: 72px;
   border-radius: 8px;
   cursor: pointer;
-  box-shadow: 0 0 0 1px rgba(255, 77, 79, 0.25);
+  box-shadow: 0 0 0 1px rgba(255, 77, 79, 0.35), 0 2px 8px rgba(0, 0, 0, 0.35);
+  flex-shrink: 0;
 }
 .ugv-global-stop:hover:not(:disabled) {
-  background: #5c181c;
+  background: #6b181c;
   color: #fff;
 }
 .ugv-global-stop:disabled {
@@ -1149,6 +1182,7 @@ ul.video-list li a:hover div .normal_btn_play::before{background-image: url('./i
   border-radius: 999px;
   cursor: pointer;
   animation: ugv-seek-pulse 1.1s ease-out infinite;
+  flex-shrink: 0;
 }
 .ugv-seek-running-pill[hidden] {
   display: none !important;
@@ -1156,6 +1190,66 @@ ul.video-list li a:hover div .normal_btn_play::before{background-image: url('./i
 .ugv-seek-running-pill:hover {
   background: #123522;
   color: #7dffb3;
+}
+/* Empty still slots (Chat / AI) — hide broken black boxes */
+.ugv-still-slot.is-empty::after {
+  content: "No still yet — Grab still";
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 72px;
+  border: 1px dashed #2a2f3d;
+  border-radius: 8px;
+  color: #6b7280;
+  font-size: 12px;
+  background: #12151d;
+}
+.ugv-still-slot.is-empty img[hidden],
+.ugv-preview-img[hidden] {
+  display: none !important;
+}
+/* Phone / short landscape: single compact sticky row, chips scroll, STOP stays */
+@media (max-height: 500px), (max-width: 900px) and (orientation: landscape) {
+  .ugv-navbar {
+    flex-wrap: nowrap;
+    gap: 6px;
+    padding: 6px 8px;
+    margin-bottom: 6px;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+  .ugv-navbar::-webkit-scrollbar { display: none; }
+  .ugv-navbar .nav-brand { display: none; }
+  .ugv-mode-tabs button { padding: 6px 10px; min-height: 34px; }
+  .ugv-global-stop {
+    min-width: 56px;
+    padding: 8px 14px;
+    order: 50;
+  }
+  .ugv-nav-toggles {
+    margin-left: 0;
+    flex-wrap: nowrap;
+    gap: 4px;
+    flex: 1 1 auto;
+  }
+  .ugv-seek-running-pill { font-size: 10px; padding: 5px 8px; }
+  .ugv-seek-log-card {
+    max-height: 120px;
+    overflow: hidden;
+  }
+  .ugv-seek-top {
+    min-height: 0 !important;
+  }
+}
+@media (max-width: 900px) {
+  .ugv-seek-log-card {
+    max-height: 160px;
+  }
+  .ugv-chat-log, .ugv-seek-log {
+    min-height: 100px;
+    max-height: min(280px, 40vh);
+  }
 }
 .mode-panel { display: none; }
 .mode-panel.active { display: block; }

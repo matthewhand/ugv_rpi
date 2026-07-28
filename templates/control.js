@@ -806,17 +806,35 @@ function heartbeat_send(){
 }
 setInterval(heartbeat_send, 2000);
 
+function _setNavChip(btn, label, state, title) {
+    if (!btn) return;
+    btn.textContent = label;
+    if (title) btn.title = title;
+    btn.classList.remove('is-on', 'is-off', 'is-warn');
+    if (state) btn.classList.add(state);
+    // Prefer class-based chrome; clear leftover inline color from older builds
+    btn.style.color = '';
+    btn.style.background = '';
+    btn.style.borderColor = '';
+}
+
 function updateChassisHeartbeatBtn() {
     var btn = document.getElementById('chassis-heartbeat-btn');
     if (!btn) return;
     if (chassis_heartbeat_enabled) {
-        btn.textContent = 'Idle heartbeat: ON';
-        btn.style.color = '#3dd68c';
-        btn.title = 'Every 2s the UI re-sends last wheel cmd (idle = L0/R0 stop). This is the safety default for manual teleop. Turn OFF while using AI timed drives so heartbeats do not cut them short.';
+        _setNavChip(
+            btn,
+            'HB',
+            'is-on',
+            'Idle heartbeat ON: every 2s re-send last wheel cmd (idle = stop). Safety default for manual teleop.'
+        );
     } else {
-        btn.textContent = 'Idle heartbeat: OFF';
-        btn.style.color = '#ffaa55';
-        btn.title = '2s chassis heartbeat disabled — good for AI timed moves. Stick/keyboard still work; only the periodic resend is off. Use STOP to halt AI/Seek motion.';
+        _setNavChip(
+            btn,
+            'HB off',
+            'is-warn',
+            'Idle heartbeat OFF: good for AI timed drives. Use STOP to halt AI/Seek motion.'
+        );
     }
 }
 
@@ -1522,11 +1540,9 @@ function toggleRTSP() {
     .then(data => {
         var btn = document.getElementById('rtsp-toggle-btn');
         if (data.enable_rtsp_stream) {
-            btn.innerHTML = 'RTSP Stream: ON';
-            btn.style.color = '#55ff55';
+            _setNavChip(btn, 'RTSP', 'is-on', 'RTSP stream: ON');
         } else {
-            btn.innerHTML = 'RTSP Stream: OFF';
-            btn.style.color = '#ff5555';
+            _setNavChip(btn, 'RTSP', 'is-off', 'RTSP stream: OFF');
         }
     });
 }
@@ -1536,14 +1552,22 @@ function updateControlModeBtn(mode) {
     if (!btn) return;
     // Unified: both chassis + PTZ route via this mode (see app._route_json_command).
     // ros2 also RELEASES the UART so ugv_bringup can open /dev/ttyAMA0.
+    btn.classList.remove('ugv-nav-chip--accent');
     if (mode === 'direct') {
-        btn.innerHTML = 'Control: Direct serial';
-        btn.style.color = '#55ff55';
-        btn.title = 'Flask owns UART → ESP32 (wheels + pan/tilt). Click for ROS 2 (releases UART to ugv_bringup).';
+        _setNavChip(
+            btn,
+            'Direct',
+            'is-on',
+            'Motion path: Direct serial (Flask owns UART). Click for ROS 2 (releases UART to ugv_bringup).'
+        );
     } else {
-        btn.innerHTML = 'Control: ROS 2 relay';
-        btn.style.color = '#5b8cff';
-        btn.title = 'Flask releases UART; sticks → rosbridge → ugv_bringup → ESP32. Click to reclaim serial.';
+        _setNavChip(
+            btn,
+            'ROS2',
+            '',
+            'Motion path: ROS 2 relay (Flask releases UART). Click to reclaim serial.'
+        );
+        btn.classList.add('ugv-nav-chip--accent');
     }
 }
 
@@ -1662,19 +1686,28 @@ function updateEsp32WifiBtn(stopped) {
     var btn = document.getElementById('esp32-wifi-btn');
     if (!btn) return;
     if (stopped) {
-        btn.innerHTML = 'ESP32 WiFi: OFF (session)';
-        btn.style.color = '#ff5555';
-        btn.title = 'Session stop was sent (T:408). Click to re-enable SoftAP for this power cycle (T:402). Boot config unchanged — UGV AP returns after ESP32 reboot.';
+        _setNavChip(
+            btn,
+            'WiFi off',
+            'is-off',
+            'ESP32 SoftAP stopped this session (T:408). Click to re-enable (T:402). Boot config unchanged.'
+        );
+        btn.dataset.wifiStopped = '1';
     } else {
-        btn.innerHTML = 'ESP32 WiFi: stop (session)';
-        btn.style.color = '#ffaa55';
-        btn.title = 'Click to send serial T:408 CMD_WIFI_STOP. Runtime only — does NOT persist. AP SSID returns after ESP32 power cycle. Never uses T:401.';
+        _setNavChip(
+            btn,
+            'WiFi',
+            'is-warn',
+            'Click to stop ESP32 SoftAP this power cycle only (T:408). Never persists boot config.'
+        );
+        btn.dataset.wifiStopped = '0';
     }
 }
 
 function toggleEsp32Wifi() {
     var btn = document.getElementById('esp32-wifi-btn');
-    var wantStop = !(btn && /OFF \(session\)/i.test(btn.innerHTML));
+    var alreadyOff = btn && (btn.dataset.wifiStopped === '1' || /WiFi off/i.test(btn.textContent || ''));
+    var wantStop = !alreadyOff;
     var action = wantStop ? 'stop' : 'start_ap';
     if (wantStop && !confirm(
         'Stop ESP32 WiFi for this power cycle only?\n\n' +
