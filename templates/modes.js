@@ -416,6 +416,33 @@
       start.title = running ? 'Seek already running — Stop first' : '';
     }
     if (check) check.disabled = !!running;
+    // body class drives sticky log expand + config chrome
+    try {
+      document.body.classList.toggle('seek-running', !!running);
+    } catch (e) {}
+    // Lock config while running so UI doesn't imply mid-run retarget
+    var lockIds = [
+      'seek-mode-detector',
+      'seek-mode-detector-llm',
+      'seek-mode-llm-vision',
+      'seek-goal-select',
+      'seek-goal-text',
+      'seek-on-found',
+      'seek-on-found-tts',
+      'seek-llm-scene-nav',
+      'seek-llm-nav-interval',
+      'seek-max-steps',
+      'seek-timeout-s',
+    ];
+    lockIds.forEach(function (id) {
+      var el = $(id);
+      if (el) el.disabled = !!running;
+    });
+    var cfg = document.querySelector('.ugv-seek-config-card');
+    if (cfg) {
+      cfg.classList.toggle('is-locked', !!running);
+      cfg.title = running ? 'Config locked while Seek is running — Stop to edit' : '';
+    }
   }
 
   function applySeekFormFromStatus(st) {

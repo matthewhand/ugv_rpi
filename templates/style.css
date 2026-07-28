@@ -1144,11 +1144,11 @@ ul.video-list li a:hover div .normal_btn_play::before{background-image: url('./i
   color: #5b8cff !important;
   border-color: #3a5a9a !important;
 }
-/* Global emergency STOP — always visible in navbar */
+/* Global emergency STOP — always visible in navbar (primary safety control) */
 .ugv-global-stop {
-  border: 1px solid #ff4d4f;
-  background: #4a1014;
-  color: #ff8a8a;
+  border: 1.5px solid #ff4d4f;
+  background: linear-gradient(180deg, #5c181c, #3b1214);
+  color: #fff;
   font: inherit;
   font-size: 13px;
   font-weight: 800;
@@ -1158,16 +1158,30 @@ ul.video-list li a:hover div .normal_btn_play::before{background-image: url('./i
   min-width: 72px;
   border-radius: 8px;
   cursor: pointer;
-  box-shadow: 0 0 0 1px rgba(255, 77, 79, 0.35), 0 2px 8px rgba(0, 0, 0, 0.35);
+  box-shadow:
+    0 0 0 1px rgba(255, 77, 79, 0.4),
+    0 2px 10px rgba(255, 77, 79, 0.28);
   flex-shrink: 0;
 }
 .ugv-global-stop:hover:not(:disabled) {
-  background: #6b181c;
+  background: linear-gradient(180deg, #7a1f24, #4a1014);
   color: #fff;
+}
+.ugv-global-stop:active:not(:disabled) {
+  transform: scale(0.97);
+  background: #7a1f24;
 }
 .ugv-global-stop:disabled {
   opacity: 0.7;
   cursor: wait;
+}
+/* Sticky nav: keep page content from sliding under the bar */
+body {
+  scroll-padding-top: 64px;
+}
+.mode-panel-chat,
+.mode-panel-seek {
+  padding-top: 4px;
 }
 /* Seek-running indicator (outside Seek panel) */
 .ugv-seek-running-pill {
@@ -1493,12 +1507,68 @@ img.ugv-img-broken {
   background: #2a3142;
 }
 .ugv-row-actions button.danger {
-  background: #5c2a32;
+  background: #3a2226;
+  border: 1px solid #5c2a32;
   color: #ffb4b4;
+}
+.ugv-row-actions button.danger.secondary {
+  /* Form-level Stop — secondary to navbar STOP */
+  background: #2a1c20;
+  font-weight: 600;
 }
 .ugv-row-actions button:disabled {
   opacity: 0.5;
   cursor: wait;
+}
+/* Inline links inside panel titles (Chat → /ai) */
+.ugv-inline-link {
+  color: #5b8cff;
+  font-size: 12px;
+  font-weight: 600;
+  text-decoration: none;
+  margin-left: 10px;
+}
+.ugv-inline-link:hover {
+  text-decoration: underline;
+  color: #93c5fd;
+}
+.ugv-panel-card h2 .ugv-inline-link {
+  float: right;
+  margin-top: 2px;
+}
+/* Seek sticky action bar (phone / short viewports) */
+.ugv-seek-actions {
+  margin-top: 10px;
+}
+@media (max-width: 900px), (max-height: 500px) {
+  .ugv-seek-actions {
+    position: sticky;
+    bottom: 0;
+    z-index: 40;
+    margin: 0 -4px;
+    padding: 10px 8px calc(10px + env(safe-area-inset-bottom, 0px));
+    background: linear-gradient(180deg, transparent, #12151d 28%);
+    border-top: 1px solid #2a2f3d;
+  }
+  .ugv-seek-actions button {
+    min-height: 44px;
+    flex: 1 1 auto;
+  }
+  /* Collapse seek log when idle; expand when body.seek-running */
+  .ugv-seek-log-card {
+    max-height: 120px;
+    overflow: hidden;
+    transition: max-height 0.2s ease;
+  }
+  body.seek-running .ugv-seek-log-card {
+    max-height: min(40vh, 320px);
+    overflow: auto;
+  }
+}
+/* While Seek is running, pulse config card border */
+body.seek-running .ugv-seek-config-card {
+  border-color: #5b8cff;
+  box-shadow: 0 0 0 1px rgba(91, 140, 255, 0.25);
 }
 .ugv-seek-detector-bar {
   display: flex;

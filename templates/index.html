@@ -6,7 +6,7 @@
     <script src="./jquery-3.7.1.min.js"></script>
     <script src="./js-yaml.min.js"></script>
     <script src="./socket.io.js"></script>
-    <link rel="stylesheet" type="text/css" href="./style.css?v=ui-polish-1">
+    <link rel="stylesheet" type="text/css" href="./style.css?v=ui-iter-10">
     <style type="text/css">
       .seek-pano-card {
         margin-top: 8px;
@@ -30,7 +30,8 @@
       .seek-pano-img-wrap {
         position: relative;
         width: 100%;
-        height: 76px;
+        height: 110px;
+        min-height: 96px;
         background: #090a0e;
         display: flex;
         align-items: center;
@@ -452,8 +453,10 @@
             </div>
           </div>
           <div class="ugv-panel-card">
-            <h2>AI Vision Chat</h2>
-            <p class="hint">Conversational mode — describe the scene, run tools, optional drive.</p>
+            <h2>AI Vision Chat
+              <a href="/ai" class="ugv-inline-link" title="Full AI Agent with tool capability toggles">Open full AI agent →</a>
+            </h2>
+            <p class="hint">Quick chat here. Motion tools &amp; model config live on the full <a href="/ai" class="ugv-inline-link">/ai</a> console.</p>
             <div class="ugv-chat-log" id="chat-log"></div>
             <div class="ugv-chat-compose">
               <textarea id="chat-input" placeholder="Ask about what the robot sees…"></textarea>
@@ -591,9 +594,9 @@
                     </label>
                   </div>
                 </div>
-                <div class="ugv-row-actions">
+                <div class="ugv-row-actions ugv-seek-actions" id="seek-actions-bar">
                   <button type="button" id="seek-start-btn">Seek</button>
-                  <button type="button" class="danger" id="seek-stop-btn">Stop</button>
+                  <button type="button" class="danger secondary" id="seek-stop-btn" title="Stop Seek (also available as navbar STOP)">Stop</button>
                   <button type="button" class="secondary" id="seek-check-btn">Check once</button>
                 </div>
               </div>
@@ -620,6 +623,13 @@
         resize: both; overflow: hidden;
       }
       #ops-log-drawer.open { display: flex; }
+      /* Cascade when both drawers open: log stays right; twin shifts left */
+      body.ugv-twin-open #ops-log-drawer.open {
+        right: 12px;
+      }
+      body.ugv-ops-open #twin-drawer.open {
+        right: min(500px, calc(50vw + 12px));
+      }
       #ops-log-drawer::after {
         content: ''; position: absolute; right: 3px; bottom: 3px;
         width: 12px; height: 12px; border-radius: 1px;
@@ -657,10 +667,10 @@
       /* 3D Twin popup drawer (mirrors App log pattern) */
       #twin-drawer {
         position: fixed; right: 12px; bottom: 52px; z-index: 9997;
-        /* Smaller default; drag bottom-right corner to resize */
-        width: min(400px, calc(100vw - 24px));
-        height: min(300px, calc(100vh - 100px));
-        min-width: 260px; min-height: 200px;
+        /* Larger default so the robot is readable without resize */
+        width: min(520px, calc(100vw - 24px));
+        height: min(380px, calc(100vh - 100px));
+        min-width: 280px; min-height: 220px;
         max-width: calc(100vw - 24px); max-height: calc(100vh - 72px);
         display: none; flex-direction: column;
         background: #0b0f19; border: 1px solid #5b8cff;
@@ -759,8 +769,8 @@
         <div style="background-image: url('./img/grey/delete.svg');"></div>
     </footer>
     <!-- <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.7.0/jquery.min.js"></script> -->
-    <script src="./modes.js?v=ui-polish-1"></script>
-    <script src="./control.js?v=ui-polish-1"></script>
+    <script src="./modes.js?v=ui-iter-10"></script>
+    <script src="./control.js?v=ui-iter-10"></script>
     <script src="./main.js"></script>
 </body>
 </html>

@@ -1754,9 +1754,13 @@ function toggleTwinPane(force) {
             try { toggleOpsLogPane(false); } catch (e) { /* ignore */ }
         }
         drawer.classList.add('open');
+        try {
+            document.body.classList.add('ugv-twin-open');
+            document.body.classList.remove('ugv-ops-open');
+        } catch (e) {}
         if (btn) {
-            btn.style.color = '#93c5fd';
-            btn.textContent = '3D Twin ▴';
+            _setNavChip(btn, 'Twin', 'is-on', '3D Twin open — click to close');
+            btn.classList.add('ugv-nav-chip--accent');
         }
         if (frame && (!_twinState.loaded || !frame.src || frame.src === 'about:blank' || frame.getAttribute('src') === 'about:blank')) {
             frame.src = '/3d?embed=1';
@@ -1767,9 +1771,10 @@ function toggleTwinPane(force) {
         }
     } else {
         drawer.classList.remove('open');
+        try { document.body.classList.remove('ugv-twin-open'); } catch (e) {}
         if (btn) {
-            btn.style.color = '#5b8cff';
-            btn.textContent = '3D Twin';
+            _setNavChip(btn, 'Twin', '', 'Open 3D digital twin as a popup panel.');
+            btn.classList.add('ugv-nav-chip--accent');
         }
         // Unload WebGL when closed to free GPU/CPU
         if (frame) {
@@ -1874,12 +1879,21 @@ function toggleOpsLogPane(force) {
             try { toggleTwinPane(false); } catch (e) { /* ignore */ }
         }
         drawer.classList.add('open');
-        if (btn) { btn.style.color = '#a78bfa'; btn.innerHTML = 'App log ▴'; }
+        try {
+            document.body.classList.add('ugv-ops-open');
+            document.body.classList.remove('ugv-twin-open');
+        } catch (e) {}
+        if (btn) {
+            _setNavChip(btn, 'Log ▴', 'is-on', 'App log open — click to close');
+        }
         refreshOpsLog(true);
         startOpsLogPoll();
     } else {
         drawer.classList.remove('open');
-        if (btn) { btn.style.color = '#c4b5fd'; btn.innerHTML = 'App log'; }
+        try { document.body.classList.remove('ugv-ops-open'); } catch (e) {}
+        if (btn) {
+            _setNavChip(btn, 'Log', '', 'Operational app log (control mode, WiFi, AI motion, errors).');
+        }
         stopOpsLogPoll();
     }
 }

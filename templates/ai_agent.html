@@ -145,11 +145,28 @@
     .video-still:not(.is-empty) .still-placeholder { display: none; }
     @media (max-height: 500px), (max-width: 900px) and (orientation: landscape) {
       .cfg { display: none; }
-      .cfg.open { display: block; position: absolute; z-index: 20; inset: 48px 0 auto 0; max-height: 70vh; }
+      .cfg.open {
+        display: block; position: fixed; z-index: 50;
+        inset: 48px 0 0 0; max-width: 320px; max-height: 70vh;
+        box-shadow: 8px 0 24px rgba(0,0,0,.45);
+      }
       .wrap { grid-template-columns: 1fr; }
-      .video-row { grid-template-columns: 1fr; max-height: 42vh; }
-      #live-preview { max-height: 160px; }
+      .video-row {
+        grid-template-columns: 1.3fr 0.7fr;
+        max-height: 38vh;
+        padding: 6px 10px;
+      }
+      #live-preview, #snap-preview { max-height: 28vh; }
       .snap-meta { display: none; }
+      .log { min-height: 64px; }
+      .composer { padding: 8px 10px; }
+      .composer textarea { min-height: 48px; }
+      .bar { justify-content: flex-end; gap: 6px; }
+      .bar label { margin-right: auto; font-size: 11px; }
+      .bar .snap-meta { display: none !important; }
+    }
+    @media (max-width: 700px) and (orientation: landscape) {
+      .video-row { grid-template-columns: 1fr; }
     }
     .video-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
     .snap-meta { font-size: 12px; color: var(--muted); line-height: 1.45; }
