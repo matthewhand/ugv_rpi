@@ -142,6 +142,45 @@ def get_control_mode():
         return _control_mode
 
 
+def _rosbridge_reachable():
+    """True when rosbridge websocket accepts connections (PTZ/drive ROS path)."""
+    try:
+        import ros_motion
+        return bool(ros_motion.rosbridge_status().get('ok'))
+    except Exception:
+        return False
+
+
+def _ensure_flask_serial(reason='fallback'):
+    """Reclaim UART for Flask when ROS path is dead so PTZ/drive are not silent.
+
+    Returns True if serial is open and owned by Flask after the call.
+    """
+    if base.serial_is_open() and not getattr(base, 'serial_released_for_ros', False):
+        return True
+    ok = bool(base.claim_serial_for_flask())
+    if ok:
+        # Allow chassis on serial while in fallback (ROS mode may have set this False)
+        base.enable_motor_control = True
+        olog.warn(
+            'serial',
+            f'Reclaimed UART for Flask ({reason}) — rosbridge unavailable; '
+            'PTZ/chassis use serial until ROS path is healthy',
+            reason=reason,
+            serial_open=True,
+            control_mode=get_control_mode(),
+        )
+    else:
+        olog.error(
+            'serial',
+            f'UART reclaim failed ({reason}) — PTZ/drive may be dead until Direct mode or rosbridge',
+            reason=reason,
+            serial_open=False,
+            control_mode=get_control_mode(),
+        )
+    return ok
+
+
 def _drive_sign(name, default=1.0):
     """Read ±1 drive sign from env (preferred) or config.yaml base_config."""
     env_key = 'UGV_DRIVE_LINEAR_SIGN' if name == 'linear' else 'UGV_DRIVE_ANGULAR_SIGN'
@@ -234,6 +273,26 @@ def set_control_mode(mode, *, source='api'):
         except Exception as e:
             fields['rosbridge_ok'] = False
             fields['rosbridge_error'] = str(e)
+        # Critical: if rosbridge is down after release, reclaim serial so PTZ is not dead.
+        if not fields.get('rosbridge_ok'):
+            reclaimed = _ensure_flask_serial(reason='ros2_without_rosbridge')
+            fields['serial_fallback'] = True
+            fields['serial_ok'] = reclaimed
+            fields['serial_open'] = base.serial_is_open()
+            fields['serial_released_for_ros'] = bool(
+                getattr(base, 'serial_released_for_ros', False)
+            )
+            fields['uart_owner'] = 'flask_fallback' if reclaimed else 'none'
+            fields['fallback_reason'] = (
+                'rosbridge not reachable — reclaimed UART so pan/tilt and drive work via serial. '
+                'Start rosbridge in ugv_ros2 or switch Control to Direct.'
+            )
+            olog.warn(
+                'control_mode',
+                fields['fallback_reason'],
+                rosbridge_error=fields.get('rosbridge_error'),
+                serial_open=fields['serial_open'],
+            )
     if prev != mode:
         olog.info(
             'control_mode',
@@ -254,6 +313,9 @@ _load_control_mode()
 if get_control_mode() == 'ros2':
     base.enable_motor_control = False
     base.release_serial_for_ros()
+    # Startup heal: do not leave ROS mode with closed UART and dead rosbridge
+    if not _rosbridge_reachable():
+        _ensure_flask_serial(reason='startup_ros2_no_rosbridge')
 else:
     base.enable_motor_control = True
     base.claim_serial_for_flask()
@@ -261,10 +323,13 @@ olog.info(
     'startup',
     f'control_mode={get_control_mode()} '
     f'(uart_owner={"flask" if get_control_mode() == "direct" else "ros2"}, '
-    f'serial_open={base.serial_is_open()})',
+    f'serial_open={base.serial_is_open()}, '
+    f'serial_released={getattr(base, "serial_released_for_ros", False)})',
     control_mode=get_control_mode(),
     uart_owner='flask' if get_control_mode() == 'direct' else 'ros2',
     serial_open=base.serial_is_open(),
+    serial_released_for_ros=bool(getattr(base, 'serial_released_for_ros', False)),
+    rosbridge_ok=_rosbridge_reachable() if get_control_mode() == 'ros2' else None,
 )
 
 # Set to keep track of RTCPeerConnection instances
@@ -999,18 +1064,35 @@ def api_ptz():
         before_pan = (before.get('hardware') or {}).get('pan_deg')
         before_tilt = (before.get('hardware') or {}).get('tilt_deg')
         try:
-            if mode == 'ros2' or getattr(base, 'serial_released_for_ros', False):
-                # UART released — drive via rosbridge (same as stick)
+            used_ros = False
+            if mode == 'ros2' and _rosbridge_reachable():
                 import ros_motion
                 result = ros_motion.publish_gimbal_from_ui(x, y, throttle=False)
-                path = 'ros2'
-                olog.info('ptz_cmd', f'PTZ goto X={x} Y={y} (ros2)', X=x, Y=y, path='ros2', ok=result.get('ok'))
-                if not result.get('ok'):
-                    return jsonify({'success': False, 'error': result.get('error'), 'command': cmd, 'path': path}), 500
-            else:
+                if result.get('ok'):
+                    path = 'ros2'
+                    used_ros = True
+                    olog.info('ptz_cmd', f'PTZ goto X={x} Y={y} (ros2)', X=x, Y=y, path='ros2', ok=True)
+                else:
+                    olog.warn(
+                        'ptz_cmd',
+                        f'PTZ ros2 failed, serial fallback: {result.get("error")}',
+                        X=x, Y=y, error=str(result.get('error') or '')[:160],
+                    )
+            if not used_ros:
+                if mode == 'ros2' and (
+                    getattr(base, 'serial_released_for_ros', False) or not base.serial_is_open()
+                ):
+                    if not _ensure_flask_serial(reason='ptz_api'):
+                        return jsonify({
+                            'success': False,
+                            'error': 'rosbridge down and serial reclaim failed — set Control: Direct',
+                            'command': cmd,
+                            'path': 'none',
+                        }), 500
                 base.base_json_ctrl({'T': 4, 'cmd': 2})  # gimbal module
                 base.base_json_ctrl(cmd)
-                olog.info('ptz_cmd', f'PTZ goto X={x} Y={y} (serial T:133)', X=x, Y=y, path='serial')
+                path = 'serial' if mode == 'direct' else 'serial_fallback'
+                olog.info('ptz_cmd', f'PTZ goto X={x} Y={y} ({path} T:133)', X=x, Y=y, path=path)
             try:
                 cvf.pan_angle = x
                 cvf.tilt_angle = -y
@@ -1064,18 +1146,33 @@ def _ptz_goto_raw(x, y, wait_s=1.5):
     before_pan = (before.get('hardware') or {}).get('pan_deg')
     before_tilt = (before.get('hardware') or {}).get('tilt_deg')
     try:
-        if mode == 'ros2' or getattr(base, 'serial_released_for_ros', False):
+        used_ros = False
+        if mode == 'ros2' and _rosbridge_reachable():
             import ros_motion
             result = ros_motion.publish_gimbal_from_ui(x, y, throttle=False)
-            path = 'ros2'
-            if not result.get('ok'):
-                return {
-                    'success': False, 'error': result.get('error'),
-                    'command_sent': cmd, 'path': path,
-                    'before': {'pan_deg': before_pan, 'tilt_deg': before_tilt},
-                    'moved': False,
-                }
-        else:
+            if result.get('ok'):
+                path = 'ros2'
+                used_ros = True
+            else:
+                olog.warn(
+                    'ptz_cmd',
+                    f'_ptz_goto_raw ros2 fail → serial: {result.get("error")}',
+                    error=str(result.get('error') or '')[:160],
+                )
+        if not used_ros:
+            if mode == 'ros2' and (
+                getattr(base, 'serial_released_for_ros', False) or not base.serial_is_open()
+            ):
+                if not _ensure_flask_serial(reason='ptz_goto_raw'):
+                    return {
+                        'success': False,
+                        'error': 'rosbridge down and serial reclaim failed — set Control: Direct',
+                        'command_sent': cmd,
+                        'path': 'none',
+                        'before': {'pan_deg': before_pan, 'tilt_deg': before_tilt},
+                        'moved': False,
+                    }
+            path = 'serial' if mode == 'direct' else 'serial_fallback'
             base.base_json_ctrl({'T': 4, 'cmd': 2})
             base.base_json_ctrl(cmd)
         try:
@@ -6913,25 +7010,63 @@ def _route_json_command(cmd):
     if t in gimbal_types:
         x = float(cmd.get('X', cmd.get('x', 0)) or 0)
         y = float(cmd.get('Y', cmd.get('y', 0)) or 0)
-        if mode == 'ros2':
+        tilt_sign_y = -y if t in (133, '133', f.get('cmd_config', {}).get('cmd_gimbal_ctrl')) else y
+
+        def _apply_cvf_pt():
             try:
-                import ros_motion
-                result = ros_motion.publish_gimbal_from_ui(x, y, throttle=True)
-                try:
-                    cvf.pan_angle = x
-                    cvf.tilt_angle = -y if t in (133, '133', f.get('cmd_config', {}).get('cmd_gimbal_ctrl')) else y
-                except Exception:
-                    pass
-                return {'path': 'ros2', 'ok': bool(result.get('ok')), 'mode': mode, 'result': result}
+                cvf.pan_angle = x
+                cvf.tilt_angle = tilt_sign_y
+            except Exception:
+                pass
+
+        import ros_motion as _rm
+        path_choice = _rm.preferred_motion_path(mode, _rosbridge_reachable())
+        if path_choice == 'ros2':
+            try:
+                result = _rm.publish_gimbal_from_ui(x, y, throttle=True)
+                if result.get('ok'):
+                    _apply_cvf_pt()
+                    return {'path': 'ros2', 'ok': True, 'mode': mode, 'result': result}
+                olog.warn(
+                    'motion_route',
+                    f'ROS2 gimbal returned not-ok; falling back to serial: {result.get("error")}',
+                    path='ros2', T=t, mode=mode, error=str(result.get('error') or '')[:160],
+                    throttle_s=3.0, throttle_key='ros2_gimbal_fallback',
+                )
+                path_choice = 'serial_fallback'
             except Exception as e:
                 olog.error(
-                    'motion_route', f'ROS2 gimbal failed: {e}',
+                    'motion_route', f'ROS2 gimbal failed; falling back to serial: {e}',
                     path='ros2', T=t, mode=mode, error=str(e),
                     throttle_s=3.0, throttle_key='ros2_gimbal_fail',
                 )
-                return {'path': 'ros2', 'ok': False, 'mode': mode, 'error': str(e)}
+                path_choice = 'serial_fallback'
+        elif path_choice == 'serial_fallback':
+            olog.warn(
+                'motion_route',
+                'ROS2 gimbal: rosbridge down — using serial fallback',
+                path='serial_fallback', T=t, mode=mode,
+                throttle_s=5.0, throttle_key='ros2_gimbal_no_bridge',
+            )
+
+        # Direct mode, or ROS mode with dead/failed bridge
+        if path_choice != 'direct' and (
+            getattr(base, 'serial_released_for_ros', False) or not base.serial_is_open()
+        ):
+            if not _ensure_flask_serial(reason='gimbal_route'):
+                return {
+                    'path': 'none',
+                    'ok': False,
+                    'mode': mode,
+                    'error': 'rosbridge down and serial reclaim failed — switch Control to Direct',
+                }
         base.base_json_ctrl(cmd)
-        return {'path': 'direct', 'ok': True, 'mode': mode}
+        _apply_cvf_pt()
+        return {
+            'path': path_choice if path_choice in ('direct', 'serial_fallback') else 'serial_fallback',
+            'ok': True,
+            'mode': mode,
+        }
 
     # ---- Chassis wheels ----
     if t in chassis_types:
@@ -6955,7 +7090,7 @@ def _route_json_command(cmd):
             cmd['L'] = hw_L
             cmd['R'] = hw_R
 
-        if mode == 'ros2':
+        if mode == 'ros2' and _rosbridge_reachable():
             try:
                 import ros_motion
                 # Values already sign-mapped above for T:13; for T:1 derive twist from HW L/R
@@ -6969,16 +7104,36 @@ def _route_json_command(cmd):
                     lin = (L + R) / 2.0
                     ang = (R - L)
                 result = ros_motion.publish_cmd_vel(lin, ang)
-                return {'path': 'ros2', 'ok': bool(result.get('ok')), 'mode': mode, 'result': result}
+                if result.get('ok'):
+                    return {'path': 'ros2', 'ok': True, 'mode': mode, 'result': result}
+                olog.warn(
+                    'motion_route',
+                    f'ROS2 chassis not-ok; serial fallback: {result.get("error")}',
+                    path='ros2', T=t, error=str(result.get('error') or '')[:160],
+                    throttle_s=3.0, throttle_key='ros2_chassis_fallback',
+                )
             except Exception as e:
                 olog.error(
-                    'motion_route', f'ROS2 chassis failed: {e}',
+                    'motion_route', f'ROS2 chassis failed; serial fallback: {e}',
                     path='ros2', T=t, mode=mode, error=str(e),
                     throttle_s=3.0, throttle_key='ros2_chassis_fail',
                 )
-                return {'path': 'ros2', 'ok': False, 'mode': mode, 'error': str(e)}
+        if mode == 'ros2' and (
+            getattr(base, 'serial_released_for_ros', False) or not base.serial_is_open()
+        ):
+            if not _ensure_flask_serial(reason='chassis_route'):
+                return {
+                    'path': 'none',
+                    'ok': False,
+                    'mode': mode,
+                    'error': 'rosbridge down and serial reclaim failed — switch Control to Direct',
+                }
         base.base_json_ctrl(cmd)
-        return {'path': 'direct', 'ok': True, 'mode': mode}
+        return {
+            'path': 'direct' if mode == 'direct' else 'serial_fallback',
+            'ok': True,
+            'mode': mode,
+        }
 
     # Non-motion JSON always serial (lights, module select, etc.)
     # Log interesting T codes only (not high-rate noise)

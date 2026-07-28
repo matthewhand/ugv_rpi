@@ -41,6 +41,25 @@ def motion_backend() -> str:
     return (os.environ.get('UGV_MOTION_BACKEND') or 'none').strip().lower()
 
 
+def preferred_motion_path(control_mode: str, rosbridge_ok: bool) -> str:
+    """Choose software path for chassis/gimbal commands.
+
+    - direct → always serial
+    - ros2 + rosbridge up → ros2
+    - ros2 + rosbridge down → serial_fallback (caller must reclaim UART)
+
+    Pure helper so unit tests can drive path selection without Flask/hardware.
+    """
+    mode = (control_mode or 'direct').strip().lower()
+    if mode in ('serial', 'raw'):
+        mode = 'direct'
+    if mode == 'ros2' and bool(rosbridge_ok):
+        return 'ros2'
+    if mode == 'ros2':
+        return 'serial_fallback'
+    return 'direct'
+
+
 def pt_backend() -> str:
     """auto | ros2 | serial — how Flask should command pan/tilt."""
     return (os.environ.get('UGV_PT_BACKEND') or 'auto').strip().lower()

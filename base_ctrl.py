@@ -297,14 +297,20 @@ class BaseController:
 			now = time.time()
 			if now - getattr(self, '_release_log_last', 0) > 8.0:
 				self._release_log_last = now
-				print("[base_ctrl] Serial not owned by Flask (ROS mode) — drop serial cmd")
+				t_code = data.get('T') if isinstance(data, dict) else None
+				print(
+					f"[base_ctrl] Serial not owned by Flask (ROS mode) — drop serial cmd T={t_code}. "
+					"If PTZ is dead: start rosbridge or switch UI Control to Direct serial."
+				)
 				try:
 					from app_log import app_log as olog
 					olog.warn(
 						'serial',
-						'Dropped serial cmd — UART released for ROS 2',
-						T=(data.get('T') if isinstance(data, dict) else None),
+						'Dropped serial cmd — UART released for ROS 2 '
+						'(start rosbridge or switch Control to Direct)',
+						T=t_code,
 						owner='ros2',
+						hint='UGV_CONTROL_MODE=direct or UI Control: Direct serial',
 						throttle_s=8.0,
 					)
 				except Exception:
