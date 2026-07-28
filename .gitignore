@@ -12,3 +12,9 @@ templates/videos/video*
 *.log
 hailort.log
 ai_proof/
+
+# Runtime UI / local scratch (do not commit)
+.ui_aim_mode.json
+*.wav
+test_ollama_direct.py
+10-audio-files.py
