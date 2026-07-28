@@ -36,6 +36,18 @@ Seek is **usable as a pilot**, not a finished robot product. OpenAI-compatible s
 - [x] **Serial robustness**: open/close guards when ROS owns UART; session ESP32 WiFi stop (non-persistent T:408)  
 - [x] **TTS path** hardened when `pyttsx3` missing; on-found speech optional  
 - [x] **`.env` / capabilities / control_mode** gitignored; `ai_proof/` removed and ignored (no camera dumps in git)
+- [x] **Dual robot profiles**: PTZ Seek robot (`module_type: 2`) and Beast USB RoArm (`arm_config.transport: usb_serial`) in one tree  
+- [x] **USB RoArm**: `roarm_ctrl`, Aim: RoArm overlay, default **travel_tuck** low-CG stance; Seek look-around skips PTZ pans on Beast  
+- [x] **USB camera rediscovery** when V4L index jumps after re-enumerate  
+
+### Dual robot (PTZ vs Beast RoArm)
+
+| Profile | Config | Camera look-around | Arm |
+|---------|--------|--------------------|-----|
+| **PTZ / Seek** | `module_type: 2`, no USB arm transport | Gimbal pan (`T:133`) | N/A |
+| **Beast** | `module_type: 1`, `arm_config.transport: usb_serial` | Base-camera + limited arm peek; **no** PTZ pan | USB CP2102, `travel_tuck` default |
+
+Details: [docs/CONFIG_PROFILES.md](docs/CONFIG_PROFILES.md), [docs/ROARM.md](docs/ROARM.md), [docs/MERGE_PTZ_AND_ROARM_PLAN.md](docs/MERGE_PTZ_AND_ROARM_PLAN.md). Hardware notes for this Pi: `~/beast-image/CUSTOM_BUILD.md`.
 
 ### Remaining (todo)
 
