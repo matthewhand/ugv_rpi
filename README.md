@@ -50,6 +50,67 @@ OpenAI-compatible chat UI at `/ai` with optional live camera still attach.
 - **Tools:** telemetry, CV detections, snapshot metadata, and motion (direct serial or ROS 2 per `control_mode`)
 - **Vision:** attach checkbox sends a live JPEG on that turn; chat history stays text-only (no image re-send)
 
+### USB RoArm + UI Aim mode (`roarm_ctrl.py`, `app.py`, `templates/`)
+
+**Other robots (gimbal / stock arm on base UART):** leave `arm_config` out of `config.yaml`, or set `arm_config.transport: base_uart`. Original pan/tilt stick path (`T:133`) is unchanged when `module_type: 2` or **Aim: PT**.
+
+**This Beast (USB-C RoArm on CP2102):** set in `config.yaml`:
+
+```yaml
+arm_config:
+  transport: usb_serial   # routes T:144 / arm JSON to USB, not ttyAMA0
+  ui_aim_default: roarm   # stick drives RoArm position
+```
+
+- Web UI button **Aim: RoArm / Aim: PT** toggles overlay target (`POST /api/ui_aim_mode`).
+- **Aim: RoArm** — video pan/tilt overlay stick sends stock `T:144` E/Z/R; Flask maps to USB RoArm joints (`T:102`). Scroll wheel still adjusts reach (E).
+- **Aim: PT** — original gimbal logic (`T:133`) for pan/tilt kits / dual-mode use.
+- Status: `GET /api/status` includes `ui_aim_mode`, `arm_transport`, `roarm.{connected,port,last_joints}`.
+- Env override for port: `ROARM_SERIAL=/dev/serial/by-id/...`
+
+#### RoArm + ROS 2 (`control_mode=ros2`)
+
+Arm USB is **independent** of chassis `ttyAMA0`. Default is **hybrid** (UI always works):
+
+| Mode | Chassis | Aim: RoArm path |
+|------|---------|-----------------|
+| `control_mode=direct` | Flask UART | Flask → CP2102 `T:102` |
+| `control_mode=ros2` (default hybrid) | ROS `ugv_driver_min` on `ttyAMA0` | Publish `/ugv/roarm/joint_command` **and** Flask USB write; mirror `/ugv/roarm/joint_states` |
+| Exclusive driver | same | `UGV_ROARM_USB_OWNER=driver` → Flask only publishes command; driver owns USB |
+
+**Topics** (`sensor_msgs/JointState`, names `roarm_base/shoulder/elbow/hand`):
+
+- `/ugv/roarm/joint_command` — targets (UI / AI / `ros2 topic pub`)
+- `/ugv/roarm/joint_states` — state mirror or driver feedback
+
+**Start stack (chassis + rosbridge):**
+
+```bash
+cd ~/ugv_rpi/ros2 && docker compose up -d   # rosbridge :9090 + ugv_driver_min
+```
+
+**Optional exclusive RoArm driver** (do not run while Flask holds CP2102):
+
+```bash
+# Host bridge (no rclpy; uses rosbridge + ugv-env pyserial) — preferred on this Pi:
+UGV_ROARM_USB_OWNER=driver   # set in Flask env / .env, restart app
+~/ugv_rpi/ros2/start_roarm_driver.sh
+
+# Or in-container rclpy driver:
+ROARM_ENABLE_DRIVER=1 docker compose up -d   # in ~/ugv_rpi/ros2
+```
+
+**Verify:**
+
+```bash
+# offline unit tests
+./ugv-env/bin/python tests/test_roarm_ros2.py
+# live (rosbridge up)
+ROARM_ROS2_LIVE=1 ./ugv-env/bin/python tests/test_roarm_ros2.py
+# from ROS container:
+docker exec ugv_ros2 bash -lc 'source /opt/ros/humble/setup.bash && ros2 topic echo /ugv/roarm/joint_states --once'
+```
+
 ### Drive safety / conventions
 
 - Positive `linear_x` / `T:13` X = forward (ROS unicycle). UI `T:1` positive L/R = forward on stock firmware.

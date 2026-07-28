@@ -158,12 +158,14 @@ class OpencvFuncs():
         self.usb_camera_connected = self.usb_camera_detection()
         self.csi_camera_connected = False
         self.oak_camera_connected = False
+        self.usb_camera_index = None
 
-        # usb camera init
+        # usb camera init — index can jump after USB re-enumerate (video0 ↔ video1)
         if self.usb_camera_connected:
-            self.camera = cv2.VideoCapture(0)
-            self.camera.set(cv2.CAP_PROP_FRAME_WIDTH, f['video']['default_res_w'])
-            self.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, f['video']['default_res_h'])
+            self.camera = self._open_usb_camera()
+            if self.camera is None:
+                print("[cv_ctrl] USB Camera listed by lsusb but no V4L2 node opened")
+                self.usb_camera_connected = False
 
         # csi camera init
         if not self.usb_camera_connected:
@@ -204,11 +206,25 @@ class OpencvFuncs():
     def frame_process(self):
         try:
             if self.usb_camera_connected:
-                success, input_frame = self.camera.read()
+                if self.camera is None:
+                    self.camera = self._open_usb_camera()
+                success, input_frame = (False, None)
+                if self.camera is not None:
+                    success, input_frame = self.camera.read()
                 if not success:
-                    self.camera.release()
-                    time.sleep(1)
-                    self.camera = cv2.VideoCapture(0)
+                    # USB cameras on this Beast re-enumerate under vibration;
+                    # rediscover index instead of hardcoding 0.
+                    try:
+                        if self.camera is not None:
+                            self.camera.release()
+                    except Exception:
+                        pass
+                    time.sleep(0.5)
+                    self.camera = self._open_usb_camera()
+                    if self.camera is not None:
+                        success, input_frame = self.camera.read()
+                    if not success:
+                        raise RuntimeError("usb camera read failed after reopen")
             elif self.csi_camera_connected:
                 input_frame = self.picam2.capture_array()
             elif self.oak_camera_connected:
@@ -359,6 +375,44 @@ class OpencvFuncs():
         else:
             print("USB Camera not connected")
             return False
+
+    def _open_usb_camera(self):
+        """Open first working UVC node (index or /dev/videoN).
+
+        After USB disconnect/reconnect the capture node often moves (e.g. video0→video1).
+        """
+        w = f['video']['default_res_w']
+        h = f['video']['default_res_h']
+        # Prefer current index if still good, then 0..4 and common paths
+        candidates = []
+        if self.usb_camera_index is not None:
+            candidates.append(self.usb_camera_index)
+        candidates.extend([0, 1, 2, 3, 4])
+        # de-dupe preserving order
+        seen = set()
+        ordered = []
+        for c in candidates:
+            if c not in seen:
+                seen.add(c)
+                ordered.append(c)
+
+        for idx in ordered:
+            try:
+                cap = cv2.VideoCapture(idx)
+                if not cap.isOpened():
+                    cap.release()
+                    continue
+                cap.set(cv2.CAP_PROP_FRAME_WIDTH, w)
+                cap.set(cv2.CAP_PROP_FRAME_HEIGHT, h)
+                ok, frame = cap.read()
+                if ok and frame is not None:
+                    self.usb_camera_index = idx
+                    print(f"[cv_ctrl] USB camera opened index={idx} shape={frame.shape}")
+                    return cap
+                cap.release()
+            except Exception as e:
+                print(f"[cv_ctrl] open index {idx} failed: {e}")
+        return None
 
 
     def osd_render(self, osd_frame):

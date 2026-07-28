@@ -305,6 +305,43 @@ def publish_cmd_vel(linear_x: float = 0.0, angular_z: float = 0.0) -> Dict[str, 
     }
 
 
+def led_ctrl_topic() -> str:
+    """Stock ugv_driver subscribes to ugv/led_ctrl (Float32MultiArray IO4, IO5)."""
+    return (os.environ.get('UGV_LED_CTRL_TOPIC') or '/ugv/led_ctrl').strip()
+
+
+def publish_lights(io4: float = 0.0, io5: float = 0.0) -> Dict[str, Any]:
+    """Drive base/head 12V LED switches via ROS when Flask does not own UART.
+
+    ESP32 JSON equivalent: {"T":132,"IO4":io4,"IO5":io5} with 0..255.
+    """
+    topic = led_ctrl_topic()
+    msg_type = os.environ.get('UGV_LED_CTRL_TYPE') or 'std_msgs/msg/Float32MultiArray'
+    io4 = float(max(0, min(255, float(io4))))
+    io5 = float(max(0, min(255, float(io5))))
+    msg = {'data': [io4, io5]}
+    try:
+        with RosbridgeClient() as client:
+            client.publish(topic, msg, msg_type)
+            time.sleep(0.02)
+        return {
+            'ok': True,
+            'backend': 'ros2',
+            'topic': topic,
+            'IO4': io4,
+            'IO5': io5,
+        }
+    except Exception as e:
+        return {
+            'ok': False,
+            'backend': 'ros2',
+            'topic': topic,
+            'error': str(e),
+            'IO4': io4,
+            'IO5': io5,
+        }
+
+
 def ui_xy_to_radians(x_deg: float, y_deg: float) -> Tuple[float, float]:
     """Map Waveshare Flask stick degrees (T:133 X/Y) → ROS joint radians.
 
@@ -370,6 +407,157 @@ def publish_gimbal_from_ui(x_deg: float, y_deg: float, throttle: bool = True) ->
     out['ui_x_deg'] = float(x_deg)
     out['ui_y_deg'] = float(y_deg)
     return out
+
+
+# ---- USB RoArm joint topics (independent of base UART / chassis) ------------
+# Command (rosarm driver / external nodes): sensor_msgs/JointState
+#   /ugv/roarm/joint_command  name=[roarm_base, roarm_shoulder, roarm_elbow, roarm_hand]
+# State (Flask hybrid after USB write, or driver T:105):
+#   /ugv/roarm/joint_states
+
+_ROARM_JOINT_NAMES = [
+    'roarm_base',
+    'roarm_shoulder',
+    'roarm_elbow',
+    'roarm_hand',
+]
+_roarm_last_pub = 0.0
+_roarm_last_cmd_pub = 0.0
+_ROARM_MIN_INTERVAL = 0.03  # ~33 Hz cap for stick spam
+
+
+def roarm_joint_states_topic() -> str:
+    return (os.environ.get('UGV_ROARM_JOINT_STATES_TOPIC') or '/ugv/roarm/joint_states').strip()
+
+
+def roarm_joint_command_topic() -> str:
+    return (os.environ.get('UGV_ROARM_JOINT_CMD_TOPIC') or '/ugv/roarm/joint_command').strip()
+
+
+def roarm_usb_owner() -> str:
+    """Who opens the RoArm CP2102 USB serial.
+
+    flask  (default) — Flask roarm_ctrl owns USB (hybrid: also publishes ROS topics)
+    driver           — exclusive ROS/host driver owns USB; Flask only publishes command
+    """
+    raw = (os.environ.get('UGV_ROARM_USB_OWNER') or 'flask').strip().lower()
+    if raw in ('driver', 'ros', 'ros2', 'bridge', 'exclusive'):
+        return 'driver'
+    return 'flask'
+
+
+def _roarm_joint_msg(
+    base: float,
+    shoulder: float,
+    elbow: float,
+    hand: float,
+) -> dict:
+    return {
+        'header': {'stamp': {'sec': 0, 'nanosec': 0}, 'frame_id': 'roarm_base_link'},
+        'name': list(_ROARM_JOINT_NAMES),
+        'position': [float(base), float(shoulder), float(elbow), float(hand)],
+        'velocity': [],
+        'effort': [],
+    }
+
+
+def publish_roarm_joint_command(
+    base: float,
+    shoulder: float,
+    elbow: float,
+    hand: float,
+    *,
+    throttle: bool = True,
+    also_states: bool = False,
+) -> Dict[str, Any]:
+    """Publish RoArm target joints on /ugv/roarm/joint_command (sensor_msgs/JointState).
+
+    Intended for control_mode=ros2 Aim:RoArm and external ROS/AI nodes.
+    Does not open USB — roarm_driver_min / roarm_bridge_host / Flask hybrid write hardware.
+    """
+    global _roarm_last_cmd_pub
+    if throttle:
+        now = time.time()
+        if now - _roarm_last_cmd_pub < _ROARM_MIN_INTERVAL:
+            return {'ok': True, 'backend': 'ros2', 'throttled': True, 'kind': 'command'}
+        _roarm_last_cmd_pub = now
+
+    positions = [float(base), float(shoulder), float(elbow), float(hand)]
+    js_type = os.environ.get('UGV_JOINT_STATES_TYPE') or 'sensor_msgs/msg/JointState'
+    msg = _roarm_joint_msg(base, shoulder, elbow, hand)
+    topics = []
+    try:
+        client = _get_pt_client()
+        with _pt_client_lock:
+            cmd_topic = roarm_joint_command_topic()
+            client.publish(cmd_topic, msg, js_type)
+            topics.append(cmd_topic)
+            if also_states:
+                st_topic = roarm_joint_states_topic()
+                client.publish(st_topic, msg, js_type)
+                topics.append(st_topic)
+        return {
+            'ok': True,
+            'backend': 'ros2',
+            'kind': 'command',
+            'topics': topics,
+            'positions': positions,
+            'names': list(_ROARM_JOINT_NAMES),
+        }
+    except Exception as e:
+        return {
+            'ok': False,
+            'backend': 'ros2',
+            'kind': 'command',
+            'error': str(e),
+            'topics': topics,
+        }
+
+
+def publish_roarm_joints(
+    base: float,
+    shoulder: float,
+    elbow: float,
+    hand: float,
+    *,
+    throttle: bool = True,
+    also_as_command: bool = False,
+) -> Dict[str, Any]:
+    """Publish RoArm joint positions on rosbridge (state mirror; optional command).
+
+    Does not open USB — hardware write stays in Flask roarm_ctrl or a ROS driver.
+    Safe no-op-ish if bridge is down (returns ok=False).
+    """
+    global _roarm_last_pub
+    if throttle:
+        now = time.time()
+        if now - _roarm_last_pub < _ROARM_MIN_INTERVAL:
+            return {'ok': True, 'backend': 'ros2', 'throttled': True}
+        _roarm_last_pub = now
+
+    positions = [float(base), float(shoulder), float(elbow), float(hand)]
+    js_type = os.environ.get('UGV_JOINT_STATES_TYPE') or 'sensor_msgs/msg/JointState'
+    msg = _roarm_joint_msg(base, shoulder, elbow, hand)
+    topics = []
+    try:
+        client = _get_pt_client()  # shared rosbridge WS
+        with _pt_client_lock:
+            st_topic = roarm_joint_states_topic()
+            client.publish(st_topic, msg, js_type)
+            topics.append(st_topic)
+            if also_as_command:
+                cmd_topic = roarm_joint_command_topic()
+                client.publish(cmd_topic, msg, js_type)
+                topics.append(cmd_topic)
+        return {
+            'ok': True,
+            'backend': 'ros2',
+            'topics': topics,
+            'positions': positions,
+            'names': list(_ROARM_JOINT_NAMES),
+        }
+    except Exception as e:
+        return {'ok': False, 'backend': 'ros2', 'error': str(e), 'topics': topics}
 
 
 def prefer_ros_for_pt() -> bool:
