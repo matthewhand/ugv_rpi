@@ -1,0 +1,50 @@
+# Waveshare-compatible ROS 2 Humble stack for Flask dual-path control.
+# Base image: dudulrx0601/ugv_rpi_ros_humble:ugv_rpi_ros_humble
+#   (official Waveshare Pi ROS image; tag is the only published tag, not "latest")
+# Adds mounted entrypoint + minimal ugv_driver (cmd_vel/joint_states → ESP32 serial)
+# + optional RoArm USB driver (joint_command → CP2102 T:102; does NOT touch ttyAMA0).
+#
+# Prerequisites: Flask control_mode=ros2 (UART released) OR Flask stopped.
+# Start:  cd ~/ugv_rpi/ros2 && docker compose up -d
+# Stop:   docker compose down
+# Logs:   docker logs -f ugv_ros2
+#
+# RoArm USB (optional, independent of base UART):
+#   ROARM_ENABLE_DRIVER=1  — start roarm_driver_min in-container (exclusive USB owner)
+#   Default 0 so Flask hybrid path can keep owning USB for Aim:RoArm UI.
+#   Host alternative (no container USB fight): ../ros2/start_roarm_driver.sh
+#   with Flask UGV_ROARM_USB_OWNER=driver
+
+services:
+  ugv_ros2:
+    image: dudulrx0601/ugv_rpi_ros_humble:ugv_rpi_ros_humble
+    container_name: ugv_ros2
+    network_mode: host
+    privileged: true
+    restart: unless-stopped
+    environment:
+      UGV_MODEL: ugv_beast
+      ROS_DOMAIN_ID: "0"
+      UGV_SERIAL_DEV: /dev/ttyAMA0
+      UGV_DRIVER_SCRIPT: /opt/ugv_ros2/ugv_driver_min.py
+      ROARM_DRIVER_SCRIPT: /opt/ugv_ros2/roarm_driver_min.py
+      # 0 = do not open CP2102 in container (Flask hybrid default)
+      # 1 = start roarm_driver_min; use with UGV_ROARM_USB_OWNER=driver on Flask
+      ROARM_ENABLE_DRIVER: "${ROARM_ENABLE_DRIVER:-0}"
+      ROARM_SERIAL: "${ROARM_SERIAL:-/dev/ttyUSB0}"
+      ROARM_BAUD: "${ROARM_BAUD:-115200}"
+      ROARM_FEEDBACK_HZ: "${ROARM_FEEDBACK_HZ:-2}"
+      ROARM_REQUIRE_SERIAL: "0"
+      DISPLAY: ""
+    volumes:
+      - ./entrypoint.sh:/entrypoint.sh:ro
+      - ./ugv_driver_min.py:/opt/ugv_ros2/ugv_driver_min.py:ro
+      - ./roarm_driver_min.py:/opt/ugv_ros2/roarm_driver_min.py:ro
+    devices:
+      - /dev/ttyAMA0:/dev/ttyAMA0
+      # RoArm CP2102: not listed here so compose still starts if unplugged.
+      # privileged: true exposes host /dev/ttyUSB* and by-id for roarm_driver_min.
+    group_add:
+      - dialout
+    working_dir: /opt/ugv_ros2
+    entrypoint: ["/bin/bash", "/entrypoint.sh"]
