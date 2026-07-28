@@ -27,9 +27,11 @@ Visual QA source of truth for Playwright feature catalog.
 | `shell.navbar_phone` | Phone landscape chrome | Single sticky row; brand may hide; **STOP** visible |
 
 **Operator notes**
-- Prefer **Direct** for simple Seek demos.
+- Prefer **Direct** for simple Seek demos and reliable PTZ.
 - Leave **HB ON** for stick driving; turn **HB off** only when using AI timed drives.
 - **STOP** zeros wheels, cancels Seek, clears AI motion lock.
+- **ROS 2:** needs rosbridge; if it dies, firmware autoheal retries and serial fallback keeps motion alive (see README). Do not expect silent perfection if Docker/`ugv_ros2` is broken.
+- **Drive polarity:** after changing `drive_linear_sign`, **restart the Flask app** and check `GET /api/status` → `drive_linear_sign` (browser refresh alone does not reload yaml).
 - `shell.path_direct` / `shell.path_ros2` catalog shots depend on server path at capture time; flip the chip yourself if you need the other PNG (catalog never thrash-flips UART).
 
 ---

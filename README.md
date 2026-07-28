@@ -16,54 +16,61 @@ This is a Raspberry Pi example for the [Waveshare](https://www.waveshare.com/) U
 Make the stock dashboard usable for **autonomous “find a thing” pilots** (Seek), safer **AI/ROS motion**, clearer **operator feedback** (logs, pan aim, 3D twin), and less friction when switching **Direct serial ↔ ROS 2**.
 
 ### Honest assessment
-Seek is **usable as a pilot**, not a finished robot product. OpenAI-compatible scene nav often falls back to **vision heuristics** when the local LLM is slow or fails. Obstacle handling is **camera-only** (no lidar fusion on this stack by default). Recovery prefers **short turns** over long reverse after hard-wall lessons. Exploration uses a **dead-reckoning trail + heading**, not a real map. ROS 2 mode **does** drive chassis and PTZ when rosbridge + `ugv_bringup` are up (auto-started on mode toggle when Docker is available); wheel odometry may still report zeros if the ESP32 stream lacks encoder ticks. Secrets stay in **gitignored `.env`** — do not commit camera dumps or keys.
+This fork is a **supervised pilot**, not a finished product.
 
-### Achieved
+- **Seek** works for demos with a human on **STOP**, known VOC class (or LLM goal), and **Direct** control preferred. Scene nav often falls back to **camera heuristics** when the LLM is slow or fails. Obstacles are **vision-only** (Canny / texture / bright-wall heuristics — not lidar). Nav hops are **open-loop ms tables**, not calibrated yaw. Exploration is a **dead-reckoning heading trail**, not a map.
+- **ROS 2** works when rosbridge (`:9090`) + `ugv_bringup` are healthy. If rosbridge dies after mode toggle, a **background autoheal** retries sidecars and **falls back to serial** so PTZ/drive are not left on “dropped serial cmd”. Autoheal is best-effort (Docker/`docker exec`); it is not a full container lifecycle manager. Wheel **odometry may still read zeros** without encoder ticks.
+- **Drive polarity** is chassis-specific: `base_config.drive_linear_sign` (default on this tree **`-1`**) maps body “forward” to hardware. Confirm with `GET /api/status` → `drive_linear_sign` after restart. Wrong sign = UI forward drives camera-backward.
+- **3D Twin** is a lightweight demo (box model, CDN Three.js when online) — not a high-fidelity digital twin.
+- Secrets stay in **gitignored `.env`**. Do not commit camera dumps or keys.
 
-- [x] **Seek mode** in the multi-mode shell (Raw / Chat / Seek): goal text, detector and/or LLM referee, optional TTS on found  
-- [x] **Triple-view pan** (L / centre / R ≈ ±135°) with wait-for-pan before shutter; near-360 stitch for LLM  
-- [x] **Nav tiers** short/medium/long for drives and turns; Fast T:1 tank turns calibrated smaller to reduce overshoot  
-- [x] **Safety / recovery**: forbids forward into “near” centre; turn-to-open preferred; reverse capped short (avoid rear walls)  
-- [x] **Corridor bias**: longer hops when centre looks open; aim short turn toward emptier lane in FOV  
-- [x] **Exploration trail**: record moves + rough heading; leave overused headings; inject trail into LLM prompt  
-- [x] **Pan overlay** (`cam_aim` SoT): live needle with timed animation when HW pan feedback sticks near 0°  
-- [x] **Seek UI**: live status, event log, panorama card, image reload/retry, OLED 3-line seek context where available  
-- [x] **Control mode Direct ↔ ROS 2**: UART release/reclaim; body→hardware drive signs configurable  
-- [x] **On ROS mode toggle**: auto-start **rosbridge** (`:9090`) and **ugv_bringup** in `ugv_ros2` when missing (env-gated)  
-- [x] **AI agent** (`/ai`): OpenAI-compatible tools, capability tree, timed drives, motion lock vs UI “Freq. stop”  
-- [x] **Ops log** pane: ring-buffer server log for control mode, WiFi session stop, AI motion, errors  
-- [x] **3D Twin** as resizable in-page popup (iframe of `/3d`), not only a full-page tab  
-- [x] **Serial robustness**: open/close guards when ROS owns UART; session ESP32 WiFi stop (non-persistent T:408)  
-- [x] **TTS path** hardened when `pyttsx3` missing; on-found speech optional  
-- [x] **`.env` / capabilities / control_mode** gitignored; `ai_proof/` removed and ignored (no camera dumps in git)
+### Achieved (exists in tree — pilot-grade unless noted)
+
+- [x] **Seek** Raw/Chat/Seek shell: detector and/or LLM referee, TTS on found, finite default max steps/timeout (unlimited only if set to 0)  
+- [x] **Triple-view pan** L/C/R ≈ ±135°; wait-for-pan with **blind settle** if HW pan feedback is stuck; three-panel stitch for LLM (not a true geometric 360°)  
+- [x] **Nav tiers** short/medium/long — **open-loop** duration/speed tables (not measured calibration)  
+- [x] **Safety bias** (image heuristics): avoid forward when centre looks “near”; prefer turn-to-open; reverse capped short  
+- [x] **Corridor / blank-wall heuristics** (incl. bright painted walls) — still false open/closed under some lighting  
+- [x] **Exploration trail** for LLM prompt (heading counters only)  
+- [x] **Pan overlay** (`cam_aim`) with timed needle when HW pan sticks near 0°  
+- [x] **Seek UI**: status, log, pano card, mode-specific camera hints, config lock while running, sticky actions on small screens  
+- [x] **Global STOP** + Seek-running pill; leave-Seek confirm/auto-stop; keyboard teleop gated in Chat/Seek  
+- [x] **Control: Direct ↔ ROS 2** chips; UART release/reclaim; **serial fallback** if rosbridge is down; **periodic rosbridge autoheal** when in ROS 2 (`UGV_ROS_AUTOHEAL`, default on)  
+- [x] **Drive signs** in `config.yaml` / env; exposed on `/api/status`  
+- [x] **AI agent** (`/ai`) + thinner Chat tab; motion caps default off; motion lock vs **Idle heartbeat** (navbar **HB**); Chat has fail/retry on live stream  
+- [x] **Ops log** drawer; **3D Twin** popup drawer  
+- [x] **Serial null guards**; session ESP32 WiFi stop (T:408, non-persistent)  
+- [x] **TTS** hardened if `pyttsx3` missing  
+- [x] **Operator guide** + Playwright `--catalog` screenshots (`docs/operator-guide.md`, `scripts/screenshot_ui.py`)  
+- [x] **`.env` / capabilities / control_mode** gitignored  
 
 ### Remaining (todo)
 
-- [ ] **Reliable scene LLM**: stable JSON nav under load; less heuristic fallback; better latency on local Ollama  
-- [ ] **True localization**: fuse `/odom` (wheel + lidar EKF) when lidar present; explore by map cells, not heading-only trail  
-- [ ] **Encoder odom on this firmware**: confirm `odl`/`odr` (or equivalent) so `/odom_wheel` moves when the robot does  
-- [ ] **Lidar-aware seek**: use `/scan` for near obstacles instead of centre-image Canny only  
-- [ ] **Stuck / contact detection**: better than identical-frame + edge density (IMU jolt, motor current, bumper)  
-- [ ] **Turn calibration**: per-surface yaw feedback (odom/IMU) instead of open-loop ms tables  
-- [ ] **Pan feedback**: trustworthy HW pan degrees (or closed-loop aim) without synthetic estimate  
-- [ ] **ROS mode exit**: stop/kill bringup automatically when switching back to Direct so UART reclaim is clean  
-- [ ] **Container entrypoint**: start rosbridge + bringup with `ugv_ros2` boot, not only on UI toggle  
-- [ ] **Seek product polish**: better goal labels UX, cancel mid-pan, map of where it looked, battery gate before long runs  
-- [ ] **Security defaults**: change stock hotspot passwords; don’t leave Jupyter with empty token on shared LANs  
-- [ ] **Tests / CI**: unit coverage for nav plan safety, exploration trail, control_mode autostart mocks  
-- [ ] **Docs**: single operator runbook (Direct vs ROS, Seek modes, Freq. stop, capability toggles)
+- [ ] **Reliable scene LLM** under load; less heuristic fallback  
+- [ ] **True localization** / map exploration (not heading-only trail)  
+- [ ] **Encoder odom** + **lidar-aware** obstacles when hardware present  
+- [ ] **Turn / pan closed-loop** feedback (not open-loop tables / synthetic pan)  
+- [ ] **ROS exit**: kill bringup when switching to Direct (autoheal re-releases UART when bridge is up; clean stop on exit still open)  
+- [ ] **Container boot**: always start rosbridge+bringup with `ugv_ros2`, not only on UI toggle / autoheal  
+- [ ] **Seek product polish**: battery gate, look-map UI, richer cancel mid-drive  
+- [ ] **Security defaults** (hotspot / Jupyter token)  
+- [ ] **CI**: nav-plan safety tests, control_mode/autostart mocks  
+- [ ] **Chat ↔ `/ai` unification**; Twin offline CDN / real meshes  
+- [ ] **Docs**: expand operator-guide into a single printed runbook (guide exists; README historical sections below may lag labels)
 
 ### Quick operator notes
 
-| Mode | Use for |
-|------|---------|
-| **Raw** | Manual sticks, stock CV buttons (**AUTODRIVE** = line-follow only, needs a floor line) |
-| **Chat / AI** | Conversational tools; enable motion caps first; Freq. stop OFF for timed drives |
-| **Seek** | “Find *goal*” loops: scan → decide → drive → re-scan |
-| **Control: Direct** | Flask owns UART (default for simple seek) |
-| **Control: ROS 2** | Flask → rosbridge → bringup; needs Docker + `ugv_ros2` |
+| Control | Use for |
+|---------|---------|
+| **Raw** | Manual sticks, stock CV (**AUTODRIVE** = line-follow only) |
+| **Chat / AI** | Vision chat; enable motion tools on `/ai` first; set **HB off** for timed AI drives; use navbar **STOP** to halt |
+| **Seek** | Find-goal loop; prefer Direct; hand on **STOP**; default 30 steps / 300 s |
+| **Direct** | Flask owns UART — best default for PTZ + Seek demos |
+| **ROS 2** | Needs healthy rosbridge; autoheal retries; serial fallback if bridge dies |
+| **HB (Idle heartbeat)** | ON = re-send last wheel cmd every 2s (idle → stop). OFF for long AI timed drives |
+| **Drive sign** | After config change, **restart app** and check `/api/status` → `drive_linear_sign` |
 
-Detailed historical notes follow.
+Detailed historical notes follow (some button names in older sections may still say “Motors” / “Freq. stop” — UI chrome uses **Control** / **HB** / **Idle heartbeat**).
 
 ## Changes from upstream
 
