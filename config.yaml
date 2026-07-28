@@ -22,9 +22,10 @@ base_config:
   use_lidar: false
   # Body frame: +linear = camera-forward, +angular = CCW/left turn.
   # Applied once for T:1 L/R, T:13 X/Z, and ROS cmd_vel (AI + UI + Seek).
-  # This rover needs -1 so software "forward" matches camera-forward motion.
+  # NOTE: linear sign also flips tank-turn left/right (both wheels negated).
+  # If F/B *and* L/R feel inverted, flip linear only (±1).
   # Override with env UGV_DRIVE_LINEAR_SIGN / UGV_DRIVE_ANGULAR_SIGN (±1).
-  drive_linear_sign: -1
+  drive_linear_sign: 1
   drive_angular_sign: 1
 cmd_config:
   cmd_arm_ctrl_ui: 144

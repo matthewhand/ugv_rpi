@@ -4787,10 +4787,14 @@ def _seek_roi_open_score(gray_roi):
     edges = cv2.Canny(gray_roi, 40, 120)
     edge_density = float(np.count_nonzero(edges)) / float(edges.size)
     std = float(np.std(gray_roi))
+    mean = float(np.mean(gray_roi))
     open_score = 1.0 - min(1.0, edge_density * 5.0)
     # Blank near wall: low texture + low edges
     if std < 14.0 and edge_density < 0.05:
         open_score *= 0.30
+    # Bright painted wall/door (few edges, moderate std) is NOT free corridor
+    elif mean >= 130.0 and edge_density < 0.07 and std < 48.0:
+        open_score *= 0.25
     return round(open_score, 3)
 
 
@@ -4798,6 +4802,7 @@ def _seek_centre_obstacle_hint(views):
     """Cheap vision hint: does CENTRE look blocked by a near obstacle/wall?
 
     Returns True/False/None (None = could not judge). Used to correct an optimistic LLM.
+    Blank white walls/doors have few edges and were previously misread as open.
     """
     try:
         img = _seek_centre_frame(views)
@@ -4812,11 +4817,25 @@ def _seek_centre_obstacle_hint(views):
         edges = cv2.Canny(gray, 40, 120)
         edge_density = float(np.count_nonzero(edges)) / float(edges.size)
         std = float(np.std(gray))
+        mean = float(np.mean(gray))
         # High structure filling lower FOV → furniture/wall close
         if edge_density >= 0.10:
             return True
         # Very flat/uniform fill often means a close blank wall/door
         if std < 16.0 and edge_density < 0.04:
+            return True
+        # Mid-frame wall body: bright painted surface filling the view (common indoors)
+        wall = img[int(h * 0.22):int(h * 0.62), int(w * 0.18):int(w * 0.82)]
+        if wall.size:
+            wg = cv2.cvtColor(wall, cv2.COLOR_BGR2GRAY)
+            we = cv2.Canny(wg, 40, 120)
+            w_dens = float(np.count_nonzero(we)) / float(we.size)
+            w_mean = float(np.mean(wg))
+            w_std = float(np.std(wg))
+            if w_mean >= 125.0 and w_dens < 0.075 and w_std < 50.0:
+                return True
+        # Bright low-edge lower FOV (carpet + close pale wall) — not free path
+        if mean >= 145.0 and edge_density < 0.055 and std < 40.0:
             return True
         return False
     except Exception:
