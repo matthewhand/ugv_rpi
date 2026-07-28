@@ -810,13 +810,13 @@ function updateChassisHeartbeatBtn() {
     var btn = document.getElementById('chassis-heartbeat-btn');
     if (!btn) return;
     if (chassis_heartbeat_enabled) {
-        btn.textContent = 'Freq. stop: ON';
-        btn.style.color = '#ffaa55';
-        btn.title = 'Every 2s the UI re-sends last wheel cmd (idle = L0/R0 stop). Turn OFF while using AI timed drives so heartbeats do not cut them short.';
-    } else {
-        btn.textContent = 'Freq. stop: OFF';
+        btn.textContent = 'Idle heartbeat: ON';
         btn.style.color = '#3dd68c';
-        btn.title = '2s chassis heartbeat disabled — good for AI timed moves. Stick/keyboard still work; only the periodic resend is off.';
+        btn.title = 'Every 2s the UI re-sends last wheel cmd (idle = L0/R0 stop). This is the safety default for manual teleop. Turn OFF while using AI timed drives so heartbeats do not cut them short.';
+    } else {
+        btn.textContent = 'Idle heartbeat: OFF';
+        btn.style.color = '#ffaa55';
+        btn.title = '2s chassis heartbeat disabled — good for AI timed moves. Stick/keyboard still work; only the periodic resend is off. Use STOP to halt AI/Seek motion.';
     }
 }
 
@@ -829,7 +829,7 @@ function toggleChassisHeartbeat() {
     if (typeof addMsg === 'function') {
         // no-op on main UI
     }
-    console.log('[ugv] chassis heartbeat (freq. stop)', chassis_heartbeat_enabled ? 'ON' : 'OFF');
+    console.log('[ugv] chassis idle heartbeat', chassis_heartbeat_enabled ? 'ON' : 'OFF');
 }
 
 
@@ -1023,8 +1023,37 @@ function cmdProcess() {
     }
 }
 
-document.onkeydown = function (event) {
+/**
+ * True when keyboard chassis teleop must not run (typing or non-Raw mode).
+ * Explicit override paths: window.ugvKeyboardDriveOverride === true, or hold Alt.
+ */
+function ugvShouldBlockKeyboardDrive(event) {
+    // Any real form control — not only the Raw #commandInput legacy flag.
+    var el = document.activeElement;
+    if (el && el !== document.body && el !== document.documentElement) {
+        var tag = (el.tagName || '').toLowerCase();
+        if (tag === 'input' || tag === 'textarea' || tag === 'select' || el.isContentEditable) {
+            return true;
+        }
+    }
     if (isInputFocused) {
+        return true;
+    }
+    // Chat/Seek never keyboard-drive unless operator explicitly overrides.
+    var mode = (typeof window.ugvAppMode === 'string' && window.ugvAppMode)
+        || (function () {
+            try { return localStorage.getItem('ugv_app_mode') || 'raw'; } catch (e) { return 'raw'; }
+        })();
+    if (mode === 'chat' || mode === 'seek') {
+        if (window.ugvKeyboardDriveOverride === true) return false;
+        if (event && event.altKey) return false; // hold Alt = temporary teleop
+        return true;
+    }
+    return false;
+}
+
+document.onkeydown = function (event) {
+    if (ugvShouldBlockKeyboardDrive(event)) {
         return;
     }
     var key = keyMap[event.keyCode];
@@ -1039,19 +1068,79 @@ document.onkeydown = function (event) {
 }
 
 document.onkeyup = function (event) {
-    if (isInputFocused) {
+    // Always release held move keys on keyup so focus/mode changes cannot stick throttle.
+    var moveKeyRelease = moveKeyMap[event.keyCode];
+    if (moveKeyRelease && move_buttons[moveKeyRelease] === 1) {
+        updateMoveButton(moveKeyRelease, 0);
+        if (!ugvShouldBlockKeyboardDrive(event)) {
+            moveProcess();
+        } else {
+            // Force zero when blocked so we do not leave last non-zero cmd armed.
+            try {
+                heartbeat_left = 0;
+                heartbeat_right = 0;
+                if (typeof cmdJsonCmd === 'function') {
+                    cmdJsonCmd({T: typeof cmd_movition_ctrl !== 'undefined' ? cmd_movition_ctrl : 1, L: 0, R: 0});
+                }
+            } catch (e) {}
+        }
+        return;
+    }
+    if (ugvShouldBlockKeyboardDrive(event)) {
         return;
     }
     var key = keyMap[event.keyCode];
-    var moveKey = moveKeyMap[event.keyCode];
     if (key && ctrl_buttons[key] === 1) {
         updateButton(key, 0);
         cmdProcess();
-    } else if (moveKey && move_buttons[moveKey] === 1) {
-        updateMoveButton(moveKey, 0);
-        moveProcess();
     }
 }
+
+/**
+ * Global emergency STOP — zeros wheels, cancels Seek, clears AI motion lock.
+ * Available from Raw / Chat / Seek (navbar STOP + Seek running pill).
+ */
+function ugvEmergencyStop() {
+    // Local zero immediately (do not wait for network)
+    try {
+        heartbeat_left = 0;
+        heartbeat_right = 0;
+        if (typeof move_buttons === 'object') {
+            Object.keys(move_buttons).forEach(function (k) { move_buttons[k] = 0; });
+        }
+        if (typeof socketJson !== 'undefined' && socketJson && socketJson.connected) {
+            socketJson.emit('json', {T: 1, L: 0, R: 0, _force_stop: true});
+            socketJson.emit('json', {T: 13, X: 0, Z: 0, _force_stop: true});
+        }
+    } catch (e) {}
+    var btn = document.getElementById('global-stop-btn');
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = 'STOPPING…';
+    }
+    fetch('/api/emergency_stop', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}'})
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+            if (typeof window.ugvOnEmergencyStop === 'function') {
+                try { window.ugvOnEmergencyStop(d); } catch (e) {}
+            }
+            if (typeof addMsg === 'function') {
+                addMsg('sys', 'Emergency STOP' + (d && d.success ? ' OK' : ' (check server)'));
+            }
+        })
+        .catch(function () {
+            // Fallback: seek stop only
+            fetch('/api/ai/seek/stop', {method: 'POST'}).catch(function () {});
+        })
+        .then(function () {
+            if (btn) {
+                btn.disabled = false;
+                btn.textContent = 'STOP';
+            }
+        });
+}
+window.ugvEmergencyStop = ugvEmergencyStop;
+window.ugvShouldBlockKeyboardDrive = ugvShouldBlockKeyboardDrive;
 
 function lookAhead() {
     if (module_type == 1) {

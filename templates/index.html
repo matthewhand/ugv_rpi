@@ -74,10 +74,17 @@
         <button type="button" role="tab" data-mode="chat" id="mode-tab-chat" aria-selected="false">Chat</button>
         <button type="button" role="tab" data-mode="seek" id="mode-tab-seek" aria-selected="false">Seek</button>
       </div>
+      <button type="button" id="global-stop-btn" class="ugv-global-stop" onclick="ugvEmergencyStop()"
+        title="Emergency STOP: zero wheels, cancel Seek, clear AI motion lock. Available in every mode.">
+        STOP
+      </button>
+      <button type="button" id="seek-running-pill" class="ugv-seek-running-pill" hidden
+        title="Seek is driving the robot. Click to emergency-stop."
+        onclick="ugvEmergencyStop()">Seek running</button>
       <div class="ugv-nav-toggles" id="ugv-nav-toggles">
         <button id="rtsp-toggle-btn" class="normal_btn" onclick="toggleRTSP()" style="padding: 6px 12px; font-size: 12px; background: #222; color: #ff5555; border: 1px solid #555; border-radius: 4px; cursor: pointer;">RTSP Stream: OFF</button>
         <button id="motor-toggle-btn" class="normal_btn" onclick="toggleMotors()" style="padding: 6px 12px; font-size: 12px; background: #222; color: #5b8cff; border: 1px solid #555; border-radius: 4px; cursor: pointer;" title="Toggle routing for chassis + pan/tilt: Direct serial (UART) or ROS 2 relay (rosbridge).">Control: ROS 2 relay</button>
-        <button id="chassis-heartbeat-btn" class="normal_btn" onclick="toggleChassisHeartbeat()" style="padding: 6px 12px; font-size: 12px; background: #222; color: #ffaa55; border: 1px solid #555; border-radius: 4px; cursor: pointer;" title="Every 2s the UI re-sends last wheel cmd (idle = stop). Turn OFF for AI timed drives so the heartbeat does not cut them short.">Freq. stop: ON</button>
+        <button id="chassis-heartbeat-btn" class="normal_btn" onclick="toggleChassisHeartbeat()" style="padding: 6px 12px; font-size: 12px; background: #222; color: #ffaa55; border: 1px solid #555; border-radius: 4px; cursor: pointer;" title="Every 2s the UI re-sends last wheel cmd (idle = stop). Turn OFF for AI timed drives so the heartbeat does not cut them short.">Idle heartbeat: ON</button>
         <button id="esp32-wifi-btn" class="normal_btn" onclick="toggleEsp32Wifi()" style="padding: 6px 12px; font-size: 12px; background: #222; color: #ffaa55; border: 1px solid #555; border-radius: 4px; cursor: pointer;" title="Session-only: send serial T:408 to stop ESP32 WiFi (SoftAP UGV). Does NOT change boot config — AP returns after ESP32 reboot. Never uses T:401 (persistent off).">ESP32 WiFi: on?</button>
         <button type="button" id="ops-log-btn" class="normal_btn" onclick="toggleOpsLogPane()" style="padding: 6px 12px; font-size: 12px; background: #222; color: #c4b5fd; border: 1px solid #555; border-radius: 4px; cursor: pointer;" title="Show operational app log (control mode, WiFi, AI motion, errors).">App log</button>
         <button type="button" id="twin-btn" class="normal_btn" onclick="toggleTwinPane()" style="padding: 6px 12px; font-size: 12px; background: #1f2538; color: #5b8cff; border: 1px solid #5b8cff; border-radius: 4px; cursor: pointer; font-weight: 600;" title="Open 3D digital twin as a popup panel (same tab).">3D Twin</button>
@@ -548,7 +555,7 @@
                   </div>
                 </div>
                 <div class="ugv-seek-scenenav">
-                  <label class="ugv-seek-scenenav-label">
+                  <label class="ugv-seek-scenenav-label" title="When checked, triple-view LLM/heuristic nav picks the next drive. Uncheck for detector-only scan cycles without scene nav (modes b/c). Mode a always keeps this off.">
                     <input type="checkbox" id="seek-llm-scene-nav" checked />
                     <span>LLM Scene Navigation</span>
                   </label>
@@ -556,6 +563,14 @@
                     <span>Recalculate every</span>
                     <input type="number" id="seek-llm-nav-interval" value="10" min="1" max="100" />
                     <span>steps</span>
+                  </div>
+                  <div class="ugv-seek-limits" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;font-size:11px;color:#9aa3b2;">
+                    <label title="0 = unlimited (not recommended)">Max steps
+                      <input type="number" id="seek-max-steps" value="30" min="0" max="500" style="width:4.5em;margin-left:4px;" />
+                    </label>
+                    <label title="0 = no time limit (not recommended)">Timeout s
+                      <input type="number" id="seek-timeout-s" value="300" min="0" max="7200" style="width:5em;margin-left:4px;" />
+                    </label>
                   </div>
                 </div>
                 <div class="ugv-row-actions">
@@ -726,8 +741,8 @@
         <div style="background-image: url('./img/grey/delete.svg');"></div>
     </footer>
     <!-- <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.7.0/jquery.min.js"></script> -->
-    <script src="./modes.js?v=pan-overlay-5"></script>
-    <script src="./control.js"></script>
+    <script src="./modes.js?v=roi-stop-1"></script>
+    <script src="./control.js?v=roi-stop-1"></script>
     <script src="./main.js"></script>
 </body>
 </html>

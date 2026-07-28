@@ -49,12 +49,87 @@ REFEREE_DETECTOR = 'detector'  # OpenCV / MobileNet-SSD / future YOLO class list
 REFEREE_LLM = 'llm'            # vision model answers found: true|false via JSON
 VALID_REFEREES = frozenset({REFEREE_DETECTOR, REFEREE_LLM})
 
-# 0 = unlimited steps (stop only on found / user Stop / timeout)
-DEFAULT_SEEK_MAX_STEPS = 0
-# 0 = no time limit; positive seconds still hard-stops a runaway seek
-DEFAULT_SEEK_TIMEOUT_S = 0.0
+# Finite pilot defaults (0 still means unlimited when explicitly requested)
+DEFAULT_SEEK_MAX_STEPS = 30
+DEFAULT_SEEK_TIMEOUT_S = 300.0  # 5 minutes
 DEFAULT_SEEK_CONF = 0.22
 DEFAULT_SEEK_STEP_PAUSE_S = 0.35
+# Caps applied when a positive limit is requested
+SEEK_MAX_STEPS_CAP = 500
+SEEK_TIMEOUT_S_MIN = 5.0
+SEEK_TIMEOUT_S_CAP = 7200.0
+
+
+def normalize_seek_max_steps(raw, default: int = DEFAULT_SEEK_MAX_STEPS) -> int:
+    """Normalize max_steps from a request body / UI.
+
+    Missing/empty → *default* (finite pilot default).
+    Explicit 0 / inf / unlimited / none → 0 (unlimited).
+    Positive values capped at SEEK_MAX_STEPS_CAP.
+    """
+    if raw is None or raw == '':
+        try:
+            return max(0, int(default))
+        except (TypeError, ValueError):
+            return int(DEFAULT_SEEK_MAX_STEPS)
+    if str(raw).lower() in ('inf', 'infinite', 'unlimited', 'none'):
+        return 0
+    try:
+        ms = int(raw)
+    except (TypeError, ValueError):
+        try:
+            return max(0, int(default))
+        except (TypeError, ValueError):
+            return int(DEFAULT_SEEK_MAX_STEPS)
+    if ms < 0:
+        return 0
+    if ms > 0:
+        return min(int(SEEK_MAX_STEPS_CAP), ms)
+    return 0  # explicit 0 = unlimited
+
+
+def normalize_seek_timeout_s(raw, default: float = DEFAULT_SEEK_TIMEOUT_S) -> float:
+    """Normalize timeout_s from a request body / UI.
+
+    Missing/empty → *default* (finite pilot default).
+    Explicit 0 / inf / unlimited / none → 0.0 (no time limit).
+    Positive values clamped to [SEEK_TIMEOUT_S_MIN, SEEK_TIMEOUT_S_CAP].
+    """
+    if raw is None or raw == '':
+        try:
+            return max(0.0, float(default))
+        except (TypeError, ValueError):
+            return float(DEFAULT_SEEK_TIMEOUT_S)
+    if str(raw).lower() in ('inf', 'infinite', 'unlimited', 'none'):
+        return 0.0
+    try:
+        ts = float(raw)
+    except (TypeError, ValueError):
+        try:
+            return max(0.0, float(default))
+        except (TypeError, ValueError):
+            return float(DEFAULT_SEEK_TIMEOUT_S)
+    if ts < 0:
+        return 0.0
+    if ts > 0:
+        return max(float(SEEK_TIMEOUT_S_MIN), min(float(SEEK_TIMEOUT_S_CAP), ts))
+    return 0.0  # explicit 0 = no time limit
+
+
+def motion_lock_should_ignore_zero(
+    lock_active: bool,
+    is_zero_cmd: bool,
+    *,
+    force_stop: bool = False,
+) -> bool:
+    """Whether a zero chassis cmd should be dropped while AI motion lock is armed.
+
+    force_stop=True always delivers the zero (emergency STOP / stop_motors /
+    seek stop). Heartbeat idle zeros remain blocked during timed AI drives.
+    """
+    if force_stop:
+        return False
+    return bool(lock_active) and bool(is_zero_cmd)
 
 # What to do when the referee reports found
 ON_FOUND_NONE = 'none'

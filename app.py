@@ -3005,6 +3005,9 @@ from ai_seek import (
     DEFAULT_SEEK_TIMEOUT_S,
     DEFAULT_SEEK_CONF,
     DEFAULT_SEEK_STEP_PAUSE_S,
+    normalize_seek_max_steps,
+    normalize_seek_timeout_s,
+    motion_lock_should_ignore_zero,
     DEFAULT_ON_FOUND,
     DEFAULT_ON_FOUND_TTS,
 )
@@ -6305,26 +6308,15 @@ def api_ai_seek_start():
     data = request.get_json(silent=True) or {}
     goal = data.get('goal') or data.get('target') or data.get('label') or ''
     referee = parse_seek_referee(data.get('referee') or data.get('mode') or REFEREE_DETECTOR)
-    # max_steps: 0 / null / "inf" = unlimited (default). Positive capped for safety.
-    raw_steps = data.get('max_steps', DEFAULT_SEEK_MAX_STEPS)
-    if raw_steps is None or raw_steps == '' or str(raw_steps).lower() in ('inf', 'infinite', 'unlimited', 'none'):
-        max_steps = 0
+    # Missing → finite pilot defaults. Explicit 0 / "unlimited" → unlimited.
+    if 'max_steps' in data:
+        max_steps = normalize_seek_max_steps(data.get('max_steps'))
     else:
-        max_steps = int(raw_steps)
-        if max_steps < 0:
-            max_steps = 0
-        elif max_steps > 0:
-            max_steps = min(500, max_steps)
-    # timeout_s: 0 = no time limit; positive seconds capped
-    raw_to = data.get('timeout_s', DEFAULT_SEEK_TIMEOUT_S)
-    if raw_to is None or raw_to == '' or str(raw_to).lower() in ('inf', 'infinite', 'unlimited', 'none'):
-        timeout_s = 0.0
+        max_steps = normalize_seek_max_steps(None, default=DEFAULT_SEEK_MAX_STEPS)
+    if 'timeout_s' in data:
+        timeout_s = normalize_seek_timeout_s(data.get('timeout_s'))
     else:
-        timeout_s = float(raw_to)
-        if timeout_s < 0:
-            timeout_s = 0.0
-        elif timeout_s > 0:
-            timeout_s = max(5.0, min(7200.0, timeout_s))
+        timeout_s = normalize_seek_timeout_s(None, default=DEFAULT_SEEK_TIMEOUT_S)
     conf = float(data.get('conf_threshold') or DEFAULT_SEEK_CONF)
     conf = max(0.05, min(0.95, conf))
     on_found = parse_on_found(data.get('on_found') or data.get('upon_found') or DEFAULT_ON_FOUND)
@@ -6369,8 +6361,78 @@ def api_ai_seek_status():
 @app.route('/api/ai/seek/stop', methods=['POST'])
 def api_ai_seek_stop():
     st = seek_controller.stop()
+    # Always clear AI motion lock and force-zero chassis so Stop is not blocked by lock.
+    result = _emergency_stop_motion(source='seek_stop', stop_seek=False)
     olog.info('ai_seek', 'Seek stop requested', phase=st.get('phase'))
-    return jsonify({'success': True, 'status': seek_controller.status()})
+    return jsonify({
+        'success': True,
+        'status': seek_controller.status(),
+        'motion': result,
+    })
+
+
+def _emergency_stop_motion(source='api', stop_seek=True):
+    """Zero chassis, cancel AI drive timer/lock, optionally cancel Seek.
+
+    Always bypasses AI motion lock so operators can stop-by-STOP even during
+    continuous AI drives. Used by /api/emergency_stop and Seek stop.
+    """
+    _cancel_ai_drive_timer()
+    _clear_ai_motion_lock()
+    seek_phase = None
+    if stop_seek:
+        try:
+            st = seek_controller.stop()
+            seek_phase = (st or {}).get('phase')
+        except Exception as e:
+            olog.warn('emergency_stop', f'Seek stop failed: {e}', source=source, error=str(e))
+    # Force-zero via router (bypasses lock) and direct serial belt-and-suspenders.
+    route_results = []
+    for cmd in (
+        {'T': 1, 'L': 0, 'R': 0, '_force_stop': True},
+        {'T': 13, 'X': 0, 'Z': 0, '_force_stop': True},
+    ):
+        try:
+            route_results.append(_route_json_command(cmd))
+        except Exception as e:
+            route_results.append({'ok': False, 'error': str(e)})
+    try:
+        base.base_json_ctrl({'T': 13, 'X': 0, 'Z': 0})
+        base.base_json_ctrl({'T': 1, 'L': 0, 'R': 0})
+    except Exception as e:
+        olog.warn('emergency_stop', f'Direct zero failed: {e}', source=source, error=str(e))
+    lock_rem = max(0.0, _ai_motion_lock_until - time.time())
+    olog.warn(
+        'emergency_stop',
+        f'Emergency STOP ({source})',
+        source=source,
+        seek_phase=seek_phase,
+        lock_remaining_s=round(lock_rem, 3),
+    )
+    return {
+        'ok': True,
+        'source': source,
+        'ai_motion_lock_active': lock_rem > 0,
+        'ai_motion_lock_remaining_s': round(lock_rem, 3),
+        'seek_phase': seek_phase,
+        'routes': route_results,
+    }
+
+
+@app.route('/api/emergency_stop', methods=['POST'])
+def api_emergency_stop():
+    """Global STOP: cancel Seek, clear AI motion lock, zero chassis (bypass lock)."""
+    result = _emergency_stop_motion(source='api_emergency_stop', stop_seek=True)
+    try:
+        seek_st = seek_controller.status()
+    except Exception:
+        seek_st = None
+    return jsonify({
+        'success': True,
+        'motion': result,
+        'status': seek_st,
+        'ai_motion_lock_active': _ai_motion_lock_active(),
+    })
 
 
 @app.route('/api/ai/seek/check', methods=['POST'])
@@ -6408,7 +6470,8 @@ def api_ai_motion_status():
             'note': (
                 'While ai_motion_lock_active, zero-velocity UI chassis heartbeats '
                 '(T:1 L=0/R=0) are ignored so AI timed drives complete. '
-                'Also toggle "Freq. stop" OFF on the main dashboard when using AI.'
+                'Emergency STOP and stop_motors always clear the lock. '
+                'Also set "Idle heartbeat" OFF on the main dashboard when using AI timed drives.'
             ),
             'tools': [
                 t for t in _ai_tools_catalog()
@@ -6801,10 +6864,22 @@ def _route_json_command(cmd):
     - T:1 / T:13  chassis → serial (if direct) or /cmd_vel (if ros2)
     - T:133 / T:141 gimbal → serial or ROS joint_states + pt controller topic
     - everything else → serial always
+
+    Zero chassis cmds are ignored while AI motion lock is active (so the UI 2s
+    idle heartbeat cannot cut a timed drive). Pass ``_force_stop: true`` (or
+    ``force_stop``) to always deliver a stop — used by emergency STOP / stop_motors.
     """
     if not isinstance(cmd, dict):
         base.base_json_ctrl(cmd)
         return {'path': 'serial', 'ok': True, 'mode': get_control_mode()}
+
+    # Strip internal flags before hardware; keep force_stop for lock policy.
+    force_stop = bool(cmd.get('_force_stop') or cmd.get('force_stop') or cmd.get('_emergency'))
+    if any(k in cmd for k in ('_force_stop', 'force_stop', '_emergency')):
+        cmd = {
+            k: v for k, v in cmd.items()
+            if k not in ('_force_stop', 'force_stop', '_emergency')
+        }
 
     mode = get_control_mode()
     t = cmd.get('T')
@@ -6815,14 +6890,24 @@ def _route_json_command(cmd):
     }
     chassis_types = {1, 13, '1', '13', f.get('cmd_config', {}).get('cmd_movition_ctrl')}
 
-    # UI 2s idle heartbeat sends T:1 L=0 R=0; do not clobber an in-flight AI drive
-    if t in chassis_types and _ai_motion_lock_active() and _chassis_cmd_is_zero(cmd):
+    # UI 2s idle heartbeat sends T:1 L=0 R=0; do not clobber an in-flight AI drive.
+    # Emergency STOP sets force_stop so zeros always land and clear motion.
+    if t in chassis_types and motion_lock_should_ignore_zero(
+        _ai_motion_lock_active(),
+        _chassis_cmd_is_zero(cmd),
+        force_stop=force_stop,
+    ):
         return {
             'path': 'ignored',
             'ok': True,
             'reason': 'ai_motion_active',
             'lock_remaining_s': max(0.0, _ai_motion_lock_until - time.time()),
         }
+
+    # force_stop zeros also clear lock so subsequent heartbeats work normally
+    if force_stop and t in chassis_types and _chassis_cmd_is_zero(cmd):
+        _clear_ai_motion_lock()
+        _cancel_ai_drive_timer()
 
     # ---- Gimbal / pan-tilt ----
     if t in gimbal_types:

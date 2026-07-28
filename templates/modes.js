@@ -166,9 +166,64 @@
     }
   }
 
-  function setMode(mode) {
+  function getActiveMode() {
+    var active = document.querySelector('.ugv-mode-tabs [data-mode].active');
+    if (active) return active.getAttribute('data-mode') || 'raw';
+    try {
+      return localStorage.getItem(STORAGE_KEY) || 'raw';
+    } catch (e) {
+      return 'raw';
+    }
+  }
+
+  function setSeekRunningIndicator(running, st) {
+    var pill = $('seek-running-pill');
+    if (!pill) return;
+    if (running) {
+      pill.hidden = false;
+      var step = st && st.step != null ? st.step : '?';
+      var max = st && st.max_steps != null ? st.max_steps : 0;
+      var maxLab = max === 0 || max === '0' ? '∞' : String(max);
+      pill.textContent = 'Seek running · ' + step + '/' + maxLab;
+      pill.setAttribute('aria-hidden', 'false');
+    } else {
+      pill.hidden = true;
+      pill.textContent = 'Seek running';
+      pill.setAttribute('aria-hidden', 'true');
+    }
+  }
+
+  function setMode(mode, opts) {
+    opts = opts || {};
     mode = mode || 'raw';
     if (mode !== 'raw' && mode !== 'chat' && mode !== 'seek') mode = 'raw';
+    var prev = getActiveMode();
+    // Leaving Seek while autonomy is running: confirm (or auto-stop when force).
+    if (
+      prev === 'seek' &&
+      mode !== 'seek' &&
+      lastSeenSeekPhase === 'running' &&
+      !opts.force
+    ) {
+      var ok = true;
+      try {
+        ok = window.confirm(
+          'Seek is still driving the robot. Stop Seek and switch mode?'
+        );
+      } catch (e) {
+        ok = true;
+      }
+      if (!ok) {
+        // Keep Seek tab selected
+        return false;
+      }
+      // Auto-stop seek before leaving (does not wait for network)
+      try {
+        seekStop({ silent: true });
+      } catch (e) {}
+      lastSeenSeekPhase = 'stopped';
+      setSeekRunningIndicator(false);
+    }
     var panels = {
       raw: $('mode-panel-raw'),
       chat: $('mode-panel-chat'),
@@ -191,10 +246,12 @@
     try {
       localStorage.setItem(STORAGE_KEY, mode);
     } catch (e) {}
+    window.ugvAppMode = mode;
     // Re-open MJPEG when entering chat/seek (or any mode switch)
     if (mode === 'chat' || mode === 'seek' || mode === 'raw') {
       refreshLiveFeeds();
     }
+    return true;
   }
 
   function initModeTabs() {
@@ -412,6 +469,14 @@
     if (intervalInp && st.llm_nav_interval) {
       intervalInp.value = String(st.llm_nav_interval);
     }
+    var maxInp = $('seek-max-steps');
+    if (maxInp && st.max_steps != null) {
+      maxInp.value = String(st.max_steps);
+    }
+    var toInp = $('seek-timeout-s');
+    if (toInp && st.timeout_s != null) {
+      toInp.value = String(st.timeout_s);
+    }
   }
 
   function replaySeekLogFromStatus(st, opts) {
@@ -559,6 +624,22 @@
 
     if (detWrap) detWrap.hidden = (mode === 'llm_vision');
     if (llmWrap) llmWrap.hidden = (mode !== 'llm_vision');
+
+    // Mode a: scene-nav always off and checkbox disabled (payload forces false).
+    // Modes b/c: checkbox is live and included in start payload.
+    var sceneCb = $('seek-llm-scene-nav');
+    var intervalInp = $('seek-llm-nav-interval');
+    if (sceneCb) {
+      if (mode === 'detector') {
+        sceneCb.checked = false;
+        sceneCb.disabled = true;
+      } else {
+        sceneCb.disabled = false;
+      }
+    }
+    if (intervalInp) {
+      intervalInp.disabled = mode === 'detector' || (sceneCb && !sceneCb.checked);
+    }
 
     try {
       localStorage.setItem(SEEK_REFEREE_KEY, mode);
@@ -955,14 +1036,32 @@
     var ref = st.referee || 'detector';
     var det = st.last_detection;
     var nav = st.last_nav || {};
+    var maxSteps = st.max_steps;
+    var maxLab =
+      maxSteps === 0 || maxSteps === '0' ? '∞' : maxSteps != null ? String(maxSteps) : '—';
+    var stepNum = st.step || 0;
+    var stepsLeft =
+      maxSteps && maxSteps !== 0 && maxSteps !== '0'
+        ? Math.max(0, Number(maxSteps) - Number(stepNum))
+        : null;
+    var timeLeftLab = '';
+    if (st.timeout_s && Number(st.timeout_s) > 0 && st.started_at) {
+      var elapsed = Date.now() / 1000 - Number(st.started_at);
+      var left = Math.max(0, Number(st.timeout_s) - elapsed);
+      timeLeftLab = ' · time left ~' + Math.round(left) + 's';
+    } else if (st.timeout_s && Number(st.timeout_s) > 0) {
+      timeLeftLab = ' · timeout ' + st.timeout_s + 's';
+    }
     var lines = [
       'Phase: ' + phase.toUpperCase(),
       'Referee: ' + ref,
       'Goal: ' + (st.goal_label || st.goal_text || '—'),
       'Step: ' +
-        (st.step || 0) +
+        stepNum +
         ' / ' +
-        (st.max_steps === 0 || st.max_steps === '0' ? '∞' : st.max_steps || '—'),
+        maxLab +
+        (stepsLeft != null ? ' (' + stepsLeft + ' left)' : '') +
+        timeLeftLab,
       'Message: ' + (st.message || ''),
     ];
     if (st.last_check_seq) {
@@ -1064,6 +1163,7 @@
         var phase = st.phase || 'idle';
         renderSeekStatus(st);
         setSeekControlsRunning(phase === 'running');
+        setSeekRunningIndicator(phase === 'running', st);
 
         // Only announce end on transition out of running (not on every poll)
         if (lastSeenSeekPhase === 'running' && phase !== 'running') {
@@ -1083,6 +1183,7 @@
             );
           }
           updateDetectorBar(st);
+          setSeekRunningIndicator(false);
         } else if (phase === 'running' && !seekPollTimer) {
           // Server still running but poll was lost (e.g. tab background) — resume
           startSeekPolling();
@@ -1109,15 +1210,49 @@
     wrap.hidden = getSeekOnFound() !== 'tts';
   }
 
+  // Finite pilot defaults — match server DEFAULT_SEEK_* (0 still = unlimited if chosen)
+  var DEFAULT_UI_SEEK_MAX_STEPS = 30;
+  var DEFAULT_UI_SEEK_TIMEOUT_S = 300;
+
+  function getSeekMaxSteps() {
+    var inp = $('seek-max-steps');
+    if (!inp) return DEFAULT_UI_SEEK_MAX_STEPS;
+    var v = parseInt(inp.value, 10);
+    if (isNaN(v) || v < 0) return DEFAULT_UI_SEEK_MAX_STEPS;
+    return v; // 0 = unlimited (explicit)
+  }
+
+  function getSeekTimeoutS() {
+    var inp = $('seek-timeout-s');
+    if (!inp) return DEFAULT_UI_SEEK_TIMEOUT_S;
+    var v = parseFloat(inp.value);
+    if (isNaN(v) || v < 0) return DEFAULT_UI_SEEK_TIMEOUT_S;
+    return v; // 0 = no limit (explicit)
+  }
+
+  function getLlmSceneNavEnabled(mode) {
+    // Mode a (detector-only): always off. Modes b/c: honor the checkbox.
+    if (mode === 'detector') return false;
+    var sceneCb = $('seek-llm-scene-nav');
+    if (sceneCb) return !!sceneCb.checked;
+    return mode !== 'detector';
+  }
+
   function seekStart() {
     var mode = getSelectedSeekMode();
     var goal = getSeekGoal();
+    if (!(goal || '').trim()) {
+      seekLog('Start blocked: goal is empty', 'warn');
+      return;
+    }
     var referee = (mode === 'llm_vision') ? 'llm' : 'detector';
-    var llmSceneNav = (mode !== 'detector');
+    var llmSceneNav = getLlmSceneNavEnabled(mode);
     var onFound = getSeekOnFound();
     var onFoundTts = getSeekOnFoundTts();
     var llmNavInterval = parseInt(($('seek-llm-nav-interval') && $('seek-llm-nav-interval').value) || '10', 10);
     if (isNaN(llmNavInterval) || llmNavInterval < 1) llmNavInterval = 10;
+    var maxSteps = getSeekMaxSteps();
+    var timeoutS = getSeekTimeoutS();
     lastSeekCheckSeq = 0;
     lastSeekStep = -1;
     lastSeekLogSeq = 0;
@@ -1130,6 +1265,8 @@
         ') for: ' +
         goal +
         ' · scene nav: ' + (llmSceneNav ? 'every ' + llmNavInterval + ' steps' : 'disabled') +
+        ' · limits: ' + (maxSteps === 0 ? '∞ steps' : maxSteps + ' steps') +
+        ' / ' + (timeoutS === 0 ? 'no timeout' : timeoutS + 's') +
         ' · upon found: ' +
         (onFound === 'tts' ? 'TTS “' + onFoundTts + '”' : 'do nothing'),
       'start'
@@ -1140,14 +1277,15 @@
       goal
     );
     setSeekControlsRunning(true);
+    setSeekRunningIndicator(true, { step: 0, max_steps: maxSteps });
     fetch('/api/ai/seek/start', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         goal: goal,
         referee: referee,
-        max_steps: 0,
-        timeout_s: 0,
+        max_steps: maxSteps,
+        timeout_s: timeoutS,
         on_found: onFound,
         on_found_tts: onFoundTts,
         llm_scene_nav: llmSceneNav,
@@ -1162,6 +1300,7 @@
           seekLog('Start failed: ' + (d.error || 'unknown'));
           setDetectorBar('idle', 'Detector: idle', '');
           setSeekControlsRunning(false);
+          setSeekRunningIndicator(false);
           lastSeenSeekPhase = 'idle';
           return;
         }
@@ -1177,11 +1316,21 @@
         seekLog(String(e.message || e));
         setDetectorBar('idle', 'Detector: idle', '');
         setSeekControlsRunning(false);
+        setSeekRunningIndicator(false);
         lastSeenSeekPhase = 'idle';
       });
   }
 
-  function seekStop() {
+  function seekStop(opts) {
+    opts = opts || {};
+    if (!opts.silent) {
+      seekLog('Stop requested', 'warn');
+    }
+    // Prefer global emergency STOP (zeros + lock clear + seek cancel)
+    if (typeof window.ugvEmergencyStop === 'function' && !opts.seekOnly) {
+      window.ugvEmergencyStop();
+      return;
+    }
     fetch('/api/ai/seek/stop', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
       .then(function (r) {
         return r.json();
@@ -1189,12 +1338,12 @@
       .then(function (d) {
         var st = (d && d.status) || {};
         renderSeekStatus(st);
-        seekLog('Stop requested', 'warn');
+        setSeekRunningIndicator(st.phase === 'running', st);
         // Keep polling until phase leaves running so end message + TTS status appear
         if (!seekPollTimer && st.phase === 'running') startSeekPolling();
       })
       .catch(function (e) {
-        seekLog(String(e.message || e));
+        if (!opts.silent) seekLog(String(e.message || e));
       });
   }
 
@@ -1271,6 +1420,12 @@
     radios.forEach(function (r) {
       r.addEventListener('change', syncSeekRefereeUI);
     });
+    var sceneCbInit = $('seek-llm-scene-nav');
+    if (sceneCbInit) {
+      sceneCbInit.addEventListener('change', function () {
+        syncSeekRefereeUI();
+      });
+    }
     var onFoundSel = $('seek-on-found');
     if (onFoundSel) onFoundSel.addEventListener('change', syncSeekOnFoundUI);
     syncSeekOnFoundUI();
@@ -1373,7 +1528,18 @@
     boot();
   }
 
+  // After emergency STOP, refresh seek UI / pill from server
+  window.ugvOnEmergencyStop = function () {
+    lastSeenSeekPhase = 'stopped';
+    setSeekRunningIndicator(false);
+    setSeekControlsRunning(false);
+    hydrateSeekFromServer({ soft: true });
+  };
+
   // export for tests / console
   window.ugvSetMode = setMode;
+  window.ugvGetActiveMode = getActiveMode;
   window.ugvRefreshLiveFeeds = refreshLiveFeeds;
+  window.ugvSeekStop = seekStop;
+  window.ugvSetSeekRunningIndicator = setSeekRunningIndicator;
 })();

@@ -1112,6 +1112,51 @@ ul.video-list li a:hover div .normal_btn_play::before{background-image: url('./i
   padding: 6px 10px !important;
   font-size: 11px !important;
 }
+/* Global emergency STOP — always visible in navbar */
+.ugv-global-stop {
+  border: 1px solid #ff4d4f;
+  background: #3b1214;
+  color: #ff6b6b;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  padding: 8px 16px;
+  min-height: 36px;
+  min-width: 64px;
+  border-radius: 8px;
+  cursor: pointer;
+  box-shadow: 0 0 0 1px rgba(255, 77, 79, 0.25);
+}
+.ugv-global-stop:hover:not(:disabled) {
+  background: #5c181c;
+  color: #fff;
+}
+.ugv-global-stop:disabled {
+  opacity: 0.7;
+  cursor: wait;
+}
+/* Seek-running indicator (outside Seek panel) */
+.ugv-seek-running-pill {
+  border: 1px solid #00e676;
+  background: #0d2818;
+  color: #00e676;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 6px 10px;
+  min-height: 32px;
+  border-radius: 999px;
+  cursor: pointer;
+  animation: ugv-seek-pulse 1.1s ease-out infinite;
+}
+.ugv-seek-running-pill[hidden] {
+  display: none !important;
+}
+.ugv-seek-running-pill:hover {
+  background: #123522;
+  color: #7dffb3;
+}
 .mode-panel { display: none; }
 .mode-panel.active { display: block; }
 .mode-panel-chat, .mode-panel-seek {

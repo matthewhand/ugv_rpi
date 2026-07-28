@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import sys
+import threading
 import time
 import unittest
 from pathlib import Path
@@ -21,6 +22,14 @@ from ai_seek import (  # noqa: E402
     parse_on_found,
     format_on_found_tts,
     detector_labels,
+    normalize_seek_max_steps,
+    normalize_seek_timeout_s,
+    motion_lock_should_ignore_zero,
+    DEFAULT_SEEK_MAX_STEPS,
+    DEFAULT_SEEK_TIMEOUT_S,
+    SEEK_MAX_STEPS_CAP,
+    SEEK_TIMEOUT_S_MIN,
+    SEEK_TIMEOUT_S_CAP,
     REFEREE_DETECTOR,
     REFEREE_LLM,
     ON_FOUND_NONE,
@@ -237,6 +246,110 @@ class TestSeekController(unittest.TestCase):
         self.assertEqual(st['phase'], 'found')
         self.assertTrue(st['last_detection']['found'])
         self.assertEqual(st['last_detection']['goal_label'], 'dog')
+
+
+class TestSeekLimitDefaults(unittest.TestCase):
+    """Finite pilot defaults + explicit unlimited override (ROI pack)."""
+
+    def test_defaults_are_finite_and_nonzero(self):
+        self.assertGreater(DEFAULT_SEEK_MAX_STEPS, 0)
+        self.assertGreater(DEFAULT_SEEK_TIMEOUT_S, 0)
+
+    def test_missing_uses_finite_default(self):
+        self.assertEqual(normalize_seek_max_steps(None), DEFAULT_SEEK_MAX_STEPS)
+        self.assertEqual(normalize_seek_max_steps(''), DEFAULT_SEEK_MAX_STEPS)
+        self.assertEqual(normalize_seek_timeout_s(None), DEFAULT_SEEK_TIMEOUT_S)
+        self.assertEqual(normalize_seek_timeout_s(''), DEFAULT_SEEK_TIMEOUT_S)
+
+    def test_explicit_zero_is_unlimited(self):
+        self.assertEqual(normalize_seek_max_steps(0), 0)
+        self.assertEqual(normalize_seek_max_steps('0'), 0)
+        self.assertEqual(normalize_seek_max_steps('unlimited'), 0)
+        self.assertEqual(normalize_seek_timeout_s(0), 0.0)
+        self.assertEqual(normalize_seek_timeout_s('inf'), 0.0)
+
+    def test_positive_capped(self):
+        self.assertEqual(normalize_seek_max_steps(12), 12)
+        self.assertEqual(normalize_seek_max_steps(99999), SEEK_MAX_STEPS_CAP)
+        self.assertEqual(normalize_seek_timeout_s(1), SEEK_TIMEOUT_S_MIN)
+        self.assertEqual(normalize_seek_timeout_s(999999), SEEK_TIMEOUT_S_CAP)
+
+    def test_controller_start_adopts_normalized_defaults(self):
+        ctrl = SeekController()
+
+        def loop(c, label, conf, max_steps, timeout_s):
+            # Capture what the loop receives and finish immediately
+            c.update(step=0, message=f'ms={max_steps},to={timeout_s}')
+            c.finish('stopped', message='done', step=0)
+
+        r = ctrl.start(
+            'dog',
+            loop_fn=loop,
+            max_steps=normalize_seek_max_steps(None),
+            timeout_s=normalize_seek_timeout_s(None),
+        )
+        self.assertTrue(r['success'])
+        deadline = time.time() + 2.0
+        while time.time() < deadline and ctrl.is_running():
+            time.sleep(0.02)
+        st = ctrl.status()
+        self.assertEqual(st['max_steps'], DEFAULT_SEEK_MAX_STEPS)
+        self.assertEqual(st['timeout_s'], DEFAULT_SEEK_TIMEOUT_S)
+
+
+class TestMotionLockZeroPolicy(unittest.TestCase):
+    """AI lock drops heartbeat zeros; force_stop (emergency STOP) always delivers."""
+
+    def test_heartbeat_zero_blocked_while_locked(self):
+        self.assertTrue(
+            motion_lock_should_ignore_zero(True, True, force_stop=False)
+        )
+
+    def test_force_stop_never_blocked(self):
+        self.assertFalse(
+            motion_lock_should_ignore_zero(True, True, force_stop=True)
+        )
+        self.assertFalse(
+            motion_lock_should_ignore_zero(True, True, force_stop=True)
+        )
+
+    def test_nonzero_never_blocked(self):
+        self.assertFalse(
+            motion_lock_should_ignore_zero(True, False, force_stop=False)
+        )
+
+    def test_unlocked_zeros_pass(self):
+        self.assertFalse(
+            motion_lock_should_ignore_zero(False, True, force_stop=False)
+        )
+
+    def test_seek_stop_clears_running_phase(self):
+        """Shipped SeekController.stop() path used by emergency/seek stop APIs."""
+        ctrl = SeekController()
+        started = threading.Event()
+        release = threading.Event()
+
+        def loop(c, label, conf, max_steps, timeout_s):
+            started.set()
+            # Block until test requests stop (or timeout)
+            for _ in range(200):
+                if c.should_stop() or release.is_set():
+                    break
+                time.sleep(0.01)
+            c.finish('stopped', message='stopped by test', step=0)
+
+        r = ctrl.start('dog', loop_fn=loop, max_steps=50, timeout_s=30)
+        self.assertTrue(r['success'])
+        self.assertTrue(started.wait(1.0))
+        self.assertTrue(ctrl.is_running())
+        st = ctrl.stop()
+        release.set()
+        self.assertIn(st.get('phase'), ('stopped', 'running', 'idle'))
+        deadline = time.time() + 2.0
+        while time.time() < deadline and ctrl.is_running():
+            time.sleep(0.02)
+        self.assertFalse(ctrl.is_running())
+        self.assertNotEqual(ctrl.status().get('phase'), 'running')
 
 
 if __name__ == '__main__':
