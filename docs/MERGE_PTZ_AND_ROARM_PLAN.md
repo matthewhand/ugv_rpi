@@ -311,3 +311,11 @@ Do **not** require two codebases—**one tree, two configs**.
 - Product rules still enforced: USB RoArm Seek look skips PTZ (`path=roarm_look`); default pose `travel_tuck`; PTZ profile shape covered by dual-robot gating tests
 - Offline re-verify on land tip: dual_robot_gating + ai_seek + `tests/test_roarm_ros2.py` script; Beast HW proof also via `tests/test_roarm_control.py` when CP2102 present
 - Live PTZ robot checklist remains open (other bot / non-blocking)
+
+## Push status (2026-07-29)
+
+- Local `main` tip: `6bcc2c5` (committed; `.env` and runtime junk not tracked)
+- `git push` over HTTPS blocked on this host (no git credentials); used GitHub MCP API land instead
+- Remote branch: `dual-robot-beast-land` → PR https://github.com/matthewhand/ugv_rpi/pull/1
+- Partial land of dual-robot files onto PR; large cores (`app.py`, templates, etc.) may still be in flight at write time
+- No force-push; secrets (`.env`) not published
