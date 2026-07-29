@@ -1,1 +1,1 @@
-PLACEHOLDER_WILL_REPLACE
+@file:/tmp/ros_content_for_mcp.txt
