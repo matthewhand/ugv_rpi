@@ -2,6 +2,8 @@
 
 One codebase, two robots. Select behaviour with `config.yaml` (or a copy per machine).
 
+**Honesty:** profiles describe how **this tree** is meant to be configured. Deployed git tips can lag; verify with `git -C ~/ugv_rpi status` and the `arm_config` block actually on disk before assuming Seek/RoArm gating is live.
+
 ## Beast (USB RoArm, this Pi)
 
 ```yaml

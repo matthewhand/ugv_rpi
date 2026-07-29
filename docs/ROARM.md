@@ -2,6 +2,8 @@
 
 Hardware: RoArm has its **own ESP32** on USB-C CP2102 — **not** base UART (`ttyAMA0`).
 
+**Scope:** operator guide for the dual-robot tree on this Pi. Behaviour below matches **local** `ugv_rpi` when `arm_config.transport: usb_serial`. Confirm the running process was started from that tree (`git -C ~/ugv_rpi log -1`). Remote `origin/main` may lag until dual-robot publish finishes (see [MERGE_PTZ_AND_ROARM_PLAN.md](MERGE_PTZ_AND_ROARM_PLAN.md) end-of-day status).
+
 ## Default stance: `travel_tuck`
 
 | Joint | Approx | Meaning |

@@ -242,19 +242,19 @@ Do **not** require two codebases—**one tree, two configs**.
 
 ### Beast config
 
-- [x] Boot → arm **travel_tuck** *(config default + `roarm_ctrl` pose; control proof exercised)*  
-- [x] Aim: RoArm moves USB arm; Aim: PT does not break if unused *(USB path proved via control suite when HW present)*  
-- [ ] Camera survives index change (unplug/replug or restart) *(code present; not re-proved this land)*  
+- [x] Config + code path for boot **travel_tuck** *(default pose in `config.yaml` / `roarm_ctrl`; HW control suite exercised earlier on CP2102)*  
+- [x] Aim: RoArm USB path present in local tree; HW move proven via `tests/test_roarm_control.py` when serial present  
+- [ ] Camera survives index change (unplug/replug or restart) *(rediscovery code present; not re-proved this session)*  
 - [ ] Control mode ros2: wheels via ROS; arm still USB hybrid *(offline ros2 path tests only)*  
-- [x] Seek either disabled, or look-around uses base yaw / safe arm peek only  
-- [ ] Short hop + wall refuse still works *(Seek unit tests offline; live hop not re-run)*  
-- [x] `python -m py_compile` on touched modules; roarm tests if hardware present
+- [x] Seek look-around on Beast skips PTZ when `arm_usb_enabled()` *(local `app.py` + dual-robot gating tests)*  
+- [ ] Short hop + wall refuse live *(Seek unit tests offline; full live hop not re-run this session)*  
+- [x] `py_compile` on core modules; offline dual/seek/roarm suites on local tip  
 
 ### Regression
 
-- [x] Single `app.py` process *(land does not spawn extras)*  
 - [x] No force-push  
 - [x] Secrets/`.env` not committed  
+- [ ] Shared `origin/main` tip includes full dual-robot `app.py` *(blocked: host has no git write auth; PR partial)*  
 
 ---
 
@@ -281,7 +281,7 @@ Do **not** require two codebases—**one tree, two configs**.
 | D | Seek Beast adapter | No PTZ pan on RoArm |
 | E | Dual-config smoke | Green checklist |
 | F | Docs pass (§6) | README + beast-image MD updated |
-| G | Merge to `main`, push | **Done local** `main` (FF integrate + Phase G docs commit; see `git log -1`); push deferred until asked |
+| G | Merge to `main`, push | **Local main only** (see Phase G + End-of-day status). **Not** fully on `origin/main`. |
 
 ---
 
@@ -305,17 +305,33 @@ Do **not** require two codebases—**one tree, two configs**.
 
 ## Phase G — landed on local `main` (2026-07-28)
 
-- Local `main` fast-forwarded to integrate tip **`1c236b3`**, then Phase G docs commit on `main` (tip = `git rev-parse main`)
-- Integrate branch remains at `1c236b3`; freeze `beast/roarm-preserve` @ `c0382cf`
-- No force-push; **`git push origin main` not done** (non-goal unless requested)
-- Product rules still enforced: USB RoArm Seek look skips PTZ (`path=roarm_look`); default pose `travel_tuck`; PTZ profile shape covered by dual-robot gating tests
-- Offline re-verify on land tip: dual_robot_gating + ai_seek + `tests/test_roarm_ros2.py` script; Beast HW proof also via `tests/test_roarm_control.py` when CP2102 present
-- Live PTZ robot checklist remains open (other bot / non-blocking)
+- Local `main` fast-forwarded through integrate tip **`1c236b3`**, then Phase G / hygiene docs commits (see `git log -1` / `git rev-parse main` for current tip)
+- Freeze branch `beast/roarm-preserve` remains at **`c0382cf`**; integrate branch tip **`1c236b3`** (docs Done checklist)
+- **Product rules in the local tree:** USB RoArm Seek look skips PTZ (`path=roarm_look`); default pose `travel_tuck`; dual-robot gating tests offline
+- Offline re-verify on local tip: dual_robot_gating + ai_seek + `tests/test_roarm_ros2.py`; HW control suite when CP2102 present
+- Live PTZ robot checklist remains open (other bot)
 
-## Push status (2026-07-29)
+## End-of-day status (2026-07-29) — honest
 
-- Local `main` tip: `6bcc2c5` (committed; `.env` and runtime junk not tracked)
-- `git push` over HTTPS blocked on this host (no git credentials); used GitHub MCP API land instead
-- Remote branch: `dual-robot-beast-land` → PR https://github.com/matthewhand/ugv_rpi/pull/1
-- Partial land of dual-robot files onto PR; large cores (`app.py`, templates, etc.) may still be in flight at write time
-- No force-push; secrets (`.env`) not published
+**What is true on this Pi (local `main`):**
+
+| Claim | Reality |
+|-------|---------|
+| Dual-robot code integrated | **Yes** — one tree; Beast USB RoArm + Seek/PTZ gated by config |
+| Seek skips PTZ on USB arm | **Yes in local `app.py`** (`arm_usb_enabled` → `roarm_look`) |
+| Docs + offline tests | **Yes** on this tree |
+| Secrets committed | **No** — `.env` gitignored; not in index |
+| Force-push | **No** |
+
+**What is *not* true yet:**
+
+| Claim | Reality |
+|-------|---------|
+| “Pushed to `origin/main`” | **False** — HTTPS push needs host credentials; not completed |
+| Local `main` == `origin/main` | **False** — as of 2026-07-29: local is **ahead and behind** origin (diverged after `0a1258b`; origin gained UI/operator-guide/ROS autoheal commits while we landed dual-robot offline) |
+| PR #1 is merge-ready complete dual-robot | **False / incomplete** — https://github.com/matthewhand/ugv_rpi/pull/1 (`dual-robot-beast-land`) has **partial** API land (e.g. `roarm_ctrl`, docs, tests, config). Remote branch **`app.py` did not have `arm_usb_enabled` / `roarm_look` when last checked** — do **not** merge until local cores match |
+| All live checklist green | **False** — camera re-plug, live Seek hop, PTZ-bot smoke still open |
+
+**Next session (when git write auth exists):** rebase/merge `origin/main` into local `main` carefully (keep dual-robot gates + remote ROS/UI honesty), finish PR or push, restart Flask, smoke Beast.
+
+**Do not treat PR #1 or remote `main` as the dual-robot source of truth until the table above is green.**

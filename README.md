@@ -36,8 +36,8 @@ Seek is **usable as a pilot**, not a finished robot product. OpenAI-compatible s
 - [x] **Serial robustness**: open/close guards when ROS owns UART; session ESP32 WiFi stop (non-persistent T:408)  
 - [x] **TTS path** hardened when `pyttsx3` missing; on-found speech optional  
 - [x] **`.env` / capabilities / control_mode** gitignored; `ai_proof/` removed and ignored (no camera dumps in git)
-- [x] **Dual robot profiles**: PTZ Seek robot (`module_type: 2`) and Beast USB RoArm (`arm_config.transport: usb_serial`) in one tree  
-- [x] **USB RoArm**: `roarm_ctrl`, Aim: RoArm overlay, default **travel_tuck** low-CG stance; Seek look-around skips PTZ pans on Beast  
+- [x] **Dual robot profiles** *(in this tree)*: PTZ Seek robot (`module_type: 2`) and Beast USB RoArm (`arm_config.transport: usb_serial`)  
+- [x] **USB RoArm** *(in this tree)*: `roarm_ctrl`, Aim: RoArm overlay, default **travel_tuck**; Seek look-around skips PTZ pans on Beast  
 - [x] **USB camera rediscovery** when V4L index jumps after re-enumerate  
 
 ### Dual robot (PTZ vs Beast RoArm)
@@ -49,7 +49,10 @@ Seek is **usable as a pilot**, not a finished robot product. OpenAI-compatible s
 
 Details: [docs/CONFIG_PROFILES.md](docs/CONFIG_PROFILES.md), [docs/ROARM.md](docs/ROARM.md), [docs/MERGE_PTZ_AND_ROARM_PLAN.md](docs/MERGE_PTZ_AND_ROARM_PLAN.md). Hardware notes for this Pi: `~/beast-image/CUSTOM_BUILD.md`.
 
+**Git honesty (2026-07-29):** Dual-robot behaviour above describes the **local working tree on this Beast** (`git log -1`). It is **not** fully published to `origin/main` yet (local tip diverged from origin; partial PR [dual-robot-beast-land](https://github.com/matthewhand/ugv_rpi/pull/1) must not be treated as complete until `app.py` on that branch includes the USB Seek gate). Always check `git status` / `git rev-parse HEAD` on the robot you are running.
+
 ### Remaining (todo)
+
 
 - [ ] **Reliable scene LLM**: stable JSON nav under load; less heuristic fallback; better latency on local Ollama  
 - [ ] **True localization**: fuse `/odom` (wheel + lidar EKF) when lidar present; explore by map cells, not heading-only trail  
@@ -63,7 +66,8 @@ Details: [docs/CONFIG_PROFILES.md](docs/CONFIG_PROFILES.md), [docs/ROARM.md](doc
 - [ ] **Seek product polish**: better goal labels UX, cancel mid-pan, map of where it looked, battery gate before long runs  
 - [ ] **Security defaults**: change stock hotspot passwords; don’t leave Jupyter with empty token on shared LANs  
 - [ ] **Tests / CI**: unit coverage for nav plan safety, exploration trail, control_mode autostart mocks  
-- [ ] **Docs**: single operator runbook (Direct vs ROS, Seek modes, Freq. stop, capability toggles)
+- [ ] **Docs**: single operator runbook (Direct vs ROS, Seek modes, Freq. stop, capability toggles)  
+- [ ] **Publish dual-robot tip**: rebase/merge with `origin/main`, finish remote `app.py`/UI cores, push (no force); do not merge incomplete PR #1
 
 ### Quick operator notes
 
