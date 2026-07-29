@@ -1,1 +1,1 @@
-FILE:/tmp/ROS_MOTION_CONTENT
+FILE:/home/ws/ugv_rpi/ros_motion.py
