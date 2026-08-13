@@ -235,19 +235,28 @@
     var mode = window.ugvAppMode || getActiveMode();
     var chat = $('chat-live-preview');
     var seek = $('seek-live-preview');
+    var track = $('track-live-preview');
     var raw = getRawFeedImg();
 
     if (mode === 'chat') {
       pauseLiveStream(seek);
+      pauseLiveStream(track);
       pauseLiveStream(raw);
       resumeLiveStream(chat, 'mode-enter');
     } else if (mode === 'seek') {
       pauseLiveStream(chat);
+      pauseLiveStream(track);
       pauseLiveStream(raw);
       resumeLiveStream(seek, 'mode-enter');
+    } else if (mode === 'track') {
+      pauseLiveStream(chat);
+      pauseLiveStream(seek);
+      pauseLiveStream(raw);
+      resumeLiveStream(track, 'mode-enter');
     } else {
       pauseLiveStream(chat);
       pauseLiveStream(seek);
+      pauseLiveStream(track);
       if (raw) {
         if (!raw._ugvRetryWired) {
           wireImageRetry(raw, {
@@ -292,9 +301,25 @@
   function setMode(mode, opts) {
     opts = opts || {};
     mode = mode || 'raw';
-    if (mode !== 'raw' && mode !== 'chat' && mode !== 'seek') mode = 'raw';
+    if (mode !== 'raw' && mode !== 'chat' && mode !== 'seek' && mode !== 'track') mode = 'raw';
     var prev = getActiveMode();
     // Leaving Seek while autonomy is running: confirm (or auto-stop when force).
+    if (
+      prev === 'track' &&
+      mode !== 'track' &&
+      lastSeenTrackPhase === 'running' &&
+      !opts.force
+    ) {
+      var okT = true;
+      try {
+        okT = window.confirm('Track is sweeping the camera. Stop Track and switch mode?');
+      } catch (e) {
+        okT = true;
+      }
+      if (!okT) return false;
+      try { trackStop({ silent: true }); } catch (e2) {}
+      lastSeenTrackPhase = 'stopped';
+    }
     if (
       prev === 'seek' &&
       mode !== 'seek' &&
@@ -324,6 +349,7 @@
       raw: $('mode-panel-raw'),
       chat: $('mode-panel-chat'),
       seek: $('mode-panel-seek'),
+      track: $('mode-panel-track'),
     };
     var tabs = document.querySelectorAll('.ugv-mode-tabs [data-mode]');
     Object.keys(panels).forEach(function (m) {
@@ -344,7 +370,7 @@
     } catch (e) {}
     window.ugvAppMode = mode;
     // Re-open MJPEG when entering chat/seek (or any mode switch)
-    if (mode === 'chat' || mode === 'seek' || mode === 'raw') {
+    if (mode === 'chat' || mode === 'seek' || mode === 'track' || mode === 'raw') {
       refreshLiveFeeds();
     }
     return true;
@@ -488,6 +514,10 @@
   var lastSeekStep = -1;
   var lastSeekLogSeq = 0;
   var lastSeenSeekPhase = 'idle';
+  var lastSeenTrackPhase = 'idle';
+  var trackPollTimer = null;
+  var lastTrackLogSeq = 0;
+  var DETECTOR_LABELS_CACHE = [];
   var seekFireTimer = null;
   var seekHydrated = false;
 
@@ -1708,12 +1738,235 @@
     }, 700);
   }
 
+  function trackLog(msg, kind) {
+    var log = $('track-log');
+    if (!log) return;
+    var div = document.createElement('div');
+    div.className = 'ugv-chat-msg sys ugv-seek-log-' + (kind || 'info');
+    div.textContent = msg;
+    log.appendChild(div);
+    while (log.childNodes.length > 80) log.removeChild(log.firstChild);
+    log.scrollTop = log.scrollHeight;
+  }
+
+  function drainTrackLog(st) {
+    var evs = (st && st.event_log) || [];
+    evs.forEach(function (ev) {
+      var seq = ev.seq || 0;
+      if (seq > lastTrackLogSeq) {
+        lastTrackLogSeq = seq;
+        trackLog(ev.text || '', ev.kind || 'info');
+      }
+    });
+  }
+
+  function updateTrackRefereeHint() {
+    var inp = $('track-goal-text');
+    var hint = $('track-referee-hint');
+    if (!hint) return;
+    var g = ((inp && inp.value) || '').trim().toLowerCase();
+    if (!g) {
+      hint.textContent = 'Referee: —';
+      return;
+    }
+    var det = DETECTOR_LABELS_CACHE.indexOf(g) >= 0;
+    // aliases handled server-side; hint is best-effort
+    hint.textContent = det
+      ? 'Referee: MobileNet-SSD detector (' + g + ')'
+      : 'Referee: vision LLM (not a VOC class)';
+  }
+
+  function renderTrackStatus(st) {
+    st = st || {};
+    var el = $('track-status');
+    var phase = st.phase || 'idle';
+    if (el) {
+      el.innerHTML =
+        'Phase: <span class="phase-' +
+        phase +
+        '">' +
+        phase +
+        '</span>' +
+        (st.message ? ' — ' + String(st.message).slice(0, 80) : '') +
+        (st.locked ? ' · LOCKED' : '');
+    }
+    var bar = $('track-detector-bar');
+    var lab = $('track-detector-label');
+    var met = $('track-detector-meta');
+    if (lab) {
+      lab.textContent =
+        (st.referee === 'llm' ? 'LLM' : 'Detector') +
+        ': ' +
+        (phase === 'running' ? (st.locked ? 'locked' : 'scanning') : phase);
+    }
+    if (met) {
+      met.textContent = st.goal_label
+        ? st.goal_label + (st.step ? ' · scan ' + st.step : '')
+        : '';
+    }
+    if (bar) {
+      bar.classList.toggle('is-running', phase === 'running');
+    }
+    drainTrackLog(st);
+  }
+
+  function startTrackPolling() {
+    if (trackPollTimer) clearInterval(trackPollTimer);
+    trackPollTimer = setInterval(pollTrack, 400);
+  }
+  function stopTrackPolling() {
+    if (trackPollTimer) {
+      clearInterval(trackPollTimer);
+      trackPollTimer = null;
+    }
+  }
+
+  function pollTrack() {
+    fetch('/api/ai/track/status')
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        var st = (d && d.status) || {};
+        var phase = st.phase || 'idle';
+        renderTrackStatus(st);
+        if (lastSeenTrackPhase === 'running' && phase !== 'running') {
+          stopTrackPolling();
+          drainTrackLog(st);
+          trackLog('Track ended: ' + phase + ' — ' + (st.message || ''), phase === 'found' ? 'found' : 'sys');
+        } else if (phase === 'running' && !trackPollTimer) {
+          startTrackPolling();
+        }
+        lastSeenTrackPhase = phase;
+      })
+      .catch(function () {});
+  }
+
+  function trackStart() {
+    var inp = $('track-goal-text');
+    var goal = ((inp && inp.value) || '').trim();
+    if (!goal) {
+      trackLog('Start blocked: goal is empty', 'warn');
+      return;
+    }
+    lastTrackLogSeq = 0;
+    var logEl = $('track-log');
+    if (logEl) logEl.innerHTML = '';
+    var maxSteps = parseInt(($('track-max-steps') && $('track-max-steps').value) || '40', 10);
+    var timeoutS = parseFloat(($('track-timeout-s') && $('track-timeout-s').value) || '180');
+    trackLog('Starting track for: ' + goal, 'start');
+    fetch('/api/ai/track/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ goal: goal, max_steps: maxSteps, timeout_s: timeoutS }),
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (!d.success) {
+          trackLog('Start failed: ' + (d.error || 'unknown'), 'warn');
+          return;
+        }
+        renderTrackStatus(d.status || {});
+        startTrackPolling();
+        pollTrack();
+      })
+      .catch(function (e) {
+        trackLog(String(e.message || e), 'warn');
+      });
+  }
+
+  function trackStop(opts) {
+    opts = opts || {};
+    if (!opts.silent) trackLog('Stop requested', 'warn');
+    fetch('/api/ai/track/stop', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        renderTrackStatus((d && d.status) || { phase: 'stopped' });
+      })
+      .catch(function (e) {
+        if (!opts.silent) trackLog(String(e.message || e), 'warn');
+      });
+  }
+
+  function trackCheckOnce() {
+    var inp = $('track-goal-text');
+    var goal = ((inp && inp.value) || '').trim();
+    if (!goal) {
+      trackLog('Check blocked: goal is empty', 'warn');
+      return;
+    }
+    trackLog('Check once: ' + goal);
+    fetch('/api/ai/track/check', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ goal: goal }),
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (!d.success) {
+          trackLog('Check failed: ' + (d.error || ''), 'warn');
+          return;
+        }
+        var c = d.check || {};
+        trackLog(
+          (d.referee || '') +
+            ' · found=' +
+            !!c.found +
+            (c.raw_detections && c.raw_detections.length
+              ? ' · saw ' + c.raw_detections.join(', ')
+              : c.reason
+                ? ' — ' + c.reason
+                : '')
+        );
+      })
+      .catch(function (e) {
+        trackLog(String(e.message || e), 'warn');
+      });
+  }
+
+  function initTrack() {
+    var start = $('track-start-btn');
+    var stop = $('track-stop-btn');
+    var check = $('track-check-btn');
+    if (start) start.addEventListener('click', trackStart);
+    if (stop) stop.addEventListener('click', function () { trackStop({}); });
+    if (check) check.addEventListener('click', trackCheckOnce);
+    var goalInp = $('track-goal-text');
+    if (goalInp) goalInp.addEventListener('input', updateTrackRefereeHint);
+    var trackImg = $('track-live-preview');
+    wireImageRetry(trackImg, {
+      isStream: true,
+      baseUrl: VIDEO_FEED_URL,
+      label: 'Live camera',
+      maxRetries: 24,
+      failEl: $('track-live-fail'),
+    });
+    wireManualRetry($('track-live-retry'), trackImg);
+    fetch('/api/ai/seek/labels')
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        var labs = d.detector_labels || d.labels || [];
+        DETECTOR_LABELS_CACHE = labs.map(function (x) { return String(x).toLowerCase(); });
+        var dl = $('track-goal-list');
+        if (dl) {
+          dl.innerHTML = '';
+          labs.forEach(function (lab) {
+            var o = document.createElement('option');
+            o.value = lab;
+            dl.appendChild(o);
+          });
+        }
+        updateTrackRefereeHint();
+      })
+      .catch(function () {});
+    pollTrack();
+  }
+
   function boot() {
     // Wire retries before first mode enter so refreshLiveFeeds uses _ugvReload
     initLiveImageRetries();
     initModeTabs();
     initChat();
     initSeek();
+    initTrack();
     refreshLiveFeeds();
     wirePtzAimBridge();
   }
@@ -1727,9 +1980,11 @@
   // After emergency STOP, refresh seek UI / pill from server
   window.ugvOnEmergencyStop = function () {
     lastSeenSeekPhase = 'stopped';
+    lastSeenTrackPhase = 'stopped';
     setSeekRunningIndicator(false);
     setSeekControlsRunning(false);
     hydrateSeekFromServer({ soft: true });
+    try { pollTrack(); } catch (e) {}
   };
 
   // export for tests / console / screenshot catalog

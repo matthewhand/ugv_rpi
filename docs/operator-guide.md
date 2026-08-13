@@ -104,6 +104,12 @@ Visual QA source of truth for Playwright feature catalog.
 
 ---
 
+## 4b. Track mode (experimental)
+
+PTZ-only hunt: the camera sweeps; the chassis does not drive. Goal `dog`/`person`/… uses MobileNet-SSD and centres on the bbox. Unique text (`toilet`) uses the vision LLM and locks the current pose (no bbox). Navbar **STOP** cancels Track.
+
+---
+
 ## 5. AI Agent (`/ai`)
 
 | guide_id | Feature | Expected UI |

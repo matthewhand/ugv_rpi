@@ -3439,6 +3439,16 @@ def api_ai_chat():
 
 
 # ---------- Seek mode: pilot LLM steers; referee is detector OR vision LLM JSON ----------
+from ai_track import (
+    track_controller,
+    resolve_track_goal,
+    bbox_offsets,
+    ptz_delta_from_offsets,
+    clamp_ptz,
+    DEFAULT_TRACK_MAX_STEPS,
+    DEFAULT_TRACK_TIMEOUT_S,
+    DEFAULT_TRACK_CONF,
+)
 from ai_seek import (
     seek_controller,
     parse_seek_goal,
@@ -7053,6 +7063,8 @@ def api_ai_seek_start():
             'voltage_v': volts,
             'threshold_v': _BATTERY_LOW_V,
         }), 400
+    if track_controller.is_running():
+        return jsonify({'success': False, 'error': 'Track is running — stop it first'}), 409
     goal = data.get('goal') or data.get('target') or data.get('label') or ''
     referee = parse_seek_referee(data.get('referee') or data.get('mode') or REFEREE_DETECTOR)
     # Missing → finite pilot defaults. Explicit 0 / "unlimited" → unlimited.
@@ -7133,6 +7145,10 @@ def _emergency_stop_motion(source='api', stop_seek=True):
             seek_phase = (st or {}).get('phase')
         except Exception as e:
             olog.warn('emergency_stop', f'Seek stop failed: {e}', source=source, error=str(e))
+        try:
+            track_controller.stop()
+        except Exception as e:
+            olog.warn('emergency_stop', f'Track stop failed: {e}', source=source, error=str(e)[:120])
     # Force-zero via router (bypasses lock) and direct serial belt-and-suspenders.
     route_results = []
     for cmd in (
@@ -7197,6 +7213,220 @@ def api_ai_seek_check():
     conf = float(data.get('conf_threshold') or DEFAULT_SEEK_CONF)
     check = seek_goal_check(label, referee=referee, conf_threshold=conf)
     return jsonify({'success': True, 'goal_label': label, 'referee': referee, 'check': check})
+
+
+_TRACK_SCAN_PANS = (-90.0, -45.0, 0.0, 45.0, 90.0)
+_TRACK_SCAN_TILTS = (-18.0, 0.0, 14.0)
+
+
+def _track_current_ptz():
+    try:
+        snap = _ptz_aim_public()
+        return float(snap.get('pan_deg') or 0.0), float(snap.get('tilt_deg') or 0.0)
+    except Exception:
+        return 0.0, 0.0
+
+
+def _track_goto(pan, tilt, should_stop=None):
+    pan, tilt = clamp_ptz(pan, tilt)
+    try:
+        _publish_ptz_aim(pan, tilt, settled=False, source='track')
+    except Exception:
+        pass
+    try:
+        _seek_look_deg(pan, tilt_deg=tilt, wait_hw=True, should_stop=should_stop)
+    except Exception as e:
+        olog.warn('ai_track', f'Track PTZ goto failed: {e}', error=str(e)[:160])
+    return pan, tilt
+
+
+def _track_center_on_best(best, should_stop=None):
+    ox, oy = bbox_offsets(best)
+    if ox is None:
+        return None
+    if abs(ox) <= 0.10 and abs(oy or 0) <= 0.10:
+        return {'centered': True, 'offset_x': ox, 'offset_y': oy}
+    dpan, dtilt = ptz_delta_from_offsets(ox, oy)
+    cur_p, cur_t = _track_current_ptz()
+    npan, ntilt = _track_goto(cur_p + dpan, cur_t + dtilt, should_stop=should_stop)
+    return {
+        'centered': False,
+        'offset_x': ox,
+        'offset_y': oy,
+        'pan': npan,
+        'tilt': ntilt,
+        'd_pan': dpan,
+        'd_tilt': dtilt,
+    }
+
+
+def _track_loop(ctrl, label, conf, max_steps, timeout_s):
+    """PTZ-only scan + lock. Never commands the chassis."""
+    t0 = time.time()
+    referee = (ctrl.status() or {}).get('referee') or REFEREE_DETECTOR
+    max_steps = int(max_steps or 0)
+    timeout_s = float(timeout_s or 0)
+    locked = False
+    lost = 0
+    step = 0
+
+    def _halt(phase, message):
+        try:
+            _track_goto(0.0, 0.0)
+        except Exception:
+            pass
+        ctrl.finish(phase, message=message, step=step, locked=False)
+
+    try:
+        while True:
+            if ctrl.should_stop():
+                _halt('stopped', 'Stopped by user')
+                return
+            if timeout_s > 0 and (time.time() - t0) >= timeout_s:
+                _halt('timeout', f'Timeout after {timeout_s}s')
+                return
+            if max_steps > 0 and step >= max_steps and not locked:
+                _halt('timeout', f'Gave up after {max_steps} scan steps')
+                return
+
+            if not locked:
+                step += 1
+                ctrl.update(step=step, locked=False, message=f'Scan {step}: sweeping PTZ for {label}…')
+                found = False
+                for tilt in _TRACK_SCAN_TILTS:
+                    if ctrl.should_stop():
+                        break
+                    for pan in _TRACK_SCAN_PANS:
+                        if ctrl.should_stop():
+                            break
+                        ctrl.update(
+                            message=f'Scan {step}: look pan={int(pan)}° tilt={int(tilt)}°',
+                        )
+                        _track_goto(pan, tilt, should_stop=ctrl.should_stop)
+                        jpeg = _seek_grab_jpeg()
+                        chk = seek_goal_check(
+                            label, referee=referee, conf_threshold=conf, jpeg=jpeg,
+                        )
+                        ctrl.update(
+                            last_detection=chk,
+                            last_check_seq=int((ctrl.status() or {}).get('last_check_seq') or 0) + 1,
+                        )
+                        raw = chk.get('raw_detections') or chk.get('labels_found') or []
+                        ctrl.append_log(
+                            'detect',
+                            f'Scan {step} · pan {int(pan)}° tilt {int(tilt)}° · '
+                            f'{referee} saw [{", ".join(str(x) for x in raw) or "none"}]'
+                            + (' · LOCK' if chk.get('found') else ''),
+                        )
+                        if chk.get('found'):
+                            found = True
+                            locked = True
+                            lost = 0
+                            adj = _track_center_on_best(chk.get('best'), should_stop=ctrl.should_stop)
+                            p, t = _track_current_ptz()
+                            ctrl.update(locked=True, lock_pan=p, lock_tilt=t,
+                                        message=f'Locked on {label} at pan={p:.0f}° tilt={t:.0f}°')
+                            ctrl.append_log(
+                                'found',
+                                f'Locked “{label}” via {referee} at pan={p:.0f} tilt={t:.0f}'
+                                + (f' · refine Δpan={adj.get("d_pan")}' if adj else ''),
+                            )
+                            break
+                    if found:
+                        break
+                if not found:
+                    ctrl.append_log('nav', f'Scan {step}: no {label} — next sweep')
+                continue
+
+            # Locked: re-check and keep bbox in the middle of the frame
+            time.sleep(0.35)
+            if ctrl.should_stop():
+                _halt('stopped', 'Stopped by user')
+                return
+            jpeg = _seek_grab_jpeg()
+            chk = seek_goal_check(label, referee=referee, conf_threshold=conf, jpeg=jpeg)
+            ctrl.update(last_detection=chk)
+            if chk.get('found'):
+                lost = 0
+                adj = _track_center_on_best(chk.get('best'), should_stop=ctrl.should_stop)
+                p, t = _track_current_ptz()
+                ctrl.update(
+                    locked=True, lock_pan=p, lock_tilt=t,
+                    message=f'Tracking {label} · pan={p:.0f}° tilt={t:.0f}°',
+                )
+                if adj and not adj.get('centered'):
+                    ctrl.append_log(
+                        'nav',
+                        f'Refine centre Δpan={adj.get("d_pan")} Δtilt={adj.get("d_tilt")}',
+                    )
+            else:
+                lost += 1
+                ctrl.append_log('nav', f'Lock lost ({lost}/4) — {label} not in frame')
+                if lost >= 4:
+                    locked = False
+                    ctrl.update(locked=False, message=f'Lost {label} — resuming PTZ sweep')
+                    ctrl.append_log('nav', 'Resume sweep')
+    except Exception as e:
+        olog.error('ai_track', f'Track loop crashed: {e}', error=str(e)[:300])
+        try:
+            _execute_agent_tool('stop_motors', {})
+        except Exception:
+            pass
+        ctrl.finish('failed', message=str(e)[:200], step=step)
+
+
+@app.route('/api/ai/track/start', methods=['POST'])
+def api_ai_track_start():
+    data = request.get_json(silent=True) or {}
+    if seek_controller.is_running():
+        return jsonify({'success': False, 'error': 'Seek is running — stop it first'}), 409
+    goal = data.get('goal') or data.get('target') or data.get('label') or ''
+    resolved = resolve_track_goal(goal)
+    if resolved.get('error'):
+        return jsonify({'success': False, 'error': resolved['error']}), 400
+    max_steps = int(data.get('max_steps') if data.get('max_steps') is not None else DEFAULT_TRACK_MAX_STEPS)
+    timeout_s = float(data.get('timeout_s') if data.get('timeout_s') is not None else DEFAULT_TRACK_TIMEOUT_S)
+    conf = float(data.get('conf_threshold') or DEFAULT_TRACK_CONF)
+    result = track_controller.start(
+        goal,
+        loop_fn=_track_loop,
+        max_steps=max_steps,
+        timeout_s=timeout_s,
+        conf_threshold=conf,
+    )
+    code = 200 if result.get('success') else 400
+    return jsonify(result), code
+
+
+@app.route('/api/ai/track/status', methods=['GET'])
+def api_ai_track_status():
+    return jsonify({'success': True, 'status': track_controller.status()})
+
+
+@app.route('/api/ai/track/stop', methods=['POST'])
+def api_ai_track_stop():
+    track_controller.stop()
+    return jsonify({'success': True, 'status': track_controller.status()})
+
+
+@app.route('/api/ai/track/check', methods=['POST'])
+def api_ai_track_check():
+    data = request.get_json(silent=True) or {}
+    goal = data.get('goal') or ''
+    resolved = resolve_track_goal(goal)
+    if resolved.get('error'):
+        return jsonify({'success': False, 'error': resolved['error']}), 400
+    chk = seek_goal_check(
+        resolved['goal'],
+        referee=resolved['referee'],
+        conf_threshold=float(data.get('conf_threshold') or DEFAULT_TRACK_CONF),
+    )
+    return jsonify({
+        'success': True,
+        'goal_label': resolved['goal'],
+        'referee': resolved['referee'],
+        'check': chk,
+    })
 
 
 @app.route('/api/ai/motion_status', methods=['GET'])
