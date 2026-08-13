@@ -23,6 +23,7 @@
 - [x] Drive signs on `/api/status`; config `drive_linear_sign: -1` for this chassis  
 - [x] Kill `ugv_bringup` when switching ROS 2 → Direct (`UGV_AUTOSTOP_BRINGUP`)  
 - [x] Seek battery gate (known low V); nav-plan extracted to `seek_nav.py` + unit tests  
+- [x] Seek hop/turn tables match this chassis (UI-Fast T:1 spins; punchy linear for cable runner)  
 
 ## Open (honest residual)
 

@@ -28,7 +28,7 @@ This fork is a **supervised pilot**, not a finished product.
 
 - [x] **Seek** Raw/Chat/Seek shell: detector and/or LLM referee, TTS on found, finite default max steps/timeout (unlimited only if set to 0)  
 - [x] **Triple-view pan** L/C/R ≈ ±135°; wait-for-pan with **blind settle** if HW pan feedback is stuck; three-panel stitch for LLM (not a true geometric 360°)  
-- [x] **Nav tiers** short/medium/long — **open-loop** duration/speed tables (not measured calibration)  
+- [x] **Nav tiers** short/medium/long — **open-loop** tables, chassis-calibrated 2026-08-13 (Fast T:1 turns; punchy linear so the cable runner moves)  
 - [x] **Safety bias** (image heuristics): avoid forward when centre looks “near”; prefer turn-to-open; reverse capped short  
 - [x] **Corridor / blank-wall heuristics** (incl. bright painted walls) — still false open/closed under some lighting  
 - [x] **Exploration trail** for LLM prompt (heading counters only)  

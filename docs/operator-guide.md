@@ -99,6 +99,7 @@ Visual QA source of truth for Playwright feature catalog.
 - **Config is locked while Seek is running** (mode radios, goal, upon-found, scene nav, max steps, timeout). Card tooltip: “Config locked while Seek is running — Stop to edit”. Use **Stop** or navbar **STOP** to unlock and edit.
 - Leaving Seek while running prompts stop confirm.
 - Prefer mode **a** or **b** with `person`/`dog` for demos.
+- **This chassis:** Seek turns are **UI-Fast T:1** spins (soft twist yaw does nothing). Forward hops are punchy (~0.22–0.28) so the floor cable runner is crossed; short/medium/long ≈ 0.85s / 1.1s / 1.6s. Restart the Flask app after changing hop tables.
 
 ---
 

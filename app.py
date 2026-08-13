@@ -1828,7 +1828,7 @@ _AI_SYSTEM_PROMPT = (
     "Use tools when available: get_cv_detections for MobileNet-SSD labels (includes dog, person, cat, …), "
     "send_motor_command for short timed drives, send_gimbal_command to look around, stop_motors for safety. "
     "For search tasks: (1) inspect the current view / run detection, (2) if the target is missing drive "
-    "forward in short steps (duration_ms 800–1500, linear_x ~0.12–0.2) down open hallways, "
+    "forward in punchy timed steps (duration_ms 800–1600, linear_x ~0.22–0.28) down open hallways, "
     "(3) re-check with get_cv_detections after each move, (4) stop when the target is found or the path is blocked. "
     "Do not claim you cannot see or move if the matching tools are listed as callable. "
     "Prefer several short moves over one long continuous drive."
@@ -3291,7 +3291,7 @@ def api_ai_chat():
         system += f"Unavailable (do not claim you have these): {', '.join(inactive)}. "
     if any(n in active for n in ('send_motor_command', 'stop_motors')):
         system += (
-            "Prefer short timed moves (duration_ms 800–1500, linear_x 0.12–0.2). "
+            "Prefer punchy timed moves (duration_ms 800–1600, linear_x 0.22–0.28). "
             "After each drive, re-check with get_cv_detections before moving again. "
             "Call stop_motors if unsure or when done."
         )
@@ -3421,6 +3421,7 @@ from seek_nav import (  # noqa: E402
     seek_normalize_distance as _seek_normalize_distance,
     seek_normalize_obstacle_range as _seek_normalize_obstacle_range,
     SEEK_TURN_MS_BY_DIST as _SEEK_TURN_MS_BY_DIST,
+    SEEK_TURN_DEG_BY_DIST as _SEEK_TURN_DEG_BY_DIST,
     interpret_base_voltage as _interpret_base_voltage,
     seek_battery_block_reason as _seek_battery_block_reason_pure,
     reset_escape_cycle as _seek_reset_escape_cycle,
@@ -3446,11 +3447,11 @@ _SEEK_NAV_SYSTEM = (
     "Choose turn_left or turn_right if straight is blocked/cluttered/unsafe and that side looks more open "
     "or more likely to reveal the goal. "
     "Also set drive_distance for how long the next timed hop should be before re-scanning: "
-    "short = tight space / near obstacles / uncertain (crawl) OR a small aiming turn; "
-    "medium = somewhat open corridor; "
-    "long = clear hallway / empty floor ahead — USE THIS when the path looks free (go farther). "
+    "short = tight space / near obstacles / a small Fast aiming spin (~0.3s); "
+    "medium = punchy hop over floor cables / a solid Fast room turn (~0.7s); "
+    "long = clear hallway — USE THIS when the path looks free (go farther, not a 4s creep). "
     "Turns should usually use short (or medium at most). Long is mainly for clear forward. "
-    "Do not creep short when a corridor is open. "
+    "Do not pick short-forward when a corridor is open — this chassis stalls if it creeps. "
     "Reply with JSON only. action must be exactly one of: forward, turn_left, turn_right. "
     "drive_distance must be exactly one of: short, medium, long. "
     "Do not claim the goal is found — another system handles that."
@@ -5012,9 +5013,9 @@ _SEEK_HEADING_DEG = 0.0
 _SEEK_EXPLORE_TRAIL = []  # newest last: {action, dist, heading, t}
 _SEEK_TRAIL_MAX = 16
 _SEEK_TURN_HEADING_DELTA = {
-    'short': 20.0,
-    'medium': 40.0,
-    'long': 60.0,
+    'short': float(_SEEK_TURN_DEG_BY_DIST.get('short', 35)),
+    'medium': float(_SEEK_TURN_DEG_BY_DIST.get('medium', 80)),
+    'long': float(_SEEK_TURN_DEG_BY_DIST.get('long', 130)),
 }
 
 
@@ -5622,8 +5623,8 @@ def _seek_nav_decide(views, goal_label, labels_hint=None):
 def _seek_fast_tank_turn(direction, duration_ms, should_stop=None):
     """In-place tank turn at UI Fast speed (max_speed × max_rate on T:1).
 
-    Matches Raw-mode left/right at Fast — soft T:13 arcs (angular≈0.7) do not
-    yaw this rover enough on carpet/hard floor.
+    Matches Raw-mode left/right at Fast. Soft T:13 arcs (angular≈0.4–0.7) do
+    not yaw this rover — live 2026-08-13: 350ms nudge, 700ms room turn, 1100ms large.
     """
     args_cfg = f.get('args_config') or {}
     max_speed = float(args_cfg.get('max_speed', 1.3) or 1.3)
@@ -5738,8 +5739,8 @@ def _seek_aim_for_motion(action, open_side=None, should_stop=None):
 
 def _seek_execute_nav_action(action, drive_distance='medium', should_stop=None, open_side=None):
     """Execute body move from a normalized plan:
-    - turn_left/right: pure spin at UI Fast wheel speed (T:1 max_speed×max_rate)
-    - forward/backward: timed linear hop by distance (0.9s / 1.8s / 3.2s)
+    - turn_left/right: T:1 UI-Fast tank spin (soft T:13 yaw does not turn this chassis)
+    - forward/backward: punchy timed hop (cable runner needs ~0.26, not 0.12)
 
     Camera: forward+turns look 0°; reverse looks ±135° (rear).
     """
@@ -5755,7 +5756,7 @@ def _seek_execute_nav_action(action, drive_distance='medium', should_stop=None, 
     cam_look = aim.get('label')
 
     if action == 'turn_left':
-        dur = int(_SEEK_TURN_MS_BY_DIST.get(dist, 900))
+        dur = int(plan['duration_ms'])
         last_res = _seek_fast_tank_turn('left', dur, should_stop=should_stop)
         last_args = {
             'action': 'turn_left',
@@ -5767,7 +5768,7 @@ def _seek_execute_nav_action(action, drive_distance='medium', should_stop=None, 
         }
 
     elif action == 'turn_right':
-        dur = int(_SEEK_TURN_MS_BY_DIST.get(dist, 900))
+        dur = int(plan['duration_ms'])
         last_res = _seek_fast_tank_turn('right', dur, should_stop=should_stop)
         last_args = {
             'action': 'turn_right',

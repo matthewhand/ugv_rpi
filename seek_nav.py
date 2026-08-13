@@ -7,37 +7,40 @@ from __future__ import annotations
 import re
 from typing import Any, Dict, Optional
 
-# Timed hop lengths (ms) for drive_distance tiers
+# Chassis-calibrated 2026-08-13 (this Waveshare rover, carpet + floor cable runner).
+# Soft T:13 angular ~0.4–0.7 does NOT yaw — Seek turns must be T:1 UI-Fast
+# (config max_speed 1.3). Soft linear 0.12–0.16 stalls on the cable ramp;
+# punch ~0.22–0.28. Fast tank 700ms ≈ a solid room turn; multi-second Fast
+# spins over-rotate.
 SEEK_DRIVE_MS_BY_DIST = {
-    'short': 900,
-    'medium': 2400,
-    'long': 4200,
+    'short': 850,
+    'medium': 1100,
+    'long': 1600,
 }
 SEEK_DRIVE_LIN_BY_DIST = {
-    'short': 0.12,
-    'medium': 0.16,
-    'long': 0.20,
+    'short': 0.22,
+    'medium': 0.26,
+    'long': 0.28,
 }
-SEEK_ESCAPE_REVERSE_MS = 900
-SEEK_ESCAPE_REVERSE_LIN = 0.12
-SEEK_REVERSE_MAX_MS = 1100
-SEEK_REVERSE_MAX_LIN = 0.14
+SEEK_ESCAPE_REVERSE_MS = 850
+SEEK_ESCAPE_REVERSE_LIN = 0.20
+SEEK_REVERSE_MAX_MS = 900
+SEEK_REVERSE_MAX_LIN = 0.22
 SEEK_TURN_REPEATS_BY_DIST = {
     'short': 1,
     'medium': 1,
     'long': 1,
 }
-SEEK_TURN_DEG_PER_MS = 4.5 / 550.0
-SEEK_TURN_ANGLE_SCALE = (2.0 / 3.0) * (2.0 / 3.0)
+# Approximate yaw at UI-Fast T:1 on this carpet (not encoder-closed-loop).
 SEEK_TURN_DEG_BY_DIST = {
-    'short': int(round(45 * SEEK_TURN_ANGLE_SCALE)),
-    'medium': int(round(90 * SEEK_TURN_ANGLE_SCALE)),
-    'long': int(round(135 * SEEK_TURN_ANGLE_SCALE)),
+    'short': 35,
+    'medium': 80,
+    'long': 130,
 }
 SEEK_TURN_MS_BY_DIST = {
-    'short': int(round(SEEK_TURN_DEG_BY_DIST['short'] / SEEK_TURN_DEG_PER_MS)),
-    'medium': int(round(SEEK_TURN_DEG_BY_DIST['medium'] / SEEK_TURN_DEG_PER_MS)),
-    'long': int(round(SEEK_TURN_DEG_BY_DIST['long'] / SEEK_TURN_DEG_PER_MS)),
+    'short': 350,
+    'medium': 700,
+    'long': 1100,
 }
 SEEK_VALID_DISTANCES = frozenset({'short', 'medium', 'long'})
 SEEK_DIST_ALIASES = {

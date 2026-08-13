@@ -19,6 +19,8 @@ from seek_nav import (  # noqa: E402
     seek_normalize_obstacle_range,
     SEEK_REVERSE_MAX_MS,
     SEEK_REVERSE_MAX_LIN,
+    SEEK_DRIVE_LIN_BY_DIST,
+    SEEK_TURN_MS_BY_DIST,
 )
 
 
@@ -113,6 +115,27 @@ class TestNavPlanSafety(unittest.TestCase):
         self.assertEqual(plan['action'], 'forward')
         self.assertGreater(plan['linear_x'], 0)
         self.assertGreater(plan['duration_ms'], 0)
+
+    def test_chassis_forward_is_punchy_not_creep(self):
+        """Cable runner / carpet: 0.12 hops stall; live punch was ~0.26 / 1.1s."""
+        plan = seek_nav_plan('forward', 'medium', obstacle_range='none')
+        self.assertGreaterEqual(plan['linear_x'], 0.24)
+        self.assertLessEqual(plan['linear_x'], 0.35)
+        self.assertGreaterEqual(plan['duration_ms'], 800)
+        self.assertLessEqual(plan['duration_ms'], 1800)
+        self.assertGreaterEqual(SEEK_DRIVE_LIN_BY_DIST['short'], 0.20)
+
+    def test_chassis_turns_are_short_fast_spins(self):
+        """UI-Fast T:1 — 2–7s at full speed over-rotates; live 700ms was a room turn."""
+        short = seek_nav_plan('turn_left', 'short')
+        medium = seek_nav_plan('turn_right', 'medium')
+        long = seek_nav_plan('turn_left', 'long')
+        self.assertEqual(SEEK_TURN_MS_BY_DIST['medium'], 700)
+        self.assertGreaterEqual(short['duration_ms'], 250)
+        self.assertLessEqual(short['duration_ms'], 450)
+        self.assertGreaterEqual(medium['duration_ms'], 600)
+        self.assertLessEqual(medium['duration_ms'], 850)
+        self.assertLessEqual(long['duration_ms'], 1300)
 
 
 class TestBatteryGate(unittest.TestCase):
