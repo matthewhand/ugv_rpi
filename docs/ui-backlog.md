@@ -5,7 +5,7 @@
 **Workflows:** `.grok/workflows/ui-fix-improve.rhai` · `.grok/workflows/honesty-complete-64.rhai`  
 **Screenshots:** `ui_shots/` via `scripts/screenshot_ui.py --catalog`  
 **Sources of truth:** `docs/operator-guide.md`, `docs/ui-qa-report.md`, fork status in `README.md`  
-**Last honesty pass:** 2026-07-29
+**Last honesty pass:** 2026-08-13
 
 ## Done (UI / safety / ops chrome)
 
@@ -21,6 +21,8 @@
 - [x] Catalog does not auto-flip Direct↔ROS2 (UART)  
 - [x] ROS serial fallback + rosbridge autoheal (see README — not pure UI)  
 - [x] Drive signs on `/api/status`; config `drive_linear_sign: -1` for this chassis  
+- [x] Kill `ugv_bringup` when switching ROS 2 → Direct (`UGV_AUTOSTOP_BRINGUP`)  
+- [x] Seek battery gate (known low V); nav-plan extracted to `seek_nav.py` + unit tests  
 
 ## Open (honest residual)
 
@@ -33,4 +35,4 @@
 
 ## Product backlog (not UI-only)
 
-See **Remaining** in `README.md` (LLM reliability, odom/lidar, closed-loop turns, ROS exit kill, CI, security defaults).
+See **Remaining** in `README.md` (LLM reliability, odom/lidar, closed-loop turns, container boot, CI mocks, security defaults).

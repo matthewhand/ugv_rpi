@@ -9,7 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from ros_motion import preferred_motion_path  # noqa: E402
+from ros_motion import parse_ugv_bringup_pids, preferred_motion_path  # noqa: E402
 
 
 class TestPreferredMotionPath(unittest.TestCase):
@@ -35,6 +35,25 @@ class TestPreferredMotionPath(unittest.TestCase):
         self.assertEqual(preferred_motion_path('ros2', True), 'ros2')
         # Autoheal failed / bridge still dead → UI must use serial_fallback (not drop)
         self.assertEqual(preferred_motion_path('ros2', False), 'serial_fallback')
+
+
+class TestParseBringupPids(unittest.TestCase):
+    def test_extracts_real_binary_skips_wrappers(self):
+        ps = (
+            "  11 bash -lc pgrep -af ugv_bringup\n"
+            "  42 /opt/ros/humble/lib/ugv_bringup/ugv_bringup --ros-args -p serial_port:=/dev/ttyAMA0\n"
+            "  99 grep -F ugv_bringup\n"
+            " 101 docker exec ugv_ros2 bash -lc 'pkill -f ugv_bringup'\n"
+        )
+        self.assertEqual(parse_ugv_bringup_pids(ps), [42])
+
+    def test_empty_and_none(self):
+        self.assertEqual(parse_ugv_bringup_pids(''), [])
+        self.assertEqual(parse_ugv_bringup_pids(None), [])
+
+    def test_dedupes(self):
+        ps = "7 ros2 run ugv_bringup ugv_bringup\n7 ros2 run ugv_bringup ugv_bringup\n"
+        self.assertEqual(parse_ugv_bringup_pids(ps), [7])
 
 
 if __name__ == '__main__':

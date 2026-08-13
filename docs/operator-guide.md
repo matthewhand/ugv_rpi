@@ -95,6 +95,7 @@ Visual QA source of truth for Playwright feature catalog.
 
 **Operator notes**
 - Defaults are **finite** (30 steps / 300s). Set 0 only for unlimited.
+- **Battery gate:** Seek will not start (and will halt if already running) when pack voltage is known and ≤ `UGV_BATTERY_LOW_V` (default 9.5 V). If `v` is missing or looks like raw ADC, Seek does **not** block. Override: `UGV_SEEK_BATTERY_GATE=0`.
 - **Config is locked while Seek is running** (mode radios, goal, upon-found, scene nav, max steps, timeout). Card tooltip: “Config locked while Seek is running — Stop to edit”. Use **Stop** or navbar **STOP** to unlock and edit.
 - Leaving Seek while running prompts stop confirm.
 - Prefer mode **a** or **b** with `person`/`dog` for demos.

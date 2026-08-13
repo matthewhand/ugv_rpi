@@ -1,0 +1,322 @@
+"""Pure Seek nav-plan helpers (no Flask / camera).
+
+Extracted so unit tests can prove safety overrides without booting app.py.
+"""
+from __future__ import annotations
+
+import re
+from typing import Any, Dict, Optional
+
+# Timed hop lengths (ms) for drive_distance tiers
+SEEK_DRIVE_MS_BY_DIST = {
+    'short': 900,
+    'medium': 2400,
+    'long': 4200,
+}
+SEEK_DRIVE_LIN_BY_DIST = {
+    'short': 0.12,
+    'medium': 0.16,
+    'long': 0.20,
+}
+SEEK_ESCAPE_REVERSE_MS = 900
+SEEK_ESCAPE_REVERSE_LIN = 0.12
+SEEK_REVERSE_MAX_MS = 1100
+SEEK_REVERSE_MAX_LIN = 0.14
+SEEK_TURN_REPEATS_BY_DIST = {
+    'short': 1,
+    'medium': 1,
+    'long': 1,
+}
+SEEK_TURN_DEG_PER_MS = 4.5 / 550.0
+SEEK_TURN_ANGLE_SCALE = (2.0 / 3.0) * (2.0 / 3.0)
+SEEK_TURN_DEG_BY_DIST = {
+    'short': int(round(45 * SEEK_TURN_ANGLE_SCALE)),
+    'medium': int(round(90 * SEEK_TURN_ANGLE_SCALE)),
+    'long': int(round(135 * SEEK_TURN_ANGLE_SCALE)),
+}
+SEEK_TURN_MS_BY_DIST = {
+    'short': int(round(SEEK_TURN_DEG_BY_DIST['short'] / SEEK_TURN_DEG_PER_MS)),
+    'medium': int(round(SEEK_TURN_DEG_BY_DIST['medium'] / SEEK_TURN_DEG_PER_MS)),
+    'long': int(round(SEEK_TURN_DEG_BY_DIST['long'] / SEEK_TURN_DEG_PER_MS)),
+}
+SEEK_VALID_DISTANCES = frozenset({'short', 'medium', 'long'})
+SEEK_DIST_ALIASES = {
+    'short': 'short', 'near': 'short', 'slow': 'short', 'crawl': 'short',
+    'close': 'short', 'small': 'short', 's': 'short', '1': 'short',
+    'medium': 'medium', 'mid': 'medium', 'normal': 'medium', 'default': 'medium',
+    'm': 'medium', '2': 'medium',
+    'long': 'long', 'far': 'long', 'fast': 'long', 'open': 'long',
+    'large': 'long', 'big': 'long', 'l': 'long', '3': 'long',
+}
+SEEK_ESCAPE_SEQ = ('turn_left', 'turn_right', 'turn_left', 'backward', 'turn_right')
+SEEK_OBSTACLE_RANGES = frozenset({'none', 'far', 'medium', 'near', 'unknown'})
+SEEK_OBSTACLE_ALIASES = {
+    'none': 'none', 'clear': 'none', 'open': 'none', 'empty': 'none',
+    'no': 'none', 'nothing': 'none', 'n/a': 'none', 'na': 'none',
+    'far': 'far', 'distant': 'far', 'long': 'far', 'away': 'far',
+    'medium': 'medium', 'mid': 'medium', 'middle': 'medium', 'moderate': 'medium',
+    'near': 'near', 'close': 'near', 'immediate': 'near', 'very_close': 'near',
+    'very close': 'near', 'blocking': 'near', 'blocked': 'near', 'imminent': 'near',
+    'unknown': 'unknown', '?': 'unknown',
+}
+
+_escape_idx = 0
+
+
+def reset_escape_cycle() -> None:
+    global _escape_idx
+    _escape_idx = 0
+
+
+def seek_normalize_distance(raw, default: str = 'medium') -> str:
+    if raw is None:
+        return default if default in SEEK_VALID_DISTANCES else 'medium'
+    s = str(raw).strip().lower().replace('-', ' ').replace('_', ' ')
+    if s in SEEK_DIST_ALIASES:
+        return SEEK_DIST_ALIASES[s]
+    for tok in re.findall(r'[a-z0-9]+', s):
+        if tok in SEEK_DIST_ALIASES:
+            return SEEK_DIST_ALIASES[tok]
+    return default if default in SEEK_VALID_DISTANCES else 'medium'
+
+
+def seek_normalize_action(raw, default: str = 'forward') -> str:
+    a = str(raw or default).strip().lower().replace(' ', '_').replace('-', '_')
+    if a in ('forward', 'go_forward', 'straight', 'ahead'):
+        return 'forward'
+    if a in ('turn_left', 'left', 'l'):
+        return 'turn_left'
+    if a in ('turn_right', 'right', 'r'):
+        return 'turn_right'
+    if a in ('backward', 'back', 'drive_backward', 'reverse', 'retreat'):
+        return 'backward'
+    return default if default in ('forward', 'turn_left', 'turn_right', 'backward') else 'forward'
+
+
+def seek_normalize_obstacle_range(raw, default: str = 'unknown') -> str:
+    if raw is None or raw is False:
+        return default if default in SEEK_OBSTACLE_RANGES else 'unknown'
+    if raw is True:
+        return 'near'
+    s = str(raw).strip().lower().replace('-', ' ').replace('_', ' ')
+    if s in SEEK_OBSTACLE_ALIASES:
+        return SEEK_OBSTACLE_ALIASES[s]
+    for tok in re.findall(r'[a-z?]+', s):
+        if tok in SEEK_OBSTACLE_ALIASES:
+            return SEEK_OBSTACLE_ALIASES[tok]
+    m = re.search(r'(\d+(?:\.\d+)?)\s*m', s)
+    if m:
+        metres = float(m.group(1))
+        if metres < 0.6:
+            return 'near'
+        if metres < 1.5:
+            return 'medium'
+        if metres < 4.0:
+            return 'far'
+        return 'none'
+    return default if default in SEEK_OBSTACLE_RANGES else 'unknown'
+
+
+def seek_next_escape_action(prefer: Optional[str] = None) -> str:
+    global _escape_idx
+    if prefer in ('turn_left', 'turn_right', 'backward', 'left', 'right'):
+        pref = seek_normalize_action(prefer)
+        _escape_idx += 1
+        return pref
+    action = SEEK_ESCAPE_SEQ[_escape_idx % len(SEEK_ESCAPE_SEQ)]
+    _escape_idx += 1
+    return action
+
+
+def seek_nav_plan(
+    action,
+    drive_distance: str = 'medium',
+    *,
+    path_clear_forward=None,
+    stuck: bool = False,
+    obstacle_range=None,
+    last_action=None,
+    prefer_turn=None,
+) -> Dict[str, Any]:
+    """Normalize action+distance and apply safety overrides (no I/O)."""
+    action = seek_normalize_action(action)
+    dist = seek_normalize_distance(drive_distance, default='medium')
+    obs = seek_normalize_obstacle_range(obstacle_range, default='unknown')
+    last = seek_normalize_action(last_action) if last_action else None
+    prefer_turn = seek_normalize_action(prefer_turn) if prefer_turn else None
+    if prefer_turn not in ('turn_left', 'turn_right'):
+        prefer_turn = None
+    safety_override = None
+    requested = action
+
+    if obs == 'unknown':
+        if path_clear_forward is True:
+            obs = 'none'
+        elif path_clear_forward is False:
+            obs = 'near'
+
+    if last == 'backward' and action == 'backward' and obs in ('near', 'medium', 'unknown'):
+        action = prefer_turn or 'turn_left'
+        dist = 'short'
+        safety_override = f'after reverse: turn to open ({action}/{dist}) instead of reverse again'
+
+    if action == 'backward' and dist in ('medium', 'long') and not safety_override:
+        dist = 'short'
+        safety_override = 'reverse capped to short (avoid rear wall)'
+
+    if stuck and action in ('forward', 'backward') and not safety_override:
+        if last == 'backward':
+            action = prefer_turn or 'turn_left'
+            dist = 'short'
+            safety_override = f'stuck after reverse: turn to open → {action}/{dist}'
+        elif last in ('turn_left', 'turn_right'):
+            action = 'backward'
+            dist = 'short'
+            safety_override = 'stuck after turn: reverse short nudge only'
+        else:
+            action = prefer_turn or 'turn_left'
+            dist = 'short'
+            safety_override = f'stuck: turn to open → {action}/{dist} (prefer over reverse)'
+    elif action == 'forward' and not safety_override:
+        if obs == 'near':
+            if last == 'backward':
+                action = prefer_turn or 'turn_left'
+                dist = 'short'
+                safety_override = f'near after reverse: turn open → {action}/{dist}'
+            elif last in ('turn_left', 'turn_right'):
+                action = 'backward'
+                dist = 'short'
+                safety_override = 'near after turn: reverse short nudge only'
+            else:
+                action = prefer_turn or seek_next_escape_action(prefer=prefer_turn or 'turn_left')
+                if action == 'backward':
+                    action = prefer_turn or 'turn_left'
+                dist = 'short'
+                safety_override = f'near obstacle: turn open → {action}/{dist} (not reverse)'
+        elif obs == 'medium':
+            if dist == 'long':
+                dist = 'medium'
+                safety_override = 'mid-range obstacle: forward capped to medium'
+            elif dist == 'short':
+                dist = 'medium'
+                safety_override = 'mid-range: upgrade short→medium corridor hop'
+        elif obs == 'far':
+            if dist == 'short':
+                dist = 'medium'
+                safety_override = 'far obstacle: upgrade short→medium'
+        elif obs == 'none':
+            if dist == 'short':
+                dist = 'long'
+                safety_override = 'open path: upgrade short→long into empty space'
+        elif obs == 'unknown' and path_clear_forward is False:
+            if last == 'backward':
+                action = prefer_turn or 'turn_left'
+                dist = 'short'
+                safety_override = f'blocked after reverse: turn open → {action}/{dist}'
+            else:
+                action = prefer_turn or 'turn_left'
+                dist = 'short'
+                safety_override = f'blocked/unknown: turn open → {action}/{dist} (not reverse)'
+
+    effective_clear = obs in ('none', 'far') and not stuck
+    if path_clear_forward is False and obs == 'near':
+        effective_clear = False
+
+    is_turn = action in ('turn_left', 'turn_right')
+    is_linear = action in ('forward', 'backward')
+    repeats = int(SEEK_TURN_REPEATS_BY_DIST.get(dist, 2)) if is_turn else 1
+    turn_deg = int(SEEK_TURN_DEG_BY_DIST.get(dist, 90)) if is_turn else 0
+    duration_ms = int(SEEK_DRIVE_MS_BY_DIST.get(dist, 1800)) if is_linear else int(
+        SEEK_TURN_MS_BY_DIST.get(dist, 900)
+    )
+    linear_x = float(SEEK_DRIVE_LIN_BY_DIST.get(dist, 0.15)) if is_linear else 0.12
+    if action == 'backward':
+        dist = 'short'
+        duration_ms = min(
+            int(SEEK_DRIVE_MS_BY_DIST.get('short', 900)),
+            int(SEEK_ESCAPE_REVERSE_MS),
+            int(SEEK_REVERSE_MAX_MS),
+        )
+        linear_x = -abs(min(
+            float(SEEK_DRIVE_LIN_BY_DIST.get('short', 0.12)),
+            float(SEEK_ESCAPE_REVERSE_LIN),
+            float(SEEK_REVERSE_MAX_LIN),
+        ))
+
+    if is_turn:
+        side = 'left' if action == 'turn_left' else 'right'
+        magnitude = f'~{turn_deg}° {side} fast-spin {duration_ms}ms'
+        summary = f'{action}/{dist} {magnitude}'
+    elif action == 'backward':
+        magnitude = f'~{duration_ms / 1000.0:.1f}s reverse @ |v|={abs(linear_x):.2f}'
+        summary = f'backward/{dist} {magnitude}'
+    else:
+        magnitude = f'~{duration_ms / 1000.0:.1f}s forward @ v={linear_x:.2f}'
+        summary = f'forward/{dist} {magnitude}'
+
+    return {
+        'action': action,
+        'drive_distance': dist,
+        'is_turn': is_turn,
+        'is_linear': is_linear,
+        'repeats': repeats,
+        'turn_deg': turn_deg,
+        'duration_ms': duration_ms,
+        'linear_x': linear_x,
+        'magnitude': magnitude,
+        'summary': summary,
+        'path_clear_forward': effective_clear if path_clear_forward is None else bool(path_clear_forward),
+        'obstacle_range': obs,
+        'stuck': bool(stuck),
+        'safety_override': safety_override,
+        'requested_action': requested,
+        'last_action': last,
+        'prefer_turn': prefer_turn,
+    }
+
+
+def interpret_base_voltage(raw) -> Optional[float]:
+    """ESP32 `v` field → pack volts, or None if missing / untrustworthy.
+
+    Waveshare sometimes reports raw ADC-ish values (>30). Those are not volts.
+    """
+    if raw is None or raw is False:
+        return None
+    try:
+        voltage = float(raw)
+    except (TypeError, ValueError):
+        return None
+    if voltage <= 0 or voltage > 30:
+        return None
+    return voltage
+
+
+def seek_battery_block_reason(
+    voltage,
+    *,
+    low_v: float = 9.5,
+    gate_enabled: bool = True,
+) -> Optional[str]:
+    """If Seek should refuse to drive, return an operator-facing reason.
+
+    Unknown voltage does **not** block (we cannot read it). Override with
+    gate_enabled=False (`UGV_SEEK_BATTERY_GATE=0`).
+    """
+    if not gate_enabled:
+        return None
+    try:
+        threshold = float(low_v)
+    except (TypeError, ValueError):
+        threshold = 9.5
+    if voltage is None:
+        return None
+    try:
+        v = float(voltage)
+    except (TypeError, ValueError):
+        return None
+    if v <= threshold:
+        return (
+            f'Battery low ({v:.2f} V ≤ {threshold:.1f} V). '
+            'Charge or set UGV_SEEK_BATTERY_GATE=0 to override.'
+        )
+    return None

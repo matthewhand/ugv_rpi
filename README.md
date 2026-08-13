@@ -36,6 +36,9 @@ This fork is a **supervised pilot**, not a finished product.
 - [x] **Seek UI**: status, log, pano card, mode-specific camera hints, config lock while running, sticky actions on small screens  
 - [x] **Global STOP** + Seek-running pill; leave-Seek confirm/auto-stop; keyboard teleop gated in Chat/Seek  
 - [x] **Control: Direct ↔ ROS 2** chips; UART release/reclaim; **serial fallback** if rosbridge is down; **periodic rosbridge autoheal** when in ROS 2 (`UGV_ROS_AUTOHEAL`, default on)  
+- [x] **ROS exit**: switching to Direct **stops `ugv_bringup`** in the container (`UGV_AUTOSTOP_BRINGUP`, default on) then reclaims UART — PID kill inside the container, not host `pkill -f`  
+- [x] **Seek battery gate**: refuse start / halt the loop when pack V is known and ≤ `UGV_BATTERY_LOW_V` (default 9.5). Unknown / ADC-ish `v` does **not** block. Override: `UGV_SEEK_BATTERY_GATE=0`  
+- [x] **Nav-plan unit tests** (`tests/test_seek_nav.py`): near→no forward, reverse capped, no double reverse  
 - [x] **Drive signs** in `config.yaml` / env; exposed on `/api/status`  
 - [x] **AI agent** (`/ai`) + thinner Chat tab; motion caps default off; motion lock vs **Idle heartbeat** (navbar **HB**); Chat has fail/retry on live stream  
 - [x] **Ops log** drawer; **3D Twin** popup drawer  
@@ -50,11 +53,10 @@ This fork is a **supervised pilot**, not a finished product.
 - [ ] **True localization** / map exploration (not heading-only trail)  
 - [ ] **Encoder odom** + **lidar-aware** obstacles when hardware present  
 - [ ] **Turn / pan closed-loop** feedback (not open-loop tables / synthetic pan)  
-- [ ] **ROS exit**: kill bringup when switching to Direct (autoheal re-releases UART when bridge is up; clean stop on exit still open)  
 - [ ] **Container boot**: always start rosbridge+bringup with `ugv_ros2`, not only on UI toggle / autoheal  
-- [ ] **Seek product polish**: battery gate, look-map UI, richer cancel mid-drive  
+- [ ] **Seek product polish**: look-map UI, richer cancel mid-drive  
 - [ ] **Security defaults** (hotspot / Jupyter token)  
-- [ ] **CI**: nav-plan safety tests, control_mode/autostart mocks  
+- [ ] **CI**: control_mode / autostart mocks (nav-plan + bringup-PID parse tests exist)  
 - [ ] **Chat ↔ `/ai` unification**; Twin offline CDN / real meshes  
 - [ ] **Docs**: expand operator-guide into a single printed runbook (guide exists; README historical sections below may lag labels)
 
@@ -64,7 +66,7 @@ This fork is a **supervised pilot**, not a finished product.
 |---------|---------|
 | **Raw** | Manual sticks, stock CV (**AUTODRIVE** = line-follow only) |
 | **Chat / AI** | Vision chat; enable motion tools on `/ai` first; set **HB off** for timed AI drives; use navbar **STOP** to halt |
-| **Seek** | Find-goal loop; prefer Direct; hand on **STOP**; default 30 steps / 300 s |
+| **Seek** | Find-goal loop; prefer Direct; hand on **STOP**; default 30 steps / 300 s. Refuses start if pack V is known and low |
 | **Direct** | Flask owns UART — best default for PTZ + Seek demos |
 | **ROS 2** | Needs healthy rosbridge; autoheal retries; serial fallback if bridge dies |
 | **HB (Idle heartbeat)** | ON = re-send last wheel cmd every 2s (idle → stop). OFF for long AI timed drives |
@@ -87,10 +89,11 @@ Unified **Control: Direct serial | ROS 2 relay** (navbar chips / `POST /api/cont
 
 - **Direct:** Flask opens UART; chassis + PTZ serial JSON go to the ESP32.  
 - **ROS 2:** Flask **releases** UART for `ugv_bringup`; stick/AI motion prefer **rosbridge** (`ws://127.0.0.1:9090` by default).  
+- **Leaving ROS 2:** Flask **stops `ugv_bringup`** (container PID kill; `UGV_AUTOSTOP_BRINGUP=0` to skip) then **reclaims** UART. rosbridge is left running.  
 - If rosbridge is **down**: commands **fall back to serial** after reclaiming UART (so PTZ is not left on “Dropped serial cmd”).  
 - While mode stays **ROS 2**, a **background autoheal** thread (`UGV_ROS_AUTOHEAL=1`, interval `UGV_ROS_AUTOHEAL_S` ≈15s) retries rosbridge/bringup and re-releases UART when the bridge recovers.  
 - Legacy `enable_motor_control=False` still bypasses chassis-only on serial when the port is open; full ROS mode uses release + relay as above.  
-- Env: `UGV_MOTOR_BYPASS=1` at process start (dev); `UGV_AUTOSTART_ROSBRIDGE` / `UGV_AUTOSTART_BRINGUP` (default on).
+- Env: `UGV_MOTOR_BYPASS=1` at process start (dev); `UGV_AUTOSTART_ROSBRIDGE` / `UGV_AUTOSTART_BRINGUP` / `UGV_AUTOSTOP_BRINGUP` (default on).
 
 Gimbal kits: `base_config.module_type: 2` in `config.yaml`.
 

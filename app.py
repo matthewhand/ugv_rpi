@@ -242,6 +242,15 @@ def set_control_mode(mode, *, source='api'):
     if mode == 'ros2':
         serial_ok = bool(base.release_serial_for_ros())
     else:
+        # Leaving ROS: stop bringup first so it does not keep /dev/ttyAMA0
+        if prev == 'ros2':
+            try:
+                fields_stop = _stop_ugv_bringup()
+            except Exception as e:
+                fields_stop = {'ok': False, 'detail': str(e)}
+                olog.warn('ros_autostop', f'bringup stop failed: {e}', error=str(e)[:200])
+        else:
+            fields_stop = None
         serial_ok = bool(base.claim_serial_for_flask())
 
     _save_control_mode()
@@ -254,6 +263,8 @@ def set_control_mode(mode, *, source='api'):
         'source': source,
         'serial_ok': serial_ok,
     }
+    if mode == 'direct' and prev == 'ros2':
+        fields['ros_autostop'] = fields_stop
     # Entering ROS mode: auto-start rosbridge (+ bringup) so UI PTZ/drive work
     if mode == 'ros2' and (prev != mode or source in ('api', 'ui_toggle', 'startup')):
         try:
@@ -781,6 +792,79 @@ exit 0
     return out
 
 
+def _stop_ugv_bringup():
+    """Stop ugv_bringup in the ROS container so Flask can reclaim UART.
+
+    Called when leaving ROS 2 for Direct. Does not stop rosbridge.
+    Env: UGV_AUTOSTOP_BRINGUP=1 (default on). Kill is by PID inside the
+    container (not host `pkill -f`) so the docker-exec wrapper is not matched.
+    """
+    out = {
+        'wanted': True,
+        'stopped': False,
+        'already_down': False,
+        'ok': False,
+        'detail': '',
+        'pids': [],
+    }
+    if not _env_flag('UGV_AUTOSTOP_BRINGUP', '1'):
+        out['wanted'] = False
+        out['detail'] = 'UGV_AUTOSTOP_BRINGUP disabled'
+        return out
+
+    try:
+        from ros_motion import parse_ugv_bringup_pids
+    except Exception as e:
+        out['detail'] = f'parse helper import failed: {e}'
+        olog.warn('ros_autostop', out['detail'], component='bringup')
+        return out
+
+    _ok_chk, so, se, _ = _docker_exec(
+        "ps -eo pid,args 2>/dev/null | grep -F ugv_bringup || true",
+        detach=False, timeout=15,
+    )
+    pids = parse_ugv_bringup_pids(so)
+    out['pids'] = pids
+    if not pids:
+        out['already_down'] = True
+        out['ok'] = True
+        if se and ('docker CLI not found' in se or 'No such container' in se
+                   or 'Cannot connect' in se):
+            out['detail'] = f'bringup stop skipped: {se[:160]}'
+        else:
+            out['detail'] = 'ugv_bringup not running'
+        return out
+
+    pid_list = ' '.join(str(p) for p in pids)
+    kill_script = (
+        'set +e\n'
+        f'kill -TERM {pid_list} 2>/dev/null || true\n'
+        'sleep 0.4\n'
+        f'kill -KILL {pid_list} 2>/dev/null || true\n'
+        'sleep 0.15\n'
+        'ps -eo pid,args 2>/dev/null | grep -F ugv_bringup || true\n'
+    )
+    _ok_st, so2, se2, _code = _docker_exec(kill_script, detach=False, timeout=20)
+    leftover = parse_ugv_bringup_pids(so2)
+    out['stopped'] = not leftover
+    out['ok'] = not leftover
+    if leftover:
+        out['detail'] = f'still running after kill: {leftover}'
+        olog.warn(
+            'ros_autostop',
+            out['detail'][:240],
+            component='bringup', leftover=leftover, pids=pids,
+        )
+    else:
+        out['detail'] = f'stopped pids {pids}'
+        olog.info(
+            'ros_autostop',
+            'ugv_bringup stopped in container',
+            component='bringup', stopped=True, pids=pids,
+        )
+    return out
+
+
 def _ensure_ros2_sidecar_stack():
     """When entering ros2 mode: ensure rosbridge (+ optionally bringup) are up."""
     result = {
@@ -793,6 +877,26 @@ def _ensure_ros2_sidecar_stack():
     except Exception as e:
         result['bringup'] = {'wanted': True, 'ok': False, 'detail': str(e)}
     return result
+
+
+# Booted in Direct: drop leftover bringup so a Flask restart can reclaim UART.
+# (set_control_mode() at import time cannot call this — helpers are defined here.)
+if get_control_mode() == 'direct':
+    try:
+        _startup_stop = _stop_ugv_bringup()
+        if _startup_stop.get('stopped'):
+            base.claim_serial_for_flask()
+            olog.info(
+                'ros_autostop',
+                'startup Direct: stopped leftover ugv_bringup',
+                **{k: _startup_stop.get(k) for k in ('ok', 'stopped', 'detail', 'pids')},
+            )
+    except Exception as e:
+        olog.warn(
+            'ros_autostop',
+            f'startup Direct bringup stop failed: {e}',
+            error=str(e)[:200],
+        )
 
 
 # Background ROS2 heal: keep rosbridge/bringup up while control_mode=ros2.
@@ -3311,6 +3415,16 @@ from ai_seek import (
     DEFAULT_ON_FOUND,
     DEFAULT_ON_FOUND_TTS,
 )
+from seek_nav import (  # noqa: E402
+    seek_nav_plan as _seek_nav_plan,
+    seek_normalize_action as _seek_normalize_action,
+    seek_normalize_distance as _seek_normalize_distance,
+    seek_normalize_obstacle_range as _seek_normalize_obstacle_range,
+    SEEK_TURN_MS_BY_DIST as _SEEK_TURN_MS_BY_DIST,
+    interpret_base_voltage as _interpret_base_voltage,
+    seek_battery_block_reason as _seek_battery_block_reason_pure,
+    reset_escape_cycle as _seek_reset_escape_cycle,
+)
 
 _SEEK_JUDGE_SYSTEM = (
     "You are a visual goal referee for a robot camera. "
@@ -3378,145 +3492,9 @@ _SEEK_NAV_JSON_SCHEMA = {
     },
 }
 
-# Timed hop lengths (ms) for drive_distance tiers — body linear applied after sign map.
-# Medium/long biased for corridor progress (a little longer between scans).
-_SEEK_DRIVE_MS_BY_DIST = {
-    'short': 900,
-    'medium': 2400,
-    'long': 4200,
-}
-_SEEK_DRIVE_LIN_BY_DIST = {
-    'short': 0.12,
-    'medium': 0.16,
-    'long': 0.20,
-}
-# Escape reverse: SHORT nudge only — long reverse often hits the rear wall.
-# Prefer turn-to-open; reverse is just enough to free the nose for a spin.
-_SEEK_ESCAPE_REVERSE_MS = 900
-_SEEK_ESCAPE_REVERSE_LIN = 0.12
-# Never allow reverse longer than this (even if LLM asks medium/long)
-_SEEK_REVERSE_MAX_MS = 1100
-_SEEK_REVERSE_MAX_LIN = 0.14
-# In-place tank turns at UI *fast* speed (max_speed × max_rate on T:1 L/R).
-# Weak T:13 arc crawls (angular≈0.7) barely move this chassis; match Raw-mode Fast.
-_SEEK_TURN_REPEATS_BY_DIST = {
-    'short': 1,
-    'medium': 1,
-    'long': 1,
-}
-# Measured on this UGV at Fast T:1 tank spin: ~550ms ≈ 4.5° yaw (not 45°).
-# Rate ≈ 4.5 / 550 ≈ 0.00818 °/ms → ms ≈ deg / 0.00818 ≈ deg * 122.2
-_SEEK_TURN_DEG_PER_MS = 4.5 / 550.0
-# Cumulative scale from original 45/90/135°: (2/3)^2 ≈ 4/9 (two dial-backs).
-_SEEK_TURN_ANGLE_SCALE = (2.0 / 3.0) * (2.0 / 3.0)
-_SEEK_TURN_DEG_BY_DIST = {
-    'short': int(round(45 * _SEEK_TURN_ANGLE_SCALE)),   # ~20°
-    'medium': int(round(90 * _SEEK_TURN_ANGLE_SCALE)),  # ~40°
-    'long': int(round(135 * _SEEK_TURN_ANGLE_SCALE)),   # ~60°
-}
-# Timed pure-spin pulses (ms) at fast wheel speed (T:1 max_speed×max_rate)
-_SEEK_TURN_MS_BY_DIST = {
-    'short': int(round(_SEEK_TURN_DEG_BY_DIST['short'] / _SEEK_TURN_DEG_PER_MS)),    # ~2444ms → ~20°
-    'medium': int(round(_SEEK_TURN_DEG_BY_DIST['medium'] / _SEEK_TURN_DEG_PER_MS)),  # ~4889ms → ~40°
-    'long': int(round(_SEEK_TURN_DEG_BY_DIST['long'] / _SEEK_TURN_DEG_PER_MS)),      # ~7333ms → ~60°
-}
 # Fraction of args_config max_speed*max_rate for seek spins (1.0 = UI Fast)
 _SEEK_TURN_SPEED_SCALE = 1.0
-_SEEK_VALID_DISTANCES = frozenset({'short', 'medium', 'long'})
-_SEEK_DIST_ALIASES = {
-    'short': 'short', 'near': 'short', 'slow': 'short', 'crawl': 'short',
-    'close': 'short', 'small': 'short', 's': 'short', '1': 'short',
-    'medium': 'medium', 'mid': 'medium', 'normal': 'medium', 'default': 'medium',
-    'm': 'medium', '2': 'medium',
-    'long': 'long', 'far': 'long', 'fast': 'long', 'open': 'long',
-    'large': 'long', 'big': 'long', 'l': 'long', '3': 'long',
-}
-
-
-def _seek_normalize_distance(raw, default='medium'):
-    """Map free-text / LLM distance tokens → short|medium|long."""
-    if raw is None:
-        return default if default in _SEEK_VALID_DISTANCES else 'medium'
-    s = str(raw).strip().lower().replace('-', ' ').replace('_', ' ')
-    if s in _SEEK_DIST_ALIASES:
-        return _SEEK_DIST_ALIASES[s]
-    # first token / embedded keyword
-    for tok in re.findall(r'[a-z0-9]+', s):
-        if tok in _SEEK_DIST_ALIASES:
-            return _SEEK_DIST_ALIASES[tok]
-    return default if default in _SEEK_VALID_DISTANCES else 'medium'
-
-
-def _seek_normalize_action(raw, default='forward'):
-    a = str(raw or default).strip().lower().replace(' ', '_').replace('-', '_')
-    if a in ('forward', 'go_forward', 'straight', 'ahead'):
-        return 'forward'
-    if a in ('turn_left', 'left', 'l'):
-        return 'turn_left'
-    if a in ('turn_right', 'right', 'r'):
-        return 'turn_right'
-    if a in ('backward', 'back', 'drive_backward', 'reverse', 'retreat'):
-        return 'backward'
-    return default if default in ('forward', 'turn_left', 'turn_right', 'backward') else 'forward'
-
-
-# Rotate escape maneuvers when LLM tries to drive into a near obstacle.
-# Prefer turn-to-open after a reverse (see _seek_prefer_open_turn).
-_seek_escape_idx = 0
-# Prefer turns over reverse — reverse often hits the rear wall
-_SEEK_ESCAPE_SEQ = ('turn_left', 'turn_right', 'turn_left', 'backward', 'turn_right')
-_SEEK_OBSTACLE_RANGES = frozenset({'none', 'far', 'medium', 'near', 'unknown'})
-_SEEK_OBSTACLE_ALIASES = {
-    'none': 'none', 'clear': 'none', 'open': 'none', 'empty': 'none',
-    'no': 'none', 'nothing': 'none', 'n/a': 'none', 'na': 'none',
-    'far': 'far', 'distant': 'far', 'long': 'far', 'away': 'far',
-    'medium': 'medium', 'mid': 'medium', 'middle': 'medium', 'moderate': 'medium',
-    'near': 'near', 'close': 'near', 'immediate': 'near', 'very_close': 'near',
-    'very close': 'near', 'blocking': 'near', 'blocked': 'near', 'imminent': 'near',
-    'unknown': 'unknown', '?': 'unknown',
-}
-
-
-def _seek_normalize_obstacle_range(raw, default='unknown'):
-    """Map LLM obstacle closeness → none|far|medium|near|unknown."""
-    if raw is None or raw is False:
-        return default if default in _SEEK_OBSTACLE_RANGES else 'unknown'
-    if raw is True:
-        return 'near'
-    s = str(raw).strip().lower().replace('-', ' ').replace('_', ' ')
-    if s in _SEEK_OBSTACLE_ALIASES:
-        return _SEEK_OBSTACLE_ALIASES[s]
-    for tok in re.findall(r'[a-z?]+', s):
-        if tok in _SEEK_OBSTACLE_ALIASES:
-            return _SEEK_OBSTACLE_ALIASES[tok]
-    # numeric metres if model returns e.g. "0.5m" / "2 meters"
-    m = re.search(r'(\d+(?:\.\d+)?)\s*m', s)
-    if m:
-        metres = float(m.group(1))
-        if metres < 0.6:
-            return 'near'
-        if metres < 1.5:
-            return 'medium'
-        if metres < 4.0:
-            return 'far'
-        return 'none'
-    return default if default in _SEEK_OBSTACLE_RANGES else 'unknown'
-
-
-def _seek_next_escape_action(prefer=None):
-    """Cycle reverse / left / right so repeated blocks don't always do the same thing.
-
-    prefer: optional 'turn_left'|'turn_right'|'backward' to bias the first pick.
-    """
-    global _seek_escape_idx
-    if prefer in ('turn_left', 'turn_right', 'backward', 'left', 'right'):
-        pref = _seek_normalize_action(prefer)
-        # Still advance the cycle so we don't stick forever on the same side
-        _seek_escape_idx += 1
-        return pref
-    action = _SEEK_ESCAPE_SEQ[_seek_escape_idx % len(_SEEK_ESCAPE_SEQ)]
-    _seek_escape_idx += 1
-    return action
+# Nav-plan + hop tables live in seek_nav.py (unit-tested). Aliases imported above.
 
 
 def _seek_side_openness(views):
@@ -3582,184 +3560,6 @@ def _seek_prefer_open_turn(views):
     info = _seek_side_openness(views)
     return 'turn_right' if info.get('prefer') == 'right' else 'turn_left'
 
-
-def _seek_nav_plan(
-    action,
-    drive_distance='medium',
-    *,
-    path_clear_forward=None,
-    stuck=False,
-    obstacle_range=None,
-    last_action=None,
-    prefer_turn=None,
-):
-    """Normalize action+distance and attach human-readable magnitude for logs/UI.
-
-    Distance meaning:
-      forward/backward short|medium|long → timed hop 0.9s / 1.8s / 3.2s
-      turn_left/right short|medium|long → ~45° / ~90° / ~135° (1/2/3 arc cycles)
-
-    Obstacle closeness (obstacle_range) gates whether forward is allowed:
-      none   → open path, any hop
-      far    → something ahead but distant; forward ok, cap long→medium
-      medium → mid-range obstacle; forward short only
-      near   → immediate block; NEVER forward (escape turn/back)
-      unknown + path_clear false → treat as near
-
-    Recovery (rear walls are common — reverse carefully):
-      1) Near / stuck → prefer SHORT turn toward open side first.
-      2) Only reverse a short nudge if we just failed a turn and still blocked,
-         or LLM explicitly asked reverse once.
-      3) Never reverse twice; never long reverse (hits rear furniture/walls).
-    """
-    action = _seek_normalize_action(action)
-    dist = _seek_normalize_distance(drive_distance, default='medium')
-    obs = _seek_normalize_obstacle_range(obstacle_range, default='unknown')
-    last = _seek_normalize_action(last_action) if last_action else None
-    prefer_turn = _seek_normalize_action(prefer_turn) if prefer_turn else None
-    if prefer_turn not in ('turn_left', 'turn_right'):
-        prefer_turn = None
-    safety_override = None
-    requested = action
-
-    # Infer range from legacy path_clear when model omitted closeness
-    if obs == 'unknown':
-        if path_clear_forward is True:
-            obs = 'none'
-        elif path_clear_forward is False:
-            obs = 'near'
-
-    # After a reverse, do not reverse again into a corner — turn toward open space
-    if last == 'backward' and action == 'backward' and obs in ('near', 'medium', 'unknown'):
-        action = prefer_turn or 'turn_left'
-        dist = 'short'
-        safety_override = f'after reverse: turn to open ({action}/{dist}) instead of reverse again'
-
-    # Cap any reverse to short — medium/long reverse often hits the wall behind
-    if action == 'backward' and dist in ('medium', 'long') and not safety_override:
-        dist = 'short'
-        safety_override = 'reverse capped to short (avoid rear wall)'
-
-    # Stuck: turn to open first; only reverse nudge if we already turned and still stuck
-    if stuck and action in ('forward', 'backward') and not safety_override:
-        if last == 'backward':
-            action = prefer_turn or 'turn_left'
-            dist = 'short'
-            safety_override = f'stuck after reverse: turn to open → {action}/{dist}'
-        elif last in ('turn_left', 'turn_right'):
-            # Already turned, still stuck — tiny reverse then next step will turn again
-            action = 'backward'
-            dist = 'short'
-            safety_override = 'stuck after turn: reverse short nudge only'
-        else:
-            action = prefer_turn or 'turn_left'
-            dist = 'short'
-            safety_override = f'stuck: turn to open → {action}/{dist} (prefer over reverse)'
-    elif action == 'forward' and not safety_override:
-        if obs == 'near':
-            # Prefer turn-to-open over reverse (rear is often also cluttered)
-            if last == 'backward':
-                action = prefer_turn or 'turn_left'
-                dist = 'short'
-                safety_override = f'near after reverse: turn open → {action}/{dist}'
-            elif last in ('turn_left', 'turn_right'):
-                # Still near after a turn — short reverse nudge once
-                action = 'backward'
-                dist = 'short'
-                safety_override = 'near after turn: reverse short nudge only'
-            else:
-                action = prefer_turn or _seek_next_escape_action(prefer=prefer_turn or 'turn_left')
-                if action == 'backward':
-                    # Escape cycle may return reverse — force short turn instead
-                    action = prefer_turn or 'turn_left'
-                dist = 'short'
-                safety_override = f'near obstacle: turn open → {action}/{dist} (not reverse)'
-        elif obs == 'medium':
-            # Mid-range: allow medium corridor crawl; only cut long→medium
-            if dist == 'long':
-                dist = 'medium'
-                safety_override = 'mid-range obstacle: forward capped to medium'
-            elif dist == 'short':
-                dist = 'medium'
-                safety_override = 'mid-range: upgrade short→medium corridor hop'
-        elif obs == 'far':
-            # Distant clutter — still take a solid hop (corridor length)
-            if dist == 'short':
-                dist = 'medium'
-                safety_override = 'far obstacle: upgrade short→medium'
-            # long allowed when hallway looks free with distant furniture
-        elif obs == 'none':
-            # Open path — don't creep; prefer medium/long corridor hops
-            if dist == 'short':
-                dist = 'long'
-                safety_override = 'open path: upgrade short→long into empty space'
-        elif obs == 'unknown' and path_clear_forward is False:
-            if last == 'backward':
-                action = prefer_turn or 'turn_left'
-                dist = 'short'
-                safety_override = f'blocked after reverse: turn open → {action}/{dist}'
-            else:
-                action = prefer_turn or 'turn_left'
-                dist = 'short'
-                safety_override = f'blocked/unknown: turn open → {action}/{dist} (not reverse)'
-
-    # Effective clear flag for UI/logs
-    effective_clear = obs in ('none', 'far') and not stuck
-    if path_clear_forward is False and obs == 'near':
-        effective_clear = False
-
-    is_turn = action in ('turn_left', 'turn_right')
-    is_linear = action in ('forward', 'backward')
-    repeats = int(_SEEK_TURN_REPEATS_BY_DIST.get(dist, 2)) if is_turn else 1
-    turn_deg = int(_SEEK_TURN_DEG_BY_DIST.get(dist, 90)) if is_turn else 0
-    duration_ms = int(_SEEK_DRIVE_MS_BY_DIST.get(dist, 1800)) if is_linear else int(
-        _SEEK_TURN_MS_BY_DIST.get(dist, 900)
-    )
-    linear_x = float(_SEEK_DRIVE_LIN_BY_DIST.get(dist, 0.15)) if is_linear else 0.12
-    if action == 'backward':
-        # Hard cap: short reverse only — no long backing into rear walls
-        dist = 'short'
-        duration_ms = min(
-            int(_SEEK_DRIVE_MS_BY_DIST.get('short', 900)),
-            int(_SEEK_ESCAPE_REVERSE_MS),
-            int(_SEEK_REVERSE_MAX_MS),
-        )
-        linear_x = -abs(min(
-            float(_SEEK_DRIVE_LIN_BY_DIST.get('short', 0.12)),
-            float(_SEEK_ESCAPE_REVERSE_LIN),
-            float(_SEEK_REVERSE_MAX_LIN),
-        ))
-
-    if is_turn:
-        side = 'left' if action == 'turn_left' else 'right'
-        magnitude = f'~{turn_deg}° {side} fast-spin {duration_ms}ms'
-        summary = f'{action}/{dist} {magnitude}'
-    elif action == 'backward':
-        magnitude = f'~{duration_ms / 1000.0:.1f}s reverse @ |v|={abs(linear_x):.2f}'
-        summary = f'backward/{dist} {magnitude}'
-    else:
-        magnitude = f'~{duration_ms / 1000.0:.1f}s forward @ v={linear_x:.2f}'
-        summary = f'forward/{dist} {magnitude}'
-
-    return {
-        'action': action,
-        'drive_distance': dist,
-        'is_turn': is_turn,
-        'is_linear': is_linear,
-        'repeats': repeats,
-        'turn_deg': turn_deg,
-        'duration_ms': duration_ms,
-        'linear_x': linear_x,
-        'magnitude': magnitude,
-        'summary': summary,
-        'path_clear_forward': effective_clear if path_clear_forward is None else bool(path_clear_forward),
-        'obstacle_range': obs,
-        'stuck': bool(stuck),
-        'safety_override': safety_override,
-        'requested_action': requested,
-        'last_action': last,
-        'prefer_turn': prefer_turn,
-    }
 
 _SEEK_FOUND_JSON_SCHEMA = {
     'type': 'json_schema',
@@ -4515,7 +4315,7 @@ _cam_aim_pub = {
     'motion_from': 0.0,
     'motion_cmd': None,
 }
-_SEEK_DRIVE_MS = 1100  # legacy default; prefer _SEEK_DRIVE_MS_BY_DIST
+_SEEK_DRIVE_MS = 1100  # legacy default; hop tables live in seek_nav.py
 
 
 def _seek_pan_deg_to_rad(pan_deg, tilt_deg=0.0):
@@ -6038,6 +5838,10 @@ def _seek_loop(ctrl, label, conf, max_steps, timeout_s):
     prev_center_jpeg = None
     cached_nav = None
     last_drive_action = None  # for recovery: after reverse, turn to open
+    try:
+        _seek_reset_escape_cycle()
+    except Exception:
+        pass
 
     def _halt(phase, message, step=0, **kwargs):
         try:
@@ -6101,6 +5905,10 @@ def _seek_loop(ctrl, label, conf, max_steps, timeout_s):
                 return
             if timeout_s > 0 and (time.time() - t0) >= timeout_s:
                 _halt('timeout', f'Timeout after {timeout_s}s', step=step - 1)
+                return
+            batt_block = _seek_battery_block_reason()
+            if batt_block:
+                _halt('failed', batt_block, step=step - 1)
                 return
 
             if llm_scene_nav:
@@ -6603,9 +6411,45 @@ def api_ai_seek_labels():
     })
 
 
+# Battery-low log + Seek gate (volts). Unknown / ADC-ish readings do not block.
+_battery_low_active = False
+_BATTERY_LOW_V = float(os.environ.get('UGV_BATTERY_LOW_V') or 9.5)
+
+
+def _read_battery_voltage_v():
+    """Live pack volts from ESP32 feedback, or None if unknown."""
+    try:
+        bd = base.base_data if isinstance(getattr(base, 'base_data', None), dict) else {}
+        return _interpret_base_voltage(bd.get('v'))
+    except Exception:
+        return None
+
+
+def _seek_battery_block_reason():
+    """Refuse Seek drive when pack voltage is known and below threshold."""
+    if not _env_flag('UGV_SEEK_BATTERY_GATE', '1'):
+        return None
+    return _seek_battery_block_reason_pure(
+        _read_battery_voltage_v(),
+        low_v=_BATTERY_LOW_V,
+        gate_enabled=True,
+    )
+
+
 @app.route('/api/ai/seek/start', methods=['POST'])
 def api_ai_seek_start():
     data = request.get_json(silent=True) or {}
+    batt_block = _seek_battery_block_reason()
+    if batt_block:
+        volts = _read_battery_voltage_v()
+        olog.warn('ai_seek', batt_block, voltage_v=volts, threshold=_BATTERY_LOW_V)
+        return jsonify({
+            'success': False,
+            'error': batt_block,
+            'battery_blocked': True,
+            'voltage_v': volts,
+            'threshold_v': _BATTERY_LOW_V,
+        }), 400
     goal = data.get('goal') or data.get('target') or data.get('label') or ''
     referee = parse_seek_referee(data.get('referee') or data.get('mode') or REFEREE_DETECTOR)
     # Missing → finite pilot defaults. Explicit 0 / "unlimited" → unlimited.
@@ -7360,20 +7204,12 @@ def handle_socket_json(json_data):
         return
 
 # Battery low edge (log once when crossing below threshold, again when recovered)
-_battery_low_active = False
-_BATTERY_LOW_V = float(os.environ.get('UGV_BATTERY_LOW_V') or 9.5)
-
-
 def _check_battery_edge():
     global _battery_low_active
     try:
         bd = base.base_data if isinstance(getattr(base, 'base_data', None), dict) else {}
-        v = bd.get('v')
-        if v is None:
-            return
-        voltage = float(v)
-        # Waveshare often reports raw ADC-ish values; if > 30 treat as raw and skip
-        if voltage > 30:
+        voltage = _interpret_base_voltage(bd.get('v'))
+        if voltage is None:
             return
         if voltage <= _BATTERY_LOW_V and not _battery_low_active:
             _battery_low_active = True

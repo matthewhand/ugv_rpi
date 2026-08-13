@@ -60,6 +60,36 @@ def preferred_motion_path(control_mode: str, rosbridge_ok: bool) -> str:
     return 'direct'
 
 
+def parse_ugv_bringup_pids(ps_text: Optional[str]) -> list:
+    """Parse `ps` / `pgrep -af` lines for real ugv_bringup PIDs (not wrappers).
+
+    Used when leaving ROS 2 so Flask can reclaim UART without `pkill -f`
+    matching the docker-exec / bash wrapper.
+    """
+    pids = []
+    if not ps_text:
+        return pids
+    skip = ('pgrep', 'pkill', 'grep -', 'awk', 'bash -lc', 'docker exec')
+    seen = set()
+    for line in str(ps_text).splitlines():
+        raw = line.strip()
+        if not raw or 'ugv_bringup' not in raw:
+            continue
+        low = raw.lower()
+        if any(tok in low for tok in skip):
+            continue
+        pid = None
+        for tok in raw.split():
+            if tok.isdigit():
+                pid = int(tok)
+                break
+        if pid is None or pid in seen:
+            continue
+        seen.add(pid)
+        pids.append(pid)
+    return pids
+
+
 def pt_backend() -> str:
     """auto | ros2 | serial — how Flask should command pan/tilt."""
     return (os.environ.get('UGV_PT_BACKEND') or 'auto').strip().lower()
