@@ -1685,6 +1685,29 @@
     }
   }
 
+  function wirePtzAimBridge() {
+    function apply(aim) {
+      if (!aim) return;
+      renderSeekPanOverlay({ cam_aim: aim });
+    }
+    try {
+      if (typeof socket !== 'undefined' && socket && socket.on) {
+        socket.on('ptz_aim', apply);
+      }
+    } catch (e) { /* socket may load later */ }
+    // Idle Seek tab: pick up /api/ptz + /api/status even when Seek is not running
+    setInterval(function () {
+      if (getActiveMode() !== 'seek') return;
+      if (lastSeenSeekPhase === 'running') return;
+      fetch('/api/status')
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          if (d && d.ptz) apply(d.ptz);
+        })
+        .catch(function () {});
+    }, 700);
+  }
+
   function boot() {
     // Wire retries before first mode enter so refreshLiveFeeds uses _ugvReload
     initLiveImageRetries();
@@ -1692,6 +1715,7 @@
     initChat();
     initSeek();
     refreshLiveFeeds();
+    wirePtzAimBridge();
   }
 
   if (document.readyState === 'loading') {

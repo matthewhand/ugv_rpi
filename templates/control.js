@@ -477,6 +477,33 @@ document.addEventListener('mousewheel', (e) => {
         cmdJsonCmd({"T":cmd_arm_ctrl_ui,"E":armE,"Z":armZ,"R":armR});
     }
 }, { passive: false });
+/** Apply pan/tilt to the Raw HUD gauges (T:133 X/Y degrees). */
+function applyHudPtz(panX, tiltY) {
+    panX = Math.max(-180, Math.min(Number(panX) || 0, 180));
+    tiltY = Math.max(-30, Math.min(Number(tiltY) || 0, 90));
+    var panEl = document.getElementById("Pan");
+    if (panEl) panEl.innerHTML = panX.toFixed(2);
+    var panScale = document.getElementById("pan_scale");
+    if (panScale) panScale.style.transform = "rotate(" + (-panX) + "deg)";
+    var tiltNum = document.getElementById("Tilt");
+    if (!tiltNum) return;
+    tiltNum.innerHTML = tiltY.toFixed(2);
+    var pointer = document.getElementById("tilt_scale_pointer");
+    var tiltScaleOut = document.getElementById("tilt_scale");
+    var tiltScalediv = document.getElementById("tilt_scalediv");
+    if (!pointer || !tiltScaleOut || !tiltScalediv) return;
+    var tiltScaleBase = tiltScaleOut.getBoundingClientRect();
+    var tiltScaleDivBase = tiltScalediv.getBoundingClientRect();
+    var tiltNumPanel = tiltNum.getBoundingClientRect();
+    var pointerMoveY = tiltScaleBase.height / 135;
+    pointer.style.transform =
+        "translate(" +
+        tiltScaleDivBase.width +
+        "px, " +
+        (pointerMoveY * (90 - tiltY) - tiltNumPanel.height / 2) +
+        "px)";
+}
+
 function joyStickCtrl(inputX, inputY) {
     if (module_type == 1) {
         var x_cmd = Math.max(-180, Math.min(inputX/7, 180));
@@ -504,21 +531,7 @@ function joyStickCtrl(inputX, inputY) {
             steadyCtrl(1, inputY);
         }
 
-        RotateAngle = document.getElementById("Pan").innerHTML = x_cmd.toFixed(2);
-        var panScale = document.getElementById("pan_scale");
-        panScale.style.transform = `rotate(${-RotateAngle}deg)`;
-
-        var tiltNum = document.getElementById("Tilt");
-        var tiltNumPanel = tiltNum.getBoundingClientRect();
-        var tiltNumMove = tiltNum.innerHTML = y_cmd.toFixed(2);;
-
-        var pointer = document.getElementById('tilt_scale_pointer');
-        var tiltScaleOut = document.getElementById('tilt_scale');
-        var tiltScaleBase = tiltScaleOut.getBoundingClientRect();
-        var tiltScalediv = document.getElementById('tilt_scalediv');
-        var tiltScaleDivBase = tiltScalediv.getBoundingClientRect();
-        var pointerMoveY = tiltScaleBase.height/135;
-        pointer.style.transform = `translate(${tiltScaleDivBase.width}px, ${pointerMoveY*(90 - tiltNumMove)-tiltNumPanel.height/2}px)`;
+        applyHudPtz(x_cmd, y_cmd);
     }
 }
 
@@ -589,6 +602,12 @@ socketJson.emit('json', {'T':1,'L':0,'R':0})
 
 var socket = io('http://' + location.host + '/ctrl');
 socket.emit('request_data');
+socket.on('ptz_aim', function (aim) {
+    if (!aim) return;
+    var pan = aim.pan_deg != null ? aim.pan_deg : aim.cmd;
+    var tilt = aim.tilt_deg != null ? aim.tilt_deg : aim.tilt;
+    applyHudPtz(pan, tilt);
+});
 
 var light_mode = 0;
 var cv_heartbeat_stop_flag = false;
@@ -703,6 +722,10 @@ socket.on('update', function(data) {
         
         document.getElementById("photos-size").innerHTML = data[picture_size] + " MB";
         document.getElementById("videos-size").innerHTML = data[video_size] + " MB";
+
+        if (data[pan_angle] !== undefined || data[tilt_angle] !== undefined) {
+            applyHudPtz(data[pan_angle], data[tilt_angle]);
+        }
 
         document.getElementById("v_in").innerHTML = (data[base_voltage]/100).toFixed(1);
         

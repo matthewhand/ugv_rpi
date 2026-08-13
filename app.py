@@ -464,6 +464,7 @@ def api_status():
         # Effective signs used by body_to_hw_* (UI/AI forward → wheel cmd)
         'drive_linear_sign': _drive_sign('linear'),
         'drive_angular_sign': _drive_sign('angular'),
+        'ptz': _ptz_aim_public(),
     })
 
 @app.route('/api/toggle_rtsp', methods=['POST'])
@@ -1400,11 +1401,7 @@ def api_ptz():
                 base.base_json_ctrl(cmd)
                 path = 'serial' if mode == 'direct' else 'serial_fallback'
                 olog.info('ptz_cmd', f'PTZ goto X={x} Y={y} ({path} T:133)', X=x, Y=y, path=path)
-            try:
-                cvf.pan_angle = x
-                cvf.tilt_angle = -y
-            except Exception:
-                pass
+            _publish_ptz_aim(x, y, settled=False, source='api_ptz')
         except Exception as e:
             olog.error('ptz_cmd', f'PTZ goto failed: {e}', error=str(e))
             return jsonify({'success': False, 'error': str(e), 'command': cmd}), 500
@@ -1438,6 +1435,10 @@ def api_ptz():
                 X=x, Y=y, path=path, before_pan=before_pan, after_pan=after_pan,
                 before_tilt=before_tilt, after_tilt=after_tilt, moved=False,
             )
+        _publish_ptz_aim(
+            x, y, hw_pan=after_pan, hw_tilt=after_tilt,
+            settled=moved, source='api_ptz',
+        )
         return jsonify(snap)
     return jsonify({'success': False, 'error': "action must be status|goto|center|feedback"}), 400
 
@@ -1482,11 +1483,7 @@ def _ptz_goto_raw(x, y, wait_s=1.5):
             path = 'serial' if mode == 'direct' else 'serial_fallback'
             base.base_json_ctrl({'T': 4, 'cmd': 2})
             base.base_json_ctrl(cmd)
-        try:
-            cvf.pan_angle = x
-            cvf.tilt_angle = -y
-        except Exception:
-            pass
+        _publish_ptz_aim(x, y, settled=False, source='ptz_goto_raw')
     except Exception as e:
         return {
             'success': False, 'error': str(e), 'command_sent': cmd, 'path': path,
@@ -2442,7 +2439,10 @@ def _build_chat_messages(history, user_msg, attach_snapshot=False, jpeg_bytes=No
     messages.append({'role': 'user', 'content': user_msg})
     return messages, None, 0
 
-def _openai_chat(messages, max_tokens=512, temperature=0.4, tools=None, response_format=None, timeout=120):
+def _openai_chat(
+    messages, max_tokens=512, temperature=0.4, tools=None,
+    response_format=None, timeout=120, tool_choice=None,
+):
     """Chat Completions via OpenAI-compatible HTTP API. Settings from env/.env only.
 
     Returns (assistant_message_dict, raw_body, cfg).
@@ -2462,7 +2462,7 @@ def _openai_chat(messages, max_tokens=512, temperature=0.4, tools=None, response
     }
     if tools:
         payload['tools'] = tools
-        payload['tool_choice'] = 'auto'
+        payload['tool_choice'] = tool_choice if tool_choice is not None else 'auto'
     if response_format:
         payload['response_format'] = response_format
     req = urllib.request.Request(
@@ -2487,6 +2487,48 @@ def _openai_chat(messages, max_tokens=512, temperature=0.4, tools=None, response
     except Exception:
         raise RuntimeError(f'LLM bad response: {str(body)[:500]}')
     return msg, body, cfg
+
+
+def _parse_tool_call_args(msg, name=None):
+    """Extract JSON arguments from OpenAI-style tool_calls / function_call."""
+    if not isinstance(msg, dict):
+        return None
+    calls = msg.get('tool_calls') or []
+    if isinstance(calls, dict):
+        calls = [calls]
+    for tc in calls:
+        if not isinstance(tc, dict):
+            continue
+        fn = tc.get('function') or tc
+        if name and fn.get('name') and fn.get('name') != name:
+            continue
+        args = fn.get('arguments')
+        if isinstance(args, dict):
+            return args
+        if isinstance(args, str) and args.strip():
+            try:
+                parsed = json.loads(args)
+                if isinstance(parsed, dict):
+                    return parsed
+            except Exception:
+                parsed = _parse_json_from_text(args)
+                if isinstance(parsed, dict):
+                    return parsed
+    fc = msg.get('function_call')
+    if isinstance(fc, dict):
+        if name and fc.get('name') and fc.get('name') != name:
+            return None
+        args = fc.get('arguments')
+        if isinstance(args, dict):
+            return args
+        if isinstance(args, str) and args.strip():
+            try:
+                parsed = json.loads(args)
+                return parsed if isinstance(parsed, dict) else None
+            except Exception:
+                parsed = _parse_json_from_text(args)
+                return parsed if isinstance(parsed, dict) else None
+    return None
 
 
 def _message_text_content(msg):
@@ -2790,6 +2832,16 @@ def _execute_motion_via_mode(name, args):
                     0.0, _ai_motion_lock_until - time.time()
                 )
                 result['drive_linear_sign'] = _drive_sign('linear')
+            if name == 'send_gimbal_command' and ok:
+                try:
+                    _pr = float(args.get('pan_rad') or 0.0)
+                    _tr = float(args.get('tilt_rad') or 0.0)
+                    _publish_ptz_aim(
+                        -_pr * 180.0 / math.pi, _tr * 180.0 / math.pi,
+                        source='ros_gimbal',
+                    )
+                except Exception:
+                    pass
             olog.log(
                 'error' if not ok else level,
                 'ai_motion',
@@ -2902,11 +2954,7 @@ def _execute_motion_via_mode(name, args):
         x_deg = -pan * 180.0 / math.pi
         y_deg = tilt * 180.0 / math.pi
         base.base_json_ctrl({'T': 133, 'X': x_deg, 'Y': y_deg, 'SPD': 0, 'ACC': 0})
-        try:
-            cvf.pan_angle = x_deg
-            cvf.tilt_angle = -y_deg
-        except Exception:
-            pass
+        _publish_ptz_aim(x_deg, y_deg, settled=False, source='send_gimbal')
         olog.info(
             'ai_motion',
             f'AI gimbal pan={pan:.3f} tilt={tilt:.3f} rad (direct)',
@@ -3425,6 +3473,12 @@ from seek_nav import (  # noqa: E402
     interpret_base_voltage as _interpret_base_voltage,
     seek_battery_block_reason as _seek_battery_block_reason_pure,
     reset_escape_cycle as _seek_reset_escape_cycle,
+    seek_commit_through_opening as _seek_commit_through_opening,
+    seek_prefer_away_from_wall as _seek_prefer_away_from_wall,
+    seek_may_reverse as _seek_may_reverse,
+    SEEK_NAV_TOOL as _SEEK_NAV_TOOL,
+    SEEK_NAV_TOOL_NAME as _SEEK_NAV_TOOL_NAME,
+    seek_action_from_schema as _seek_action_from_schema,
 )
 
 _SEEK_JUDGE_SYSTEM = (
@@ -3440,7 +3494,7 @@ _SEEK_NAV_SYSTEM = (
     "You are a navigation advisor for a small UGV with a pan-tilt camera. "
     "You are given THREE stills from the same pose: LEFT, STRAIGHT (center), and RIGHT. "
     "Decide the safest move AND how far to drive before the next scan. "
-    "PRIMARY GOAL when seeking: advance down open corridors / empty floor space. "
+    "PRIMARY GOAL when seeking: say HOW FAR to go forward, or if blocked which way to turn. "
     "Prefer forward when the straight view is open (hallway/path clear enough for the robot). "
     "If the empty space is off-center in STRAIGHT, a short turn toward that empty lane first, "
     "then forward long on the next step. "
@@ -3452,6 +3506,15 @@ _SEEK_NAV_SYSTEM = (
     "long = clear hallway — USE THIS when the path looks free (go farther, not a 4s creep). "
     "Turns should usually use short (or medium at most). Long is mainly for clear forward. "
     "Do not pick short-forward when a corridor is open — this chassis stalls if it creeps. "
+    "HOUSE NAV (this chassis): "
+    "Drive AWAY from walls — if CENTRE is a wall/door slab, turn toward the emptier side; never inch into paint. "
+    "Doorways/halls: after you enter a frame, take another hop of similar length so the body is fully PAST the jambs "
+    "(stopping in the doorway wedges the wheels). "
+    "Low hazards (dog bowls, cable ramps, baseboards) sit at bumper height — treat floor clutter in CENTRE as near. "
+    "When approaching a wall, object, or door the robot will look DOWN at left/front/right (~±55°) "
+    "before the next hop; honour that bumper inspect (floor_blocked → do not go forward). "
+    "When a PERSON is nearby, look UP at left/front/right to keep the face in frame for identification — "
+    "do not tilt down onto their feet. "
     "Reply with JSON only. action must be exactly one of: forward, turn_left, turn_right. "
     "drive_distance must be exactly one of: short, medium, long. "
     "Do not claim the goal is found — another system handles that."
@@ -3562,6 +3625,50 @@ def _seek_prefer_open_turn(views):
     return 'turn_right' if info.get('prefer') == 'right' else 'turn_left'
 
 
+def _seek_half_open_score(jpeg, *, half):
+    """Openness of the left or right half of a still (0..1, higher = clearer)."""
+    if not jpeg:
+        return None
+    try:
+        arr = np.frombuffer(jpeg, np.uint8)
+        img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+        if img is None:
+            return None
+        h, w = img.shape[:2]
+        if half == 'left':
+            roi = img[int(h * 0.30):int(h * 0.95), 0:int(w * 0.50)]
+        else:
+            roi = img[int(h * 0.30):int(h * 0.95), int(w * 0.50):w]
+        if roi.size == 0:
+            return None
+        gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+        return _seek_roi_open_score(gray)
+    except Exception:
+        return None
+
+
+def _seek_rear_clearance(views, *, min_score=0.36):
+    """Can we reverse? Need BOTH rear quarters clear.
+
+    −135° photo → its LEFT half is behind-left.
+    +135° photo → its RIGHT half is behind-right.
+    """
+    left_v = next((v for v in (views or []) if isinstance(v, dict) and v.get('name') == 'left'), None)
+    right_v = next((v for v in (views or []) if isinstance(v, dict) and v.get('name') == 'right'), None)
+    left_half = _seek_half_open_score((left_v or {}).get('jpeg'), half='left')
+    right_half = _seek_half_open_score((right_v or {}).get('jpeg'), half='right')
+    left_ok = left_half is not None and float(left_half) >= float(min_score)
+    right_ok = right_half is not None and float(right_half) >= float(min_score)
+    return {
+        'left_half': left_half,
+        'right_half': right_half,
+        'left_clear': left_ok,
+        'right_clear': right_ok,
+        'all_clear': bool(left_ok and right_ok),
+        'min_score': min_score,
+    }
+
+
 _SEEK_FOUND_JSON_SCHEMA = {
     'type': 'json_schema',
     'json_schema': {
@@ -3669,6 +3776,7 @@ def llm_goal_check(goal_text, jpeg=None):
                 temperature=0.0,
                 tools=None,
                 response_format=fmt,
+                timeout=12,
             )
             content = _message_text_content(msg) or ''
             format_used = fmt_name
@@ -4289,6 +4397,17 @@ def _seek_force_tools_on():
 # Side pans ±135°: view centres span 270°, and with camera FOV (~60–90°) this
 # approximates a full 360° look-around (left/right see well into the rear).
 _SEEK_VIEW_PAN_DEG = 135
+# T:133 Y — slight look-down so bowls, cable runners, and baseboards are in frame
+_SEEK_LOOK_TILT_DEG = -12.0
+# Steeper bumper-height inspect when approaching a wall / object / door
+_SEEK_LOOKDOWN_TILT_DEG = -22.0
+_SEEK_LOOKUP_TILT_DEG = 18.0  # face height when a person is nearby
+_SEEK_LOOKDOWN_PANS = (
+    ('left', -55.0),
+    ('straight', 0.0),
+    ('right', 55.0),
+)
+_SEEK_LOOKUP_PANS = _SEEK_LOOKDOWN_PANS
 _SEEK_VIEW_PANS = (
     ('left', -_SEEK_VIEW_PAN_DEG),
     ('straight', 0),
@@ -4487,15 +4606,89 @@ def _seek_estimate_live_pan(cmd, hw_pan=None, settled=False, live_pan=None):
     return est, hw_f
 
 
+_ptz_aim_lock = threading.Lock()
+_ptz_aim = {
+    'x': 0.0,
+    'y': 0.0,
+    'hw_pan': None,
+    'hw_tilt': None,
+    'settled': True,
+    'source': 'init',
+    't': 0.0,
+}
+
+
+def _ptz_aim_public():
+    """Last commanded T:133 X/Y + last HW if known. For /api/status and HUD."""
+    with _ptz_aim_lock:
+        d = dict(_ptz_aim)
+    return {
+        'pan_deg': d.get('x'),
+        'tilt_deg': d.get('y'),
+        'hw_pan': d.get('hw_pan'),
+        'hw_tilt': d.get('hw_tilt'),
+        'settled': d.get('settled'),
+        'source': d.get('source'),
+        'cmd': d.get('x'),
+        'live': d.get('x'),
+        'hw': d.get('hw_pan'),
+        'tilt': d.get('y'),
+    }
+
+
+def _publish_ptz_aim(x, y, *, hw_pan=None, hw_tilt=None, settled=None, source='cmd'):
+    """Central PTZ SoT: Raw HUD, Seek overlay, /api/status, /api/ptz.
+
+    x,y are T:133 degrees (same numbers the Raw stick writes to #Pan / #Tilt).
+    """
+    try:
+        x = float(x)
+        y = float(y)
+    except (TypeError, ValueError):
+        return None
+    settled_b = True if settled is None else bool(settled)
+    with _ptz_aim_lock:
+        _ptz_aim.update({
+            'x': x, 'y': y,
+            'hw_pan': hw_pan, 'hw_tilt': hw_tilt,
+            'settled': settled_b, 'source': source, 't': time.time(),
+        })
+    try:
+        cvf.pan_angle = x
+        cvf.tilt_angle = y
+    except Exception:
+        pass
+    try:
+        _seek_publish_cam_aim(x, y, hw_pan=hw_pan, settled=settled_b, force=True)
+    except Exception:
+        pass
+    try:
+        socketio.emit(
+            'ptz_aim',
+            {
+                'pan_deg': round(x, 1),
+                'tilt_deg': round(y, 1),
+                'cmd': round(x, 1),
+                'live': round(x, 1),
+                'hw': None if hw_pan is None else round(float(hw_pan), 1),
+                'tilt': round(y, 1),
+                'settled': settled_b,
+                'source': source,
+            },
+            namespace='/ctrl',
+        )
+    except Exception:
+        pass
+    return _ptz_aim_public()
+
+
 def _seek_publish_cam_aim(pan_deg, tilt_deg=0.0, hw_pan=None, settled=None, live_pan=None, force=False):
-    """Single source of truth for seek camera aim → status.cam_aim.
+    """Seek overlay + last-aim cache. Also used when Seek is idle (API/stick PTZ).
 
     Publishes cmd + estimated live (HW when trustworthy, else timed sweep).
     force=True always publishes (command start / final settle).
     """
     try:
-        if not seek_controller.is_running():
-            return
         p = float(pan_deg)
         t = float(tilt_deg or 0.0)
         settled_b = False if settled is None else bool(settled)
@@ -4555,13 +4748,16 @@ def _seek_publish_cam_aim(pan_deg, tilt_deg=0.0, hw_pan=None, settled=None, live
         pass
 
 
-def _seek_look_deg(pan_deg, tilt_deg=0.0, settle_s=None, wait_hw=True, should_stop=None):
+def _seek_look_deg(pan_deg, tilt_deg=None, settle_s=None, wait_hw=True, should_stop=None):
     """Point gimbal (degrees), optionally wait until HW pan confirms arrival, then return.
 
     Sequence: command → (confirm pan completed | timeout) → ready for photo.
     settle_s only used as blind fallback when wait_hw is False.
     Overlay state is only published via cam_aim (not phase_meta / drive args).
+    Default tilt looks slightly down (bowls / cable / baseboards).
     """
+    if tilt_deg is None:
+        tilt_deg = float(_SEEK_LOOK_TILT_DEG)
     look = _seek_pan_deg_to_rad(pan_deg, tilt_deg)
     _seek_publish_cam_aim(pan_deg, tilt_deg, settled=False, force=True)
     res = _execute_agent_tool('send_gimbal_command', look)
@@ -4628,7 +4824,7 @@ def _seek_capture_triple_views(ctrl, step, steps_label, goal_label=None, conf_th
         except Exception:
             pass
         look, gres, arrival = _seek_look_deg(
-            pan_deg, 0.0, wait_hw=True, should_stop=ctrl.should_stop,
+            pan_deg, wait_hw=True, should_stop=ctrl.should_stop,
         )
         settled = bool(arrival and arrival.get('settled'))
         ctrl.update(
@@ -4743,10 +4939,301 @@ def _seek_capture_triple_views(ctrl, step, steps_label, goal_label=None, conf_th
             )
         except Exception:
             pass
-        _seek_look_deg(0.0, 0.0, wait_hw=True, should_stop=ctrl.should_stop)
+        _seek_look_deg(0.0, wait_hw=True, should_stop=ctrl.should_stop)
     except Exception:
         pass
     return views, found_check
+
+
+def _seek_should_inspect_floor(views, last_action=None, *, step=None, last_lookdown_step=None):
+    """Look-down only when cruise scan says we are *close* to a wall/object/door.
+
+    Do not fire after every forward hop — that spent minutes panning instead of driving.
+    Throttle to at most once every 3 steps.
+    """
+    if step is not None and last_lookdown_step is not None:
+        if int(step) - int(last_lookdown_step) < 3:
+            return False
+    blocked = _seek_centre_obstacle_hint(views)
+    if blocked is True:
+        return True
+    cor = _seek_centre_corridor_hint(views)
+    if cor.get('blocked') is True:
+        return True
+    sides = _seek_side_openness(views)
+    lo, ro = sides.get('left'), sides.get('right')
+    if lo is not None and ro is not None and lo < 0.40 and ro < 0.40:
+        return True
+    return False
+
+
+def _seek_capture_band_views(
+    ctrl, step, steps_label, *, tilt, pans, band, goal_label=None,
+    conf_threshold=DEFAULT_SEEK_CONF,
+):
+    """L / front / R stills at a fixed tilt (look-down or look-up)."""
+    views = []
+    found_check = None
+    tilt = float(tilt)
+    n_pans = len(pans)
+    verb = 'look-down' if band == 'lookdown' else 'look-up'
+    for i, (name, pan_deg) in enumerate(pans, start=1):
+        if ctrl.should_stop():
+            break
+        ctrl.update(
+            seek_phase=band,
+            message=(
+                f'Step {step}/{steps_label}: {verb} {name} '
+                f'({i}/{n_pans}, pan≈{int(pan_deg)}° tilt={int(tilt)}°)…'
+            ),
+            phase_meta={'view': name, 'index': i, 'total': n_pans, 'sub': band},
+        )
+        try:
+            _seek_oled_set(
+                phase=band, step=step,
+                activity=f'{band[:4]} {name}',
+                detail=f'{int(pan_deg)}/{int(tilt)}',
+                message=f'{band[:4]} {i}/{n_pans}',
+                nav_summary=f'{band} {name}',
+            )
+        except Exception:
+            pass
+        _seek_look_deg(
+            pan_deg, tilt_deg=tilt, wait_hw=True, should_stop=ctrl.should_stop,
+        )
+        jpeg = _seek_grab_jpeg()
+        data_url = None
+        has_target = False
+        det_labels = []
+        raw_dets = []
+        chk = None
+        if jpeg:
+            b64 = base64.b64encode(jpeg).decode('ascii')
+            data_url = f'data:image/jpeg;base64,{b64}'
+            if goal_label:
+                chk = seek_goal_check(
+                    goal_label, referee=REFEREE_DETECTOR,
+                    conf_threshold=conf_threshold, jpeg=jpeg,
+                )
+                if chk.get('found'):
+                    has_target = True
+                    if not found_check:
+                        found_check = dict(chk)
+                        found_check['found_view'] = f'{band}_{name}'
+                det_labels = chk.get('labels_found') or []
+                raw_dets = list(chk.get('raw_detections') or [])
+            # Always also note person (even if goal is dog) for look-up ID
+            if band == 'lookup' and not det_labels:
+                try:
+                    pchk = seek_goal_check(
+                        'person', referee=REFEREE_DETECTOR,
+                        conf_threshold=conf_threshold, jpeg=jpeg,
+                    )
+                    det_labels = pchk.get('labels_found') or []
+                    raw_dets = list(pchk.get('raw_detections') or raw_dets)
+                except Exception:
+                    pass
+        views.append({
+            'name': name,
+            'pan_deg': pan_deg,
+            'tilt_deg': tilt,
+            'jpeg': jpeg,
+            'bytes': len(jpeg) if jpeg else 0,
+            'data_url': data_url,
+            'has_target': has_target,
+            'detected_labels': det_labels,
+            'raw_detections': raw_dets,
+            'check': chk,
+            band: True,
+        })
+        det_txt = ', '.join(raw_dets) if raw_dets else (
+            ', '.join(det_labels) if det_labels else 'none'
+        )
+        try:
+            ctrl.append_log(
+                'detect',
+                f'Step {step} · {verb} {name} (pan {int(pan_deg)}° tilt {int(tilt)}°): '
+                f'saw [{det_txt}]'
+                + (' · GOAL MATCH' if has_target else ''),
+                view=f'{band}_{name}', step=step,
+            )
+        except Exception:
+            pass
+    try:
+        _seek_look_deg(0.0, wait_hw=True, should_stop=ctrl.should_stop)
+    except Exception:
+        pass
+    return views, found_check
+
+
+def _seek_capture_lookdown_views(ctrl, step, steps_label, goal_label=None,
+                                 conf_threshold=DEFAULT_SEEK_CONF):
+    """Bumper-height L / front / R stills (not the rear ±135° cruise scan)."""
+    return _seek_capture_band_views(
+        ctrl, step, steps_label,
+        tilt=_SEEK_LOOKDOWN_TILT_DEG, pans=_SEEK_LOOKDOWN_PANS, band='lookdown',
+        goal_label=goal_label, conf_threshold=conf_threshold,
+    )
+
+
+def _seek_capture_lookup_views(ctrl, step, steps_label, goal_label=None,
+                               conf_threshold=DEFAULT_SEEK_CONF):
+    """Face-height L / front / R stills when a person is nearby."""
+    return _seek_capture_band_views(
+        ctrl, step, steps_label,
+        tilt=_SEEK_LOOKUP_TILT_DEG, pans=_SEEK_LOOKUP_PANS, band='lookup',
+        goal_label=goal_label, conf_threshold=conf_threshold,
+    )
+
+
+def _seek_lookdown_floor_hint(views):
+    """Openness at bumper height for look-down L/C/R (higher = more free floor)."""
+    scores = {}
+    for name in ('left', 'straight', 'right'):
+        scores[name] = None
+        try:
+            v = next((item for item in (views or []) if item.get('name') == name), None)
+            jpeg = v.get('jpeg') if isinstance(v, dict) else None
+            if not jpeg:
+                continue
+            arr = np.frombuffer(jpeg, np.uint8)
+            img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+            if img is None:
+                continue
+            h, w = img.shape[:2]
+            roi = img[int(h * 0.40):int(h * 0.98), int(w * 0.12):int(w * 0.88)]
+            if roi.size == 0:
+                continue
+            gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+            scores[name] = _seek_roi_open_score(gray)
+        except Exception:
+            scores[name] = None
+    left_s, mid_s, right_s = scores.get('left'), scores.get('straight'), scores.get('right')
+    prefer = 'left'
+    if left_s is None and right_s is None:
+        prefer = 'left'
+    elif left_s is None:
+        prefer = 'right'
+    elif right_s is None:
+        prefer = 'left'
+    elif right_s > left_s + 0.04:
+        prefer = 'right'
+    elif left_s > right_s + 0.04:
+        prefer = 'left'
+    # 0.38 marked almost every indoor floor as blocked and froze the chassis.
+    floor_blocked = mid_s is not None and mid_s < 0.18
+    return {
+        'left': left_s,
+        'straight': mid_s,
+        'right': right_s,
+        'prefer': prefer,
+        'floor_blocked': floor_blocked,
+        'prefer_turn': 'turn_right' if prefer == 'right' else 'turn_left',
+    }
+
+
+def _seek_maybe_lookdown(ctrl, step, steps_label, views, label, conf, last_action=None,
+                         last_lookdown_step=None):
+    """If approaching wall/object/door, sweep look-down L/C/R. Returns (found, hint)."""
+    if not _seek_should_inspect_floor(
+        views, last_action=last_action, step=step, last_lookdown_step=last_lookdown_step,
+    ):
+        return None, None
+    try:
+        ctrl.append_log(
+            'nav',
+            f'Step {step}: approaching wall/object/door — look-down L/front/R',
+            step=step,
+        )
+    except Exception:
+        pass
+    ld_views, ld_found = _seek_capture_lookdown_views(
+        ctrl, step, steps_label, goal_label=label, conf_threshold=conf,
+    )
+    hint = _seek_lookdown_floor_hint(ld_views)
+    try:
+        ctrl.append_log(
+            'nav',
+            f'Step {step}: look-down scores L={hint.get("left")} C={hint.get("straight")} '
+            f'R={hint.get("right")} blocked={hint.get("floor_blocked")} '
+            f'prefer={hint.get("prefer")}',
+            step=step,
+        )
+    except Exception:
+        pass
+    return ld_found, hint
+
+
+def _seek_views_mention_person(views):
+    """True if any cruise/inspect still reported a person."""
+    for v in views or []:
+        if not isinstance(v, dict):
+            continue
+        blob = ' '.join(
+            str(x).lower()
+            for x in list(v.get('detected_labels') or []) + list(v.get('raw_detections') or [])
+        )
+        if 'person' in blob or 'people' in blob:
+            return True
+    return False
+
+
+def _seek_lookup_person_hint(views):
+    """Which look-up panel still has a person (for keeping them in frame)."""
+    seen = {}
+    for name in ('left', 'straight', 'right'):
+        v = next((item for item in (views or []) if item.get('name') == name), None)
+        seen[name] = bool(v and _seek_views_mention_person([v]))
+    if seen.get('straight'):
+        prefer = 'straight'
+    elif seen.get('left') and not seen.get('right'):
+        prefer = 'left'
+    elif seen.get('right') and not seen.get('left'):
+        prefer = 'right'
+    elif seen.get('left'):
+        prefer = 'left'
+    else:
+        prefer = None
+    return {
+        'person_left': seen.get('left'),
+        'person_straight': seen.get('straight'),
+        'person_right': seen.get('right'),
+        'any': any(seen.values()),
+        'prefer': prefer,
+        'prefer_turn': (
+            'turn_left' if prefer == 'left'
+            else ('turn_right' if prefer == 'right' else None)
+        ),
+    }
+
+
+def _seek_maybe_lookup(ctrl, step, steps_label, views, label, conf):
+    """If a person is in the cruise scan, look up L/front/R to keep the face."""
+    if not _seek_views_mention_person(views):
+        return None, None
+    try:
+        ctrl.append_log(
+            'nav',
+            f'Step {step}: person nearby — look-up L/front/R (face height)',
+            step=step,
+        )
+    except Exception:
+        pass
+    lu_views, lu_found = _seek_capture_lookup_views(
+        ctrl, step, steps_label, goal_label=label, conf_threshold=conf,
+    )
+    hint = _seek_lookup_person_hint(lu_views)
+    try:
+        ctrl.append_log(
+            'nav',
+            f'Step {step}: look-up person L={hint.get("person_left")} '
+            f'C={hint.get("person_straight")} R={hint.get("person_right")} '
+            f'prefer={hint.get("prefer")}',
+            step=step,
+        )
+    except Exception:
+        pass
+    return lu_found, hint
 
 
 def _seek_parse_nav_action(raw_text):
@@ -5087,7 +5574,10 @@ def _seek_explore_summary():
     }
 
 
-def _seek_unified_llm_analysis(current_views, prev_forward_jpeg, goal_label, last_action=None):
+def _seek_unified_llm_analysis(
+    current_views, prev_forward_jpeg, goal_label, last_action=None,
+    lookdown=None, lookup=None,
+):
     """Single unified LLM query: near-360° stitch + previous view.
 
     last_action: previous executed move so recovery can turn toward open space
@@ -5098,6 +5588,7 @@ def _seek_unified_llm_analysis(current_views, prev_forward_jpeg, goal_label, las
     side_info = _seek_side_openness(current_views)
     prefer_turn = _seek_prefer_open_turn(current_views)
     prefer_side = 'right' if prefer_turn == 'turn_right' else 'left'
+    rear = _seek_rear_clearance(current_views)
     explore = _seek_explore_summary()
 
     stitched_jpeg = _stitch_panorama_views(current_views)
@@ -5151,6 +5642,34 @@ def _seek_unified_llm_analysis(current_views, prev_forward_jpeg, goal_label, las
             f'RIGHT/rear-right={side_info.get("right")} '
             f'→ prefer turn {prefer_side}.\n'
         )
+    rear_note = (
+        f'\nREAR CLEARANCE (for reverse only):\n'
+        f'  LEFT photo (−135°) left-half score={rear.get("left_half")} '
+        f'clear={rear.get("left_clear")}.\n'
+        f'  RIGHT photo (+135°) right-half score={rear.get("right_half")} '
+        f'clear={rear.get("right_clear")}.\n'
+        f'  both_clear={rear.get("all_clear")} — reverse is ILLEGAL unless both_clear '
+        f'and you cannot go forward or turn.\n'
+    )
+    openness_hint = (openness_hint or '') + rear_note
+    lookdown_hint = ''
+    if lookdown:
+        lookdown_hint = (
+            f'\nLOOK-DOWN bumper inspect (L/front/R at tilt≈−22°):\n'
+            f'  scores L={lookdown.get("left")} C={lookdown.get("straight")} '
+            f'R={lookdown.get("right")} floor_blocked={lookdown.get("floor_blocked")} '
+            f'prefer={lookdown.get("prefer")}.\n'
+            f'  If floor_blocked, CENTRE is NEAR even if the high panorama looked open '
+            f'(bowls, cables, jambs, baseboards).\n'
+        )
+    if lookup:
+        lookdown_hint += (
+            f'\nLOOK-UP face inspect (L/front/R at tilt≈+18°): '
+            f'person L={lookup.get("person_left")} C={lookup.get("person_straight")} '
+            f'R={lookup.get("person_right")} prefer={lookup.get("prefer")}.\n'
+            f'  A human is nearby — keep the camera UP on them; do not stare at their feet. '
+            f'If the goal is a person and they are in a look-up panel, that is found.\n'
+        )
 
     user_content = [
         {
@@ -5175,13 +5694,18 @@ def _seek_unified_llm_analysis(current_views, prev_forward_jpeg, goal_label, las
                 '  backward → into the REAR (content that appears in LEFT/RIGHT edges, '
                 'behind the robot). If LEFT/RIGHT show close walls, do NOT reverse.\n'
                 '  left/right turns → rotate toward freer space (use LEFT vs RIGHT panels)\n\n'
-                f'{last_note}{openness_hint}\n'
-                'Answer in ONE JSON object:\n'
-                'a. Is the target visible? In which panel (straight=centre, left, right)?\n'
-                'b. obstacle_ahead_range: how close is an obstacle in the CENTRE panel ONLY?\n'
-                'c. open_side: which way has more free space for a turn (left|right|neither)?\n'
-                'd. Stuck (CENTRE unchanged vs previous forward view)?\n'
-                'e. recommended_direction + drive_distance.\n\n'
+                f'{last_note}{openness_hint}{lookdown_hint}\n'
+                'YOUR NAV CONTRACT (the robot will execute this, not a heuristic):\n'
+                '  • If CENTRE is clear enough to drive: recommended_direction="forward" and '
+                'drive_distance is HOW FAR (short≈0.8s, medium≈1.1s, long≈1.6s punchy hops).\n'
+                '    Use long for open halls/rooms; medium for mixed; short only if something is close.\n'
+                '  • If CENTRE is blocked (wall, door slab, furniture, bowl): '
+                'recommended_direction="left" or "right" — whichever side is more open. '
+                'Set open_side to that same side. Do not pick forward.\n'
+                '  • backward ONLY if you cannot go forward AND cannot usefully turn, AND '
+                'BOTH rear quarters are clear: LEFT half of the LEFT (−135°) photo AND '
+                'RIGHT half of the RIGHT (+135°) photo. If either half is cluttered, turn instead.\n'
+                'Answer in ONE JSON object.\n\n'
                 'obstacle_ahead_range (CENTRE panel ONLY — ignore left/right for this field):\n'
                 '  none   = open floor ahead in CENTRE\n'
                 '  far    = something distant in CENTRE\n'
@@ -5201,7 +5725,18 @@ def _seek_unified_llm_analysis(current_views, prev_forward_jpeg, goal_label, las
                 'turn short toward that empty lane first, then forward long next.\n'
                 '  7. medium range in CENTRE → forward medium (not reverse) unless blocked near.\n'
                 '  8. Explore: when several opens exist, pick the direction least used in the trail.\n'
-                '  9. never omit drive_distance, obstacle_ahead_range, open_side.\n\n'
+                '  9. never omit drive_distance, obstacle_ahead_range, open_side.\n'
+                ' 10. Drive AWAY from walls. A pale wall filling CENTRE is NEAR — turn to open_side, '
+                'do not creep toward the paint.\n'
+                ' 11. Doorway / hall chute (CENTRE open, LEFT+RIGHT look like jambs/walls): after a forward '
+                'into the frame, take another hop of similar length so the chassis is fully PAST the jambs. '
+                'Stopping in the doorway wedges this rover.\n'
+                ' 12. Floor hazards: bowls, cable runners, and baseboards are at bumper height. '
+                'If CENTRE lower frame shows an object on the floor, treat as near and turn around it.\n'
+                '  13. On approach the robot also takes a LOOK-DOWN left/front/right (~±55°, tilt −22°). '
+                'If that inspect says floor_blocked, do not go forward.\n'
+                '  14. If a PERSON is nearby, a LOOK-UP left/front/right (~±55°, tilt +18°) keeps the face '
+                'in frame. Identify them from that band; do not look down at their feet.\n\n'
                 'JSON schema:\n'
                 '{\n'
                 '  "goal_found": true|false,\n'
@@ -5232,11 +5767,11 @@ def _seek_unified_llm_analysis(current_views, prev_forward_jpeg, goal_label, las
     user_content.append({
         'type': 'text',
         'text': (
-            f'CURRENT NEAR-360° PANORAMA (read carefully):\n'
-            f'  LEFT third  = REAR-LEFT  (camera −{pan}°)\n'
-            f'  MIDDLE third = FRONT / drive direction (camera 0°)\n'
-            f'  RIGHT third = REAR-RIGHT (camera +{pan}°)\n'
-            f'Judge "blocked ahead" only from the MIDDLE third.'
+            f'CURRENT NEAR-360° PANORAMA — call seek_nav_answer:\n'
+            f'  LEFT third  = camera −{pan}° REAR-LEFT. rear_left_clear = LEFT HALF of this panel.\n'
+            f'  MIDDLE third = camera 0° FRONT. forward_clear_cm / can_forward / forward_hop from this only.\n'
+            f'  RIGHT third = camera +{pan}° REAR-RIGHT. rear_right_clear = RIGHT HALF of this panel.\n'
+            f'can_backward only if both rear halves are clear AND we cannot go forward or turn.'
         ),
     })
     user_content.append({'type': 'image_url', 'image_url': {'url': f'data:image/jpeg;base64,{b64_pano}'}})
@@ -5245,11 +5780,13 @@ def _seek_unified_llm_analysis(current_views, prev_forward_jpeg, goal_label, las
         {
             'role': 'system',
             'content': (
-                'You are a careful autonomous mobile robot pilot. '
-                'The panorama is near-360°: middle panel = FRONT, left/right panels = REAR sides. '
-                'Never reverse because of rear obstacles. Only CENTRE decides if the path ahead is blocked. '
-                'Judge forward obstacle closeness, then recover by turning toward open space '
-                'after a reverse so the robot can go forward again. Output JSON only.'
+                'You are the sole navigator for a small UGV. '
+                'You MUST call the function seek_nav_answer. Do not write prose. '
+                'Each field is a one-token / enum answer. '
+                'CENTRE panel = path ahead (cm until collision, can_forward, forward_hop). '
+                'LEFT photo is camera −135° rear-left — judge rear_left_clear from its LEFT HALF. '
+                'RIGHT photo is camera +135° rear-right — judge rear_right_clear from its RIGHT HALF. '
+                'can_backward only if cannot go forward, cannot turn, and BOTH rear halves are clear.'
             ),
         },
         {'role': 'user', 'content': user_content},
@@ -5258,169 +5795,131 @@ def _seek_unified_llm_analysis(current_views, prev_forward_jpeg, goal_label, las
     centre_blocked_hint = _seek_centre_obstacle_hint(current_views)
 
     try:
-        msg, _body, _cfg = _openai_chat(messages, max_tokens=280, temperature=0.1)
-        txt = _message_text_content(msg) or ''
-        parsed = _parse_json_from_text(txt)
-        if isinstance(parsed, dict):
-            found = bool(parsed.get('goal_found'))
-            found_view = str(parsed.get('goal_found_view') or 'straight').lower().strip()
-
-            obs_range = _seek_normalize_obstacle_range(
-                parsed.get('obstacle_ahead_range')
-                or parsed.get('obstacle_range')
-                or parsed.get('forward_obstacle_range')
-                or parsed.get('clearance')
-                or parsed.get('how_close')
+        try:
+            msg, _body, _cfg = _openai_chat(
+                messages,
+                max_tokens=96,
+                temperature=0.0,
+                timeout=15,
+                tools=[_SEEK_NAV_TOOL],
+                tool_choice={'type': 'function', 'function': {'name': _SEEK_NAV_TOOL_NAME}},
             )
-
-            open_raw = str(parsed.get('open_side') or parsed.get('preferred_side') or '').strip().lower()
-            if open_raw in ('left', 'l'):
-                open_side = 'left'
-                prefer_turn_llm = 'turn_left'
-            elif open_raw in ('right', 'r'):
-                open_side = 'right'
-                prefer_turn_llm = 'turn_right'
-            else:
-                open_side = prefer_side
-                prefer_turn_llm = prefer_turn
-
-            # Blend LLM open_side with vision scores when available
-            if side_info.get('scores_ok') and open_raw not in ('left', 'right', 'l', 'r'):
-                prefer_turn_llm = prefer_turn
-                open_side = prefer_side
-
-            fwd_clear = parsed.get('path_forward_clear')
-            if isinstance(fwd_clear, str):
-                fwd_clear = fwd_clear.lower() in ('true', '1', 'yes')
-            elif fwd_clear is None:
-                fwd_clear = obs_range in ('none', 'far')
-            else:
-                fwd_clear = bool(fwd_clear)
-
-            if obs_range == 'near':
-                fwd_clear = False
-            elif obs_range == 'none':
-                fwd_clear = True
-
-            vision_override = False
-            if centre_blocked_hint is True and obs_range in ('none', 'far', 'unknown'):
-                obs_range = 'near'
-                fwd_clear = False
-                vision_override = True
+        except Exception as e:
+            olog.warn('ai_seek', f'seek_nav tool_choice=required failed, retry auto: {e}')
+            msg, _body, _cfg = _openai_chat(
+                messages,
+                max_tokens=96,
+                temperature=0.0,
+                timeout=15,
+                tools=[_SEEK_NAV_TOOL],
+                tool_choice='auto',
+            )
+        parsed = _parse_tool_call_args(msg, _SEEK_NAV_TOOL_NAME)
+        if not isinstance(parsed, dict):
+            txt = _message_text_content(msg) or ''
+            parsed = _parse_json_from_text(txt)
+        if isinstance(parsed, dict) and (
+            'can_forward' in parsed
+            or 'forward_clear_cm' in parsed
+            or parsed.get('recommended_direction')
+            or parsed.get('action')
+            or parsed.get('drive_distance')
+            or parsed.get('open_side')
+        ):
+            prefer_turn_llm = prefer_turn
+            open_side = prefer_side
+            fwd_clear = False
+            obs_range = 'unknown'
+            found = bool(parsed.get('goal_found'))
+            found_view = str(
+                parsed.get('goal_view') or parsed.get('goal_found_view') or 'straight'
+            ).lower().strip()
+            if found_view in ('', 'null', 'none'):
+                found_view = 'straight' if found else None
 
             identical = bool(parsed.get('is_identical_to_previous'))
-
-            # Defaults: first near contact → reverse; after reverse → turn to open
-            if last == 'backward' and obs_range in ('near', 'medium', 'unknown'):
-                default_dir = prefer_turn_llm
-            elif obs_range == 'near':
-                default_dir = 'backward'
+            if 'can_forward' in parsed or 'forward_clear_cm' in parsed:
+                schema_move = _seek_action_from_schema(parsed, last_action=last)
+                if schema_move.get('action') == 'backward' and not rear.get('all_clear'):
+                    schema_move = _seek_action_from_schema(
+                        {**parsed, 'can_backward': False, 'backward_hop': 'none',
+                         'can_turn_left': parsed.get('can_turn_left', True)},
+                        last_action=last,
+                    )
+                direction = schema_move['action']
+                dist = schema_move['drive_distance']
+                if schema_move.get('open_side') in ('left', 'right'):
+                    open_side = schema_move['open_side']
+                    prefer_turn_llm = 'turn_' + open_side
+                fwd_clear = bool(schema_move.get('can_forward'))
+                cm = schema_move.get('forward_clear_cm')
+                if cm is None:
+                    obs_range = 'unknown'
+                elif cm <= 15:
+                    obs_range = 'near'
+                elif cm <= 60:
+                    obs_range = 'medium'
+                elif cm <= 120:
+                    obs_range = 'far'
+                else:
+                    obs_range = 'none'
             else:
-                default_dir = 'forward'
-
-            direction = _seek_normalize_action(
-                parsed.get('recommended_direction')
-                or parsed.get('action')
-                or default_dir
-            )
-            dir_token = {
-                'forward': 'forward',
-                'turn_left': 'left',
-                'turn_right': 'right',
-                'backward': 'backward',
-            }.get(direction, 'forward')
-
-            dist = _seek_normalize_distance(
-                parsed.get('drive_distance')
-                or parsed.get('distance')
-                or parsed.get('range')
-                or 'medium'
-            )
-            if not (
-                parsed.get('drive_distance')
-                or parsed.get('distance')
-                or parsed.get('range')
-            ):
-                if dir_token in ('left', 'right'):
-                    dist = 'medium' if last == 'backward' else 'short'
-                elif dir_token == 'backward' or obs_range in ('near', 'medium'):
-                    dist = 'short'
-                elif obs_range == 'far':
-                    dist = 'medium'
+                obs_range = _seek_normalize_obstacle_range(
+                    parsed.get('obstacle_ahead_range')
+                    or parsed.get('obstacle_range')
+                    or parsed.get('forward_obstacle_range')
+                    or parsed.get('clearance')
+                    or parsed.get('how_close')
+                )
+                open_raw = str(parsed.get('open_side') or parsed.get('preferred_side') or '').strip().lower()
+                if open_raw in ('left', 'l'):
+                    open_side = 'left'
+                    prefer_turn_llm = 'turn_left'
+                elif open_raw in ('right', 'r'):
+                    open_side = 'right'
+                    prefer_turn_llm = 'turn_right'
                 else:
-                    dist = 'medium'
-
-            # Soft pre-plan recovery nudges (CENTRE-only obstacle semantics)
-            # Never reverse when CENTRE is clear/far — LLM often confuses rear panels for "blocked"
-            if dir_token == 'backward' and obs_range in ('none', 'far'):
-                dir_token = 'forward'
-                dist = 'medium' if obs_range == 'none' else 'short'
-            elif last == 'backward' and dir_token == 'backward':
-                dir_token = 'left' if prefer_turn_llm == 'turn_left' else 'right'
-                dist = 'medium'
-            elif obs_range == 'near' and dir_token == 'forward':
-                if last == 'backward':
-                    dir_token = 'left' if prefer_turn_llm == 'turn_left' else 'right'
-                    dist = 'medium'
+                    open_side = prefer_side
+                    prefer_turn_llm = prefer_turn
+                fwd_clear = parsed.get('path_forward_clear')
+                if isinstance(fwd_clear, str):
+                    fwd_clear = fwd_clear.lower() in ('true', '1', 'yes')
+                elif fwd_clear is None:
+                    fwd_clear = obs_range in ('none', 'far', 'medium')
                 else:
-                    # Only reverse if we believe centre is near — optional; turn is safer if open side free
-                    dir_token = 'backward'
-                    dist = 'short'
-            elif last in ('turn_left', 'turn_right') and obs_range in ('none', 'far') and dir_token != 'forward':
-                if obs_range == 'none' or (obs_range == 'far' and fwd_clear):
-                    dir_token = 'forward'
-                    dist = 'short' if dist == 'long' else dist
-            elif obs_range == 'medium' and dir_token == 'forward' and dist != 'short':
-                dist = 'short'
-            elif obs_range == 'far' and dir_token == 'forward' and dist == 'long':
-                dist = 'medium'
-            # Prefer turn over reverse when medium and rear likely cluttered
-            if dir_token == 'backward' and obs_range == 'medium':
-                dir_token = 'left' if prefer_turn_llm == 'turn_left' else 'right'
-                dist = 'short'
-
-            plan = _seek_nav_plan(
-                dir_token,
-                dist,
-                path_clear_forward=bool(fwd_clear),
-                stuck=identical,
-                obstacle_range=obs_range,
-                last_action=last,
-                prefer_turn=prefer_turn_llm,
-            )
-            dir_token = {
-                'forward': 'forward',
-                'turn_left': 'left',
-                'turn_right': 'right',
-                'backward': 'backward',
-            }.get(plan['action'], 'forward')
-
+                    fwd_clear = bool(fwd_clear)
+                direction = _seek_normalize_action(
+                    parsed.get('recommended_direction')
+                    or parsed.get('action')
+                    or ('forward' if fwd_clear else prefer_turn_llm)
+                )
+                if direction == 'backward' and not rear.get('all_clear'):
+                    direction = prefer_turn_llm if prefer_turn_llm in ('turn_left', 'turn_right') else 'turn_left'
+                dist = _seek_normalize_distance(
+                    parsed.get('drive_distance')
+                    or parsed.get('distance')
+                    or parsed.get('range')
+                    or ('medium' if direction == 'forward' else 'short')
+                )
+            # Tables only — do not rewrite the LLM's hop length / turn side via obstacle heuristics
+            plan = _seek_nav_plan(direction, dist)
             reason = str(parsed.get('reason') or '')[:200]
-            range_note = (
-                f'obstacle={plan.get("obstacle_range") or obs_range}'
-                f' open={open_side}'
+            cm = parsed.get('forward_clear_cm')
+            range_note = f'obstacle={obs_range} open={open_side} cm={cm}'
+            reason = f'LLM {plan["summary"]} ({range_note})' + (
+                f' | {reason}' if reason else ''
             )
-            if plan.get('safety_override'):
-                reason = f"{plan['safety_override']} ({range_note})" + (
-                    f' | {reason}' if reason else ''
-                )
-            elif vision_override:
-                reason = f'vision: centre looks near-blocked ({range_note})' + (
-                    f' | {reason}' if reason else ''
-                )
-            else:
-                reason = f'{range_note}' + (f' | {reason}' if reason else '')
 
             return {
                 'goal_found': found,
                 'goal_found_view': found_view if found else None,
                 'path_forward_clear': bool(fwd_clear),
-                'obstacle_ahead_range': plan.get('obstacle_range') or obs_range,
+                'obstacle_ahead_range': obs_range,
                 'open_side': open_side,
                 'prefer_turn': prefer_turn_llm,
                 'side_openness': side_info,
                 'is_identical_to_previous': identical,
-                'recommended_direction': dir_token,
+                'recommended_direction': plan['action'],
                 'drive_distance': plan['drive_distance'],
                 'action': plan['action'],
                 'magnitude': plan['magnitude'],
@@ -5428,8 +5927,9 @@ def _seek_unified_llm_analysis(current_views, prev_forward_jpeg, goal_label, las
                 'repeats': plan['repeats'],
                 'duration_ms': plan['duration_ms'],
                 'turn_deg': plan['turn_deg'],
-                'safety_override': plan.get('safety_override'),
+                'safety_override': None,
                 'vision_blocked_hint': centre_blocked_hint,
+                'source': 'llm',
                 'reason': reason[:240],
             }
     except Exception as e:
@@ -5437,8 +5937,9 @@ def _seek_unified_llm_analysis(current_views, prev_forward_jpeg, goal_label, las
 
     # LLM failed/slow: local vision heuristic that can still exit a room
     return _seek_heuristic_room_nav(
-        current_views, last_action=last, prefer_turn=prefer_turn, prefer_side=prefer_side,
-        side_info=side_info, reason_prefix='LLM failed — ',
+        current_views, last_action=last, last_dist=None, prefer_turn=prefer_turn,
+        prefer_side=prefer_side, side_info=side_info, reason_prefix='LLM failed — ',
+        lookdown=lookdown,
     )
 
 
@@ -5446,10 +5947,12 @@ def _seek_heuristic_room_nav(
     views,
     *,
     last_action=None,
+    last_dist=None,
     prefer_turn=None,
     prefer_side=None,
     side_info=None,
     reason_prefix='',
+    lookdown=None,
 ):
     """Navigate without LLM: reverse once if blocked, aim into empty corridor, drive longer.
 
@@ -5457,12 +5960,19 @@ def _seek_heuristic_room_nav(
     """
     side_info = side_info or _seek_side_openness(views)
     prefer_turn = prefer_turn or _seek_prefer_open_turn(views)
+    if lookdown and lookdown.get('prefer_turn') in ('turn_left', 'turn_right'):
+        prefer_turn = lookdown['prefer_turn']
     prefer_side = prefer_side or ('right' if prefer_turn == 'turn_right' else 'left')
+    if lookdown and lookdown.get('prefer') in ('left', 'right'):
+        prefer_side = lookdown['prefer']
     last = _seek_normalize_action(last_action) if last_action else None
+    last_dist = _seek_normalize_distance(last_dist, default='medium') if last_dist else None
     corridor = _seek_centre_corridor_hint(views)
     blocked = corridor.get('blocked')
     if blocked is None:
         blocked = _seek_centre_obstacle_hint(views)
+    if lookdown and lookdown.get('floor_blocked'):
+        blocked = True
     hop = corridor.get('hop') or 'medium'
     lane = corridor.get('lane')
     open_score = corridor.get('open_score')
@@ -5472,9 +5982,28 @@ def _seek_heuristic_room_nav(
             action, dist, obs = prefer_turn, 'short', 'near'
             reason = f'heuristic: after reverse, turn {prefer_side} toward open space'
         elif last in ('turn_left', 'turn_right'):
-            # Still blocked after a turn — tiny reverse nudge then other side next
-            action, dist, obs = 'backward', 'short', 'near'
-            reason = f'heuristic: still blocked after {last}, reverse short nudge only'
+            rear = _seek_rear_clearance(views)
+            if _seek_may_reverse(
+                can_forward=False,
+                can_turn=False,
+                rear_left_clear=bool(rear.get('left_clear')),
+                rear_right_clear=bool(rear.get('right_clear')),
+                last_action=last,
+            ):
+                action, dist, obs = 'backward', 'short', 'near'
+                reason = (
+                    f'heuristic: still blocked after {last}; rear L/R both clear '
+                    f'(Lhalf={rear.get("left_half")} Rhalf={rear.get("right_half")}) → reverse short'
+                )
+            else:
+                other = 'turn_right' if last == 'turn_left' else 'turn_left'
+                action, dist, obs = other, 'short', 'near'
+                reason = (
+                    f'heuristic: still blocked after {last}; rear not both-clear '
+                    f'(Lhalf={rear.get("left_half")} clear={rear.get("left_clear")} '
+                    f'Rhalf={rear.get("right_half")} clear={rear.get("right_clear")}) '
+                    f'→ {other} instead of reverse'
+                )
         else:
             # Prefer turn-to-open; reverse often hits rear wall in rooms/corridors
             action, dist, obs = prefer_turn, 'short', 'near'
@@ -5526,6 +6055,30 @@ def _seek_heuristic_room_nav(
         else:
             action, dist, obs = 'forward', 'medium', 'unknown'
             reason = 'heuristic: unclear centre → forward medium (corridor progress)'
+
+    # Doorway/hall chute: don't stop in the frame (live: wedges on jambs).
+    commit = _seek_commit_through_opening(
+        last, last_dist or 'medium',
+        obstacle_range='near' if blocked is True else ('none' if blocked is False else 'unknown'),
+        left_open=side_info.get('left'),
+        right_open=side_info.get('right'),
+        centre_open=(blocked is False),
+    )
+    if commit:
+        action, dist = commit['action'], commit['drive_distance']
+        obs = 'none' if blocked is False else 'unknown'
+        reason = commit['reason']
+
+    away = _seek_prefer_away_from_wall(
+        action,
+        obstacle_range='near' if blocked is True else 'unknown',
+        left_open=side_info.get('left'),
+        right_open=side_info.get('right'),
+        prefer_turn=prefer_turn,
+    )
+    if away:
+        action, dist, obs = away, 'short', 'near'
+        reason = f'heuristic: wall ahead — turn {away} away (do not drive into paint)'
 
     plan = _seek_nav_plan(
         action, dist,
@@ -5713,11 +6266,11 @@ def _seek_aim_for_motion(action, open_side=None, should_stop=None):
     arrival = None
     try:
         _look, _gres, arrival = _seek_look_deg(
-            pan, 0.0, wait_hw=True, should_stop=should_stop,
+            pan, wait_hw=True, should_stop=should_stop,
         )
     except Exception:
         try:
-            _seek_look_deg(pan, 0.0, wait_hw=False, settle_s=0.45)
+            _seek_look_deg(pan, wait_hw=False, settle_s=0.45)
             arrival = {'settled': False, 'reason': 'exception_fallback'}
         except Exception:
             arrival = {'settled': False, 'reason': 'aim_failed'}
@@ -5790,10 +6343,10 @@ def _seek_execute_nav_action(action, drive_distance='medium', should_stop=None, 
         time.sleep(float(dur) / 1000.0 + 0.3)
         # After reverse, return camera to front for the next step
         try:
-            _seek_look_deg(0.0, 0.0, wait_hw=True, should_stop=should_stop)
+            _seek_look_deg(0.0, wait_hw=True, should_stop=should_stop)
         except Exception:
             try:
-                _seek_look_deg(0.0, 0.0, wait_hw=False, settle_s=0.3)
+                _seek_look_deg(0.0, wait_hw=False, settle_s=0.3)
             except Exception:
                 pass
 
@@ -5839,6 +6392,8 @@ def _seek_loop(ctrl, label, conf, max_steps, timeout_s):
     prev_center_jpeg = None
     cached_nav = None
     last_drive_action = None  # for recovery: after reverse, turn to open
+    last_drive_distance = None
+    last_lookdown_step = None
     try:
         _seek_reset_escape_cycle()
     except Exception:
@@ -5850,7 +6405,7 @@ def _seek_loop(ctrl, label, conf, max_steps, timeout_s):
         except Exception:
             pass
         try:
-            _seek_look_deg(0.0, 0.0, settle_s=0.2)
+            _seek_look_deg(0.0, settle_s=0.2)
         except Exception:
             pass
         # Final OLED frame then release overlay back to network status loop
@@ -5918,13 +6473,9 @@ def _seek_loop(ctrl, label, conf, max_steps, timeout_s):
                 force_replan = False
                 if cached_nav:
                     ca = _seek_normalize_action(cached_nav.get('action'))
-                    # Never reuse reverse, turns, or safety escapes — wall contact
-                    # needs a fresh look (reuse was spinning right into the same wall).
-                    if ca in ('backward', 'turn_left', 'turn_right'):
-                        force_replan = True
-                    elif cached_nav.get('safety_override') and last_drive_action:
-                        force_replan = True
-                    elif cached_nav.get('obstacle_range') in ('near', 'medium') and last_drive_action:
+                    # Re-plan after reverse only. After a turn we rewrite cache to a
+                    # forward hop so we cover ground instead of another 3-view+LLM wait.
+                    if ca == 'backward':
                         force_replan = True
                 is_calc_step = (
                     (step == 1)
@@ -5947,6 +6498,20 @@ def _seek_loop(ctrl, label, conf, max_steps, timeout_s):
                     views_to_analyze, found_det = _seek_capture_triple_views(
                         ctrl, step, steps_label, goal_label=label, conf_threshold=conf, referee=referee
                     )
+                    lu_found, lookup_hint = _seek_maybe_lookup(
+                        ctrl, step, steps_label, views_to_analyze, label, conf,
+                    )
+                    if lu_found and lu_found.get('found') and not (found_det and found_det.get('found')):
+                        found_det = lu_found
+                    ld_found, lookdown_hint = _seek_maybe_lookdown(
+                        ctrl, step, steps_label, views_to_analyze, label, conf,
+                        last_action=last_drive_action,
+                        last_lookdown_step=last_lookdown_step,
+                    )
+                    if lookdown_hint is not None:
+                        last_lookdown_step = step
+                    if ld_found and ld_found.get('found') and not (found_det and found_det.get('found')):
+                        found_det = ld_found
                     
                     if found_det and found_det.get('found'):
                         found_v = found_det.get('found_view', 'scan')
@@ -5988,6 +6553,8 @@ def _seek_loop(ctrl, label, conf, max_steps, timeout_s):
                     analysis = _seek_unified_llm_analysis(
                         views_to_analyze, prev_center_jpeg, label,
                         last_action=last_drive_action,
+                        lookdown=lookdown_hint,
+                        lookup=lookup_hint,
                     )
                     
                     if (referee == REFEREE_LLM and analysis.get('goal_found')) or (found_det and found_det.get('found')):
@@ -6011,40 +6578,42 @@ def _seek_loop(ctrl, label, conf, max_steps, timeout_s):
                         return
 
                     prefer_turn = analysis.get('prefer_turn') or _seek_prefer_open_turn(views_to_analyze)
+                    llm_said = (analysis.get('source') == 'llm')
                     plan = _seek_nav_plan(
                         analysis.get('action') or analysis.get('recommended_direction') or 'forward',
                         analysis.get('drive_distance') or 'medium',
-                        path_clear_forward=analysis.get('path_forward_clear'),
-                        stuck=bool(analysis.get('is_identical_to_previous')),
-                        obstacle_range=analysis.get('obstacle_ahead_range'),
-                        last_action=last_drive_action,
-                        prefer_turn=prefer_turn,
                     )
-                    # Exploration: if we keep driving the same heading into open space, force a turn
-                    try:
-                        ex = _seek_explore_summary()
-                        obs_chk = _seek_normalize_obstacle_range(
-                            analysis.get('obstacle_ahead_range'), default='unknown'
+                    # Heuristic-only: doorway commit / turn-away. Do not rewrite an LLM hop/turn.
+                    if not llm_said:
+                        side = analysis.get('side_openness') or {}
+                        if lookdown_hint:
+                            side = {
+                                'left': lookdown_hint.get('left', side.get('left')),
+                                'right': lookdown_hint.get('right', side.get('right')),
+                            }
+                        commit = _seek_commit_through_opening(
+                            last_drive_action, last_drive_distance,
+                            obstacle_range=analysis.get('obstacle_ahead_range'),
+                            left_open=side.get('left'),
+                            right_open=side.get('right'),
+                            centre_open=analysis.get('path_forward_clear'),
                         )
-                        if (
-                            ex.get('prefer_new')
-                            and plan.get('action') == 'forward'
-                            and obs_chk in ('none', 'far', 'medium', 'unknown')
-                            and not analysis.get('is_identical_to_previous')
-                        ):
-                            plan = _seek_nav_plan(
-                                prefer_turn or 'turn_left', 'short',
-                                path_clear_forward=analysis.get('path_forward_clear'),
+                        if commit:
+                            plan = _seek_nav_plan(commit['action'], commit['drive_distance'])
+                            plan['safety_override'] = commit['reason']
+                        else:
+                            away = _seek_prefer_away_from_wall(
+                                plan.get('action'),
                                 obstacle_range=analysis.get('obstacle_ahead_range'),
-                                last_action=last_drive_action,
+                                left_open=side.get('left'),
+                                right_open=side.get('right'),
                                 prefer_turn=prefer_turn,
                             )
-                            plan['safety_override'] = (
-                                f'explore: leave heading {ex.get("cardinal")} '
-                                f'(used {ex.get("same_heading_fwd")}×) → {plan["summary"]}'
-                            )
-                    except Exception:
-                        pass
+                            if away:
+                                plan = _seek_nav_plan(away, 'short')
+                                plan['safety_override'] = (
+                                    f'wall ahead — turn {away} away (do not drive into paint)'
+                                )
                     action = plan['action']
                     dist = plan['drive_distance']
                     obs_r = plan.get('obstacle_range') or analysis.get('obstacle_ahead_range') or '?'
@@ -6116,7 +6685,7 @@ def _seek_loop(ctrl, label, conf, max_steps, timeout_s):
                         ).strip('/')[:48],
                         obstacle=str(_cn.get('obstacle_range') or '')[:16],
                     )
-                    _seek_look_deg(0.0, 0.0, wait_hw=True, should_stop=ctrl.should_stop)
+                    _seek_look_deg(0.0, wait_hw=True, should_stop=ctrl.should_stop)
                     straight_jpeg = _seek_grab_jpeg()
                     chk_centre = seek_goal_check(label, referee=REFEREE_DETECTOR, conf_threshold=conf, jpeg=straight_jpeg)
                     raw_c = chk_centre.get('raw_detections') or []
@@ -6182,6 +6751,20 @@ def _seek_loop(ctrl, label, conf, max_steps, timeout_s):
                     obstacle='',
                 )
                 views, found_chk = _seek_capture_triple_views(ctrl, step, steps_label, goal_label=label, conf_threshold=conf, referee=referee)
+                lu_found, lookup_hint = _seek_maybe_lookup(
+                    ctrl, step, steps_label, views, label, conf,
+                )
+                if lu_found and lu_found.get('found') and not (found_chk and found_chk.get('found')):
+                    found_chk = lu_found
+                ld_found, lookdown_hint = _seek_maybe_lookdown(
+                    ctrl, step, steps_label, views, label, conf,
+                    last_action=last_drive_action,
+                    last_lookdown_step=last_lookdown_step,
+                )
+                if lookdown_hint is not None:
+                    last_lookdown_step = step
+                if ld_found and ld_found.get('found') and not (found_chk and found_chk.get('found')):
+                    found_chk = ld_found
                 ctrl.update(
                     last_views=[{
                         'name': v['name'], 'pan_deg': v['pan_deg'], 'bytes': v['bytes'],
@@ -6208,9 +6791,21 @@ def _seek_loop(ctrl, label, conf, max_steps, timeout_s):
                     nav.get('action') or 'forward',
                     nav.get('drive_distance') or 'medium',
                 )
+                if lookdown_hint and lookdown_hint.get('floor_blocked'):
+                    away = lookdown_hint.get('prefer_turn') or 'turn_left'
+                    plan = _seek_nav_plan(
+                        away, 'short',
+                        path_clear_forward=False,
+                        obstacle_range='near',
+                        last_action=last_drive_action,
+                        prefer_turn=away,
+                    )
+                    plan['safety_override'] = (
+                        f'look-down: floor blocked — turn {away} (bowl/wall/jamb)'
+                    )
                 action = plan['action']
                 dist = plan['drive_distance']
-                reason = nav.get('reason') or plan['summary']
+                reason = plan.get('safety_override') or nav.get('reason') or plan['summary']
                 nav.update({
                     'action': action,
                     'drive_distance': dist,
@@ -6308,6 +6903,7 @@ def _seek_loop(ctrl, label, conf, max_steps, timeout_s):
                     open_side=open_side,
                 )
                 last_drive_action = action
+                last_drive_distance = dist
                 # Exploration trail + heading (dead-reckoning for LLM bias)
                 try:
                     _seek_explore_record(action, dist)
@@ -6319,15 +6915,21 @@ def _seek_loop(ctrl, label, conf, max_steps, timeout_s):
                     )
                 except Exception:
                     pass
-                # After reverse escape, drop cache so next step re-plans (turn/open)
+                # After reverse, re-plan. After a turn, commit a forward hop so we
+                # actually cover ground (LLM already chose the turn side).
                 if action == 'backward':
                     cached_nav = None
-                # After 2+ forwards on same heading, force replan next step
-                try:
-                    if action == 'forward' and _seek_explore_summary().get('prefer_new'):
-                        cached_nav = None
-                except Exception:
-                    pass
+                elif action in ('turn_left', 'turn_right'):
+                    follow = _seek_nav_plan('forward', 'medium')
+                    cached_nav = {
+                        'action': 'forward',
+                        'drive_distance': 'medium',
+                        'reason': 'after turn: hop forward (LLM already chose the side)',
+                        'summary': follow['summary'],
+                        'magnitude': follow['magnitude'],
+                        'duration_ms': follow['duration_ms'],
+                        'source': 'after_turn_commit',
+                    }
                 ctrl.update(last_tools=[drive])
                 cam_note = ''
                 if isinstance(drive, dict) and drive.get('cam_look'):
@@ -7061,11 +7663,8 @@ def _route_json_command(cmd):
         tilt_sign_y = -y if t in (133, '133', f.get('cmd_config', {}).get('cmd_gimbal_ctrl')) else y
 
         def _apply_cvf_pt():
-            try:
-                cvf.pan_angle = x
-                cvf.tilt_angle = tilt_sign_y
-            except Exception:
-                pass
+            # T:133 X/Y are the HUD numbers (same as Raw stick).
+            _publish_ptz_aim(x, y, settled=False, source='socket_t133')
 
         import ros_motion as _rm
         path_choice = _rm.preferred_motion_path(mode, _rosbridge_reachable())
@@ -7240,8 +7839,8 @@ def update_data_websocket_single():
             f['fb']['led_mode']:    cvf.cv_light_mode,
             f['fb']['detect_type']: cvf.cv_mode,
             f['fb']['detect_react']:cvf.detection_reaction_mode,
-            f['fb']['pan_angle']:   cvf.pan_angle,
-            f['fb']['tilt_angle']:  cvf.tilt_angle,
+            f['fb']['pan_angle']:   _ptz_aim_public().get('pan_deg', cvf.pan_angle),
+            f['fb']['tilt_angle']:  _ptz_aim_public().get('tilt_deg', cvf.tilt_angle),
             f['fb']['base_voltage']:base.base_data['v'] if (base.base_data and isinstance(base.base_data, dict) and 'v' in base.base_data) else 0,
             f['fb']['video_fps']:   cvf.video_fps,
             f['fb']['cv_movtion_mode']: cvf.cv_movtion_lock,

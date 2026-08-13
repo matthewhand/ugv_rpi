@@ -21,6 +21,11 @@ from seek_nav import (  # noqa: E402
     SEEK_REVERSE_MAX_LIN,
     SEEK_DRIVE_LIN_BY_DIST,
     SEEK_TURN_MS_BY_DIST,
+    seek_commit_through_opening,
+    seek_prefer_away_from_wall,
+    seek_may_reverse,
+    seek_hop_from_forward_cm,
+    seek_action_from_schema,
 )
 
 
@@ -136,6 +141,109 @@ class TestNavPlanSafety(unittest.TestCase):
         self.assertGreaterEqual(medium['duration_ms'], 600)
         self.assertLessEqual(medium['duration_ms'], 850)
         self.assertLessEqual(long['duration_ms'], 1300)
+
+
+class TestHouseNavRules(unittest.TestCase):
+    def test_doorway_commit_after_forward_in_chute(self):
+        c = seek_commit_through_opening(
+            'forward', 'medium',
+            obstacle_range='none',
+            left_open=0.2, right_open=0.15, centre_open=True,
+        )
+        self.assertIsNotNone(c)
+        self.assertEqual(c['action'], 'forward')
+        self.assertEqual(c['drive_distance'], 'long')
+        self.assertIn('jamb', c['reason'].lower())
+
+    def test_no_commit_when_centre_blocked(self):
+        self.assertIsNone(seek_commit_through_opening(
+            'forward', 'medium',
+            obstacle_range='near',
+            left_open=0.1, right_open=0.1, centre_open=False,
+        ))
+
+    def test_no_commit_unless_last_was_forward(self):
+        self.assertIsNone(seek_commit_through_opening(
+            'turn_left', 'short',
+            obstacle_range='none',
+            left_open=0.1, right_open=0.1, centre_open=True,
+        ))
+
+    def test_turn_away_from_near_wall(self):
+        self.assertEqual(
+            seek_prefer_away_from_wall(
+                'forward', obstacle_range='near',
+                left_open=0.8, right_open=0.2,
+            ),
+            'turn_left',
+        )
+        self.assertIsNone(seek_prefer_away_from_wall(
+            'forward', obstacle_range='none', left_open=0.2, right_open=0.2,
+        ))
+
+    def test_reverse_requires_both_rear_quarters(self):
+        self.assertFalse(seek_may_reverse(
+            can_forward=True, can_turn=False,
+            rear_left_clear=True, rear_right_clear=True,
+        ))
+        self.assertFalse(seek_may_reverse(
+            can_forward=False, can_turn=True,
+            rear_left_clear=True, rear_right_clear=True,
+        ))
+        self.assertFalse(seek_may_reverse(
+            can_forward=False, can_turn=False,
+            rear_left_clear=True, rear_right_clear=False,
+        ))
+        self.assertFalse(seek_may_reverse(
+            can_forward=False, can_turn=False,
+            rear_left_clear=True, rear_right_clear=True,
+            last_action='backward',
+        ))
+        self.assertTrue(seek_may_reverse(
+            can_forward=False, can_turn=False,
+            rear_left_clear=True, rear_right_clear=True,
+            last_action='turn_left',
+        ))
+
+
+class TestSeekNavSchema(unittest.TestCase):
+    def test_cm_buckets(self):
+        self.assertEqual(seek_hop_from_forward_cm(0), 'none')
+        self.assertEqual(seek_hop_from_forward_cm(15), 'short')
+        self.assertEqual(seek_hop_from_forward_cm(30), 'short')
+        self.assertEqual(seek_hop_from_forward_cm(60), 'medium')
+        self.assertEqual(seek_hop_from_forward_cm(100), 'long')
+
+    def test_schema_forward_long(self):
+        m = seek_action_from_schema({
+            'can_forward': True, 'forward_clear_cm': 200, 'forward_hop': 'long',
+            'can_turn_left': True, 'can_turn_right': True,
+            'rear_left_clear': True, 'rear_right_clear': True,
+            'can_backward': False, 'backward_hop': 'none',
+        })
+        self.assertEqual(m['action'], 'forward')
+        self.assertEqual(m['drive_distance'], 'long')
+
+    def test_schema_turn_when_blocked(self):
+        m = seek_action_from_schema({
+            'can_forward': False, 'forward_clear_cm': 0, 'forward_hop': 'none',
+            'can_turn_left': False, 'can_turn_right': True,
+            'rear_left_clear': False, 'rear_right_clear': True,
+            'can_backward': False, 'backward_hop': 'none',
+        })
+        self.assertEqual(m['action'], 'turn_right')
+
+    def test_schema_reverse_needs_both_rear(self):
+        blocked = {
+            'can_forward': False, 'forward_clear_cm': 0, 'forward_hop': 'none',
+            'can_turn_left': False, 'can_turn_right': False,
+            'can_backward': True, 'backward_hop': 'short',
+        }
+        no = seek_action_from_schema({**blocked, 'rear_left_clear': True, 'rear_right_clear': False})
+        self.assertNotEqual(no['action'], 'backward')
+        yes = seek_action_from_schema({**blocked, 'rear_left_clear': True, 'rear_right_clear': True})
+        self.assertEqual(yes['action'], 'backward')
+        self.assertEqual(yes['drive_distance'], 'short')
 
 
 class TestBatteryGate(unittest.TestCase):

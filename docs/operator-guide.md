@@ -100,6 +100,7 @@ Visual QA source of truth for Playwright feature catalog.
 - Leaving Seek while running prompts stop confirm.
 - Prefer mode **a** or **b** with `person`/`dog` for demos.
 - **This chassis:** Seek turns are **UI-Fast T:1** spins (soft twist yaw does nothing). Forward hops are punchy (~0.22–0.28) so the floor cable runner is crossed; short/medium/long ≈ 0.85s / 1.1s / 1.6s. Restart the Flask app after changing hop tables.
+- **House nav:** drive *away* from walls; after entering a doorway take another hop so the body is past the jambs; cruise tilt ≈ −12°. Approaching a wall/object/door triggers a **look-down L/front/R** (tilt ≈ −22°). A **person** in the cruise scan triggers a **look-up L/front/R** (tilt ≈ +18°) so faces stay identifiable. **Reverse** only if forward and turn are both impossible **and** both rear quarters are clear (left half of −135° and right half of +135°). PTZ from `/api/ptz` or Seek updates the Raw HUD needles and Seek compass.
 
 ---
 

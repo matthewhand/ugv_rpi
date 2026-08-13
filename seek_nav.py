@@ -294,6 +294,294 @@ def interpret_base_voltage(raw) -> Optional[float]:
     return voltage
 
 
+def seek_commit_through_opening(
+    last_action,
+    last_dist='medium',
+    *,
+    obstacle_range='unknown',
+    left_open=None,
+    right_open=None,
+    centre_open=None,
+) -> Optional[Dict[str, Any]]:
+    """If we just drove into a doorway/hall chute, keep going past the jambs.
+
+    Live lesson: stopping in the frame wedges the chassis. Travel at least as
+    far *past* the threshold as you drove *into* it (one more hop, same or longer).
+    Walls on both sides + centre not near = chute.
+    """
+    if seek_normalize_action(last_action) != 'forward':
+        return None
+    obs = seek_normalize_obstacle_range(obstacle_range, default='unknown')
+    if obs == 'near':
+        return None
+    if centre_open is False:
+        return None
+    try:
+        lo = None if left_open is None else float(left_open)
+        ro = None if right_open is None else float(right_open)
+    except (TypeError, ValueError):
+        return None
+    if lo is None or ro is None:
+        return None
+    if lo >= 0.45 or ro >= 0.45:
+        return None
+    last = seek_normalize_distance(last_dist, default='medium')
+    nxt = 'medium' if last == 'short' else last
+    if last == 'medium':
+        nxt = 'long'
+    return {
+        'action': 'forward',
+        'drive_distance': nxt,
+        'reason': (
+            'doorway commit: clear the frame — drive as far past the jambs '
+            f'as you entered ({last}→{nxt})'
+        ),
+    }
+
+
+def seek_may_reverse(
+    *,
+    can_forward: bool,
+    can_turn: bool,
+    rear_left_clear: bool,
+    rear_right_clear: bool,
+    last_action=None,
+) -> bool:
+    """Reverse only as last resort: no forward, no turn, and BOTH rear quarters clear.
+
+    Rear quarters: left half of the −135° still and right half of the +135° still.
+    Never reverse twice in a row.
+    """
+    if can_forward:
+        return False
+    if can_turn:
+        return False
+    if seek_normalize_action(last_action) == 'backward':
+        return False
+    return bool(rear_left_clear) and bool(rear_right_clear)
+
+
+SEEK_FORWARD_CM_ENUM = (0, 15, 30, 60, 100, 200)
+SEEK_NAV_TOOL_NAME = 'seek_nav_answer'
+SEEK_NAV_TOOL = {
+    'type': 'function',
+    'function': {
+        'name': SEEK_NAV_TOOL_NAME,
+        'description': (
+            'Answer each navigation question with the smallest allowed token. '
+            'Do not write prose. CENTRE=front path; LEFT photo is −135° rear-left; '
+            'RIGHT photo is +135° rear-right.'
+        ),
+        'parameters': {
+            'type': 'object',
+            'additionalProperties': False,
+            'properties': {
+                'forward_clear_cm': {
+                    'type': 'integer',
+                    'enum': list(SEEK_FORWARD_CM_ENUM),
+                    'description': (
+                        'CENTRE panel only: estimated centimetres until a collision '
+                        'if we drive straight. 0 = blocked now.'
+                    ),
+                },
+                'can_forward': {
+                    'type': 'boolean',
+                    'description': 'Can we move forward at all from the CENTRE panel?',
+                },
+                'forward_hop': {
+                    'type': 'string',
+                    'enum': ['none', 'short', 'medium', 'long'],
+                    'description': 'If can_forward, how far to hop. none if we cannot.',
+                },
+                'can_turn_left': {
+                    'type': 'boolean',
+                    'description': 'Is a left in-place turn useful (left side not a wall)?',
+                },
+                'can_turn_right': {
+                    'type': 'boolean',
+                    'description': 'Is a right in-place turn useful (right side not a wall)?',
+                },
+                'rear_left_clear': {
+                    'type': 'boolean',
+                    'description': (
+                        'LEFT HALF of the −135° (rear-left) photo is clear behind us.'
+                    ),
+                },
+                'rear_right_clear': {
+                    'type': 'boolean',
+                    'description': (
+                        'RIGHT HALF of the +135° (rear-right) photo is clear behind us.'
+                    ),
+                },
+                'can_backward': {
+                    'type': 'boolean',
+                    'description': (
+                        'True only if we cannot go forward, cannot usefully turn, '
+                        'AND both rear halves are clear.'
+                    ),
+                },
+                'backward_hop': {
+                    'type': 'string',
+                    'enum': ['none', 'short'],
+                    'description': 'short only when can_backward; else none.',
+                },
+                'goal_found': {
+                    'type': 'boolean',
+                    'description': 'Target object is clearly visible in a panel.',
+                },
+                'goal_view': {
+                    'type': 'string',
+                    'enum': ['none', 'left', 'straight', 'right'],
+                },
+            },
+            'required': [
+                'forward_clear_cm', 'can_forward', 'forward_hop',
+                'can_turn_left', 'can_turn_right',
+                'rear_left_clear', 'rear_right_clear',
+                'can_backward', 'backward_hop',
+                'goal_found', 'goal_view',
+            ],
+        },
+    },
+}
+
+
+def _truthy(v) -> bool:
+    if isinstance(v, bool):
+        return v
+    if v is None:
+        return False
+    s = str(v).strip().lower()
+    return s in ('1', 'true', 'yes', 'y', 'on')
+
+
+def seek_hop_from_forward_cm(cm) -> str:
+    """Map estimated clear centimetres to a hop bucket."""
+    try:
+        n = int(float(cm))
+    except (TypeError, ValueError):
+        return 'medium'
+    if n <= 0:
+        return 'none'
+    if n <= 30:
+        return 'short'
+    if n <= 70:
+        return 'medium'
+    return 'long'
+
+
+def seek_action_from_schema(data: Optional[Dict[str, Any]], last_action=None) -> Dict[str, Any]:
+    """Turn function-call tokens into action + drive_distance (no I/O)."""
+    d = data if isinstance(data, dict) else {}
+    can_fwd = _truthy(d.get('can_forward'))
+    hop = str(d.get('forward_hop') or '').strip().lower()
+    if hop not in ('none', 'short', 'medium', 'long'):
+        hop = seek_hop_from_forward_cm(d.get('forward_clear_cm'))
+    if hop == 'none':
+        can_fwd = False
+    if can_fwd and hop not in ('short', 'medium', 'long'):
+        hop = 'medium'
+    can_l = _truthy(d.get('can_turn_left'))
+    can_r = _truthy(d.get('can_turn_right'))
+    rear_l = _truthy(d.get('rear_left_clear'))
+    rear_r = _truthy(d.get('rear_right_clear'))
+    can_back = _truthy(d.get('can_backward'))
+    back_hop = str(d.get('backward_hop') or '').strip().lower()
+    try:
+        cm = int(float(d.get('forward_clear_cm')))
+    except (TypeError, ValueError):
+        cm = None
+
+    if can_fwd:
+        return {
+            'action': 'forward',
+            'drive_distance': hop,
+            'forward_clear_cm': cm,
+            'can_forward': True,
+            'can_turn_left': can_l,
+            'can_turn_right': can_r,
+            'can_backward': False,
+        }
+
+    if can_l and not can_r:
+        side, turn = 'left', 'turn_left'
+    elif can_r and not can_l:
+        side, turn = 'right', 'turn_right'
+    elif can_l and can_r:
+        side, turn = 'left', 'turn_left'
+    else:
+        side, turn = None, None
+
+    if turn:
+        return {
+            'action': turn,
+            'drive_distance': 'short',
+            'forward_clear_cm': cm,
+            'can_forward': False,
+            'can_turn_left': can_l,
+            'can_turn_right': can_r,
+            'can_backward': False,
+            'open_side': side,
+        }
+
+    if seek_may_reverse(
+        can_forward=False,
+        can_turn=False,
+        rear_left_clear=rear_l,
+        rear_right_clear=rear_r,
+        last_action=last_action,
+    ) and (can_back or back_hop == 'short' or (rear_l and rear_r)):
+        return {
+            'action': 'backward',
+            'drive_distance': 'short',
+            'forward_clear_cm': cm,
+            'can_forward': False,
+            'can_turn_left': False,
+            'can_turn_right': False,
+            'can_backward': True,
+        }
+
+    return {
+        'action': 'turn_left',
+        'drive_distance': 'short',
+        'forward_clear_cm': cm,
+        'can_forward': False,
+        'can_turn_left': can_l,
+        'can_turn_right': can_r,
+        'can_backward': False,
+        'open_side': 'left',
+    }
+
+
+def seek_prefer_away_from_wall(
+    action,
+    *,
+    obstacle_range='unknown',
+    left_open=None,
+    right_open=None,
+    prefer_turn=None,
+) -> Optional[str]:
+    """If CENTRE is a wall, turn toward the more open side — never inch into it."""
+    obs = seek_normalize_obstacle_range(obstacle_range, default='unknown')
+    act = seek_normalize_action(action)
+    if obs != 'near' or act != 'forward':
+        return None
+    pref = seek_normalize_action(prefer_turn) if prefer_turn else None
+    try:
+        lo = None if left_open is None else float(left_open)
+        ro = None if right_open is None else float(right_open)
+    except (TypeError, ValueError):
+        lo = ro = None
+    if lo is not None and ro is not None:
+        if ro > lo + 0.04:
+            return 'turn_right'
+        if lo > ro + 0.04:
+            return 'turn_left'
+    if pref in ('turn_left', 'turn_right'):
+        return pref
+    return 'turn_left'
+
+
 def seek_battery_block_reason(
     voltage,
     *,
