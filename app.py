@@ -1798,7 +1798,20 @@ def _ai_env_config():
         'base_url': (os.environ.get('OPENAI_BASE_URL') or 'https://api.openai.com/v1').rstrip('/'),
         # OpenAI requires a model name; override via OPENAI_MODEL in .env for custom infra
         'model': os.environ.get('OPENAI_MODEL') or 'gpt-4o-mini',
+        # Chat / agent tool loops need a large completion budget so function
+        # arguments are not truncated (reasoning models eat tokens first).
+        'chat_max_tokens': _chat_max_tokens(),
     }
+
+
+def _chat_max_tokens():
+    """Max completion tokens for Chat / agent tool rounds. Default 8192."""
+    raw = os.environ.get('UGV_CHAT_MAX_TOKENS') or os.environ.get('OPENAI_MAX_TOKENS')
+    try:
+        n = int(raw) if raw not in (None, '') else 8192
+    except (TypeError, ValueError):
+        n = 8192
+    return max(1024, min(32768, n))
 
 def _grab_jpeg_bytes(max_width=640, quality=70):
     """Capture one clean JPEG for AI/snapshot (no HUD, no failure placeholders).
@@ -2981,13 +2994,25 @@ def _run_agent_loop(messages, max_rounds=6):
     tools = _openai_tools_for_agent()
     tool_trace = []
     cfg = _ai_env_config()
+    out_tokens = int(cfg.get('chat_max_tokens') or _chat_max_tokens())
     for _round in range(max_rounds):
         msg, body, cfg = _openai_chat(
             messages,
-            max_tokens=512,
+            max_tokens=out_tokens,
             temperature=0.4,
             tools=tools if tools else None,
         )
+        finish = None
+        try:
+            finish = (body.get('choices') or [{}])[0].get('finish_reason')
+        except Exception:
+            finish = None
+        if finish == 'length':
+            olog.warn(
+                'ai_chat',
+                f'LLM hit max_tokens={out_tokens} (finish_reason=length) — tool JSON may be truncated',
+                max_tokens=out_tokens, round=_round,
+            )
         tool_calls = msg.get('tool_calls') or []
         if tool_calls:
             # Append assistant turn with tool_calls, then tool results
@@ -3003,7 +3028,27 @@ def _run_agent_loop(messages, max_rounds=6):
                 try:
                     args = json.loads(raw_args) if isinstance(raw_args, str) else (raw_args or {})
                 except Exception:
+                    olog.warn(
+                        'ai_chat',
+                        f'Tool {name} arguments not valid JSON (likely truncated)',
+                        tool=name, finish_reason=finish,
+                        args_prefix=str(raw_args)[:160],
+                    )
                     args = {}
+                    result = {
+                        'ok': False,
+                        'error': (
+                            'tool arguments truncated or invalid JSON '
+                            f'(finish_reason={finish}, max_tokens={out_tokens})'
+                        ),
+                    }
+                    tool_trace.append({'name': name, 'arguments': args, 'result': result})
+                    messages.append({
+                        'role': 'tool',
+                        'tool_call_id': tc.get('id') or name,
+                        'content': json.dumps(result),
+                    })
+                    continue
                 result = _execute_agent_tool(name, args)
                 tool_trace.append({'name': name, 'arguments': args, 'result': result})
                 messages.append({
@@ -3076,6 +3121,7 @@ def api_ai_config():
     return jsonify({
         'base_url': cfg['base_url'],
         'model': cfg['model'],
+        'chat_max_tokens': cfg.get('chat_max_tokens') or _chat_max_tokens(),
         'api_key_set': bool(key),
         'api_key_masked': masked,
         'token_estimate_method': method,
