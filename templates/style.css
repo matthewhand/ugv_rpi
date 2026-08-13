@@ -1295,11 +1295,15 @@ body {
 }
 .ugv-seek-log-card {
   min-height: 420px;
+  max-height: min(520px, 62vh);
+  overflow: hidden;
 }
 .ugv-seek-log-card .ugv-seek-log {
-  flex: 1;
-  min-height: 320px;
+  flex: 1 1 auto;
+  min-height: 0;
   max-height: none;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 .ugv-seek-config-card {
   min-height: 0;
@@ -1410,6 +1414,7 @@ body {
 }
 .ugv-chat-log, .ugv-seek-log {
   flex: 1;
+  overflow-x: hidden;
   overflow-y: auto;
   background: #0f1117;
   border-radius: 8px;
@@ -1557,15 +1562,14 @@ img.ugv-img-broken {
     min-height: 44px;
     flex: 1 1 auto;
   }
-  /* Collapse seek log when idle; expand when body.seek-running */
+  /* Phone: shorter log pane; inner .ugv-seek-log still scrolls */
   .ugv-seek-log-card {
-    max-height: 120px;
+    min-height: 140px;
+    max-height: 160px;
     overflow: hidden;
-    transition: max-height 0.2s ease;
   }
   body.seek-running .ugv-seek-log-card {
-    max-height: min(40vh, 320px);
-    overflow: auto;
+    max-height: min(40vh, 280px);
   }
 }
 /* While Seek is running, pulse config card border */
