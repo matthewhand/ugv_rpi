@@ -20,8 +20,8 @@ from ai_seek import REFEREE_DETECTOR, REFEREE_LLM  # noqa: E402
 
 class TestResolveTrackGoal(unittest.TestCase):
     def test_detector_for_voc(self):
-        r = resolve_track_goal('dog')
-        self.assertEqual(r['goal'], 'dog')
+        r = resolve_track_goal('chair')
+        self.assertEqual(r['goal'], 'chair')
         self.assertEqual(r['referee'], REFEREE_DETECTOR)
         self.assertIsNone(r['error'])
 
@@ -31,8 +31,8 @@ class TestResolveTrackGoal(unittest.TestCase):
         self.assertEqual(r['referee'], REFEREE_DETECTOR)
 
     def test_llm_for_unique(self):
-        r = resolve_track_goal('toilet')
-        self.assertEqual(r['goal'], 'toilet')
+        r = resolve_track_goal('red mug')
+        self.assertEqual(r['goal'], 'red mug')
         self.assertEqual(r['referee'], REFEREE_LLM)
         self.assertIsNone(r['error'])
 

@@ -1,122 +1,164 @@
-![GitHub top language](https://img.shields.io/github/languages/top/effectsmachine/ugv_rpi) ![GitHub language count](https://img.shields.io/github/languages/count/effectsmachine/ugv_rpi)
-![GitHub code size in bytes](https://img.shields.io/github/languages/code-size/effectsmachine/ugv_rpi)
-![GitHub repo size](https://img.shields.io/github/repo-size/effectsmachine/ugv_rpi) ![GitHub](https://img.shields.io/github/license/effectsmachine/ugv_rpi) ![GitHub last commit](https://img.shields.io/github/last-commit/effectsmachine/ugv_rpi)
+# ugv_rpi (fork)
 
-# Waveshare UGV Robots
-This is a Raspberry Pi example for the [Waveshare](https://www.waveshare.com/) UGV robots: **WAVE ROVER**, **UGV Rover**, **UGV Beast**, **RaspRover**, **UGV01**, **UGV02**.  
+![GitHub last commit](https://img.shields.io/github/last-commit/matthewhand/ugv_rpi) ![GitHub](https://img.shields.io/github/license/matthewhand/ugv_rpi)
 
-![](./media/UGV-Rover-details-23.jpg)
+A **supervised-pilot** fork of [waveshareteam/ugv_rpi](https://github.com/waveshareteam/ugv_rpi) — the Raspberry Pi Flask web app for Waveshare UGV robots (WAVE ROVER, UGV Rover, UGV Beast, RaspRover, UGV01, UGV02).
 
-> **Fork:** [matthewhand/ugv_rpi](https://github.com/matthewhand/ugv_rpi) (also [effectsmachine/ugv_rpi](https://github.com/effectsmachine/ugv_rpi)) — based on [waveshareteam/ugv_rpi](https://github.com/waveshareteam/ugv_rpi).  
-> The stock Waveshare app is still the base. This fork adds **Seek mode**, **ROS 2 control routing**, **ops tooling**, and UI polish. An honest status of that work is below.
+The stock dashboard, Jupyter tutorials, and OpenCV toys are still here. This tree adds **Seek** (a supervised scan-and-hop loop), experimental **Track** (PTZ-only hunt), a **Chat / `/ai` agent**, **Direct ↔ ROS 2** UART routing, and operator chrome (global **STOP**, ops log, PTZ HUD).
 
-## Fork modifications — status
+**This is not a finished product.** Keep a hand on **STOP**.
 
-### What we set out to improve
-Make the stock dashboard usable for **autonomous “find a thing” pilots** (Seek), safer **AI/ROS motion**, clearer **operator feedback** (logs, pan aim, 3D twin), and less friction when switching **Direct serial ↔ ROS 2**.
+| | |
+|---|---|
+| **This repo** | [matthewhand/ugv_rpi](https://github.com/matthewhand/ugv_rpi) |
+| **Upstream** | [waveshareteam/ugv_rpi](https://github.com/waveshareteam/ugv_rpi) |
+| **UI** | `http://<pi>:5000` — tabs **Raw · Chat · Seek · Track** |
+| **Full agent** | `http://<pi>:5000/ai` |
+| **Operator guide** | [docs/operator-guide.md](docs/operator-guide.md) |
 
-### Honest assessment
-This fork is a **supervised pilot**, not a finished product.
+The original Waveshare README (install, hotspot, robot type) is unchanged **below**.
 
-- **Seek** works for demos with a human on **STOP**, known VOC class (or LLM goal), and **Direct** control preferred. Scene nav often falls back to **camera heuristics** when the LLM is slow or fails. Obstacles are **vision-only** (Canny / texture / bright-wall heuristics — not lidar). Nav hops are **open-loop ms tables**, not calibrated yaw. Exploration is a **dead-reckoning heading trail**, not a map.
-- **ROS 2** works when rosbridge (`:9090`) + `ugv_bringup` are healthy. If rosbridge dies after mode toggle, a **background autoheal** retries sidecars and **falls back to serial** so PTZ/drive are not left on “dropped serial cmd”. Autoheal is best-effort (Docker/`docker exec`); it is not a full container lifecycle manager. Wheel **odometry may still read zeros** without encoder ticks.
-- **Drive polarity** is chassis-specific: `base_config.drive_linear_sign` (default on this tree **`-1`**) maps body “forward” to hardware. Confirm with `GET /api/status` → `drive_linear_sign` after restart. Wrong sign = UI forward drives camera-backward.
-- **3D Twin** is a lightweight demo (box model, CDN Three.js when online) — not a high-fidelity digital twin.
-- Secrets stay in **gitignored `.env`**. Do not commit camera dumps or keys.
+---
 
-### Achieved (exists in tree — pilot-grade unless noted)
+## What this fork adds
 
-- [x] **Seek** Raw/Chat/Seek shell: detector and/or LLM referee, TTS on found, finite default max steps/timeout (unlimited only if set to 0)  
-- [x] **Triple-view pan** L/C/R ≈ ±135°; wait-for-pan with **blind settle** if HW pan feedback is stuck; three-panel stitch for LLM (not a true geometric 360°)  
-- [x] **Nav tiers** short/medium/long — **open-loop** tables, chassis-calibrated 2026-08-13 (Fast T:1 turns; punchy linear so the cable runner moves)  
-- [x] **Safety bias** (image heuristics): avoid forward when centre looks “near”; prefer turn-to-open; reverse capped short  
-- [x] **Corridor / blank-wall heuristics** (incl. bright painted walls) — still false open/closed under some lighting  
-- [x] **Exploration trail** for LLM prompt (heading counters only)  
-- [x] **Pan overlay** (`cam_aim`) with timed needle when HW pan sticks near 0°  
-- [x] **Seek UI**: status, log, pano card, mode-specific camera hints, config lock while running, sticky actions on small screens  
-- [x] **Global STOP** + Seek-running pill; leave-Seek confirm/auto-stop; keyboard teleop gated in Chat/Seek  
-- [x] **Control: Direct ↔ ROS 2** chips; UART release/reclaim; **serial fallback** if rosbridge is down; **periodic rosbridge autoheal** when in ROS 2 (`UGV_ROS_AUTOHEAL`, default on)  
-- [x] **ROS exit**: switching to Direct **stops `ugv_bringup`** in the container (`UGV_AUTOSTOP_BRINGUP`, default on) then reclaims UART — PID kill inside the container, not host `pkill -f`  
-- [x] **Seek battery gate**: refuse start / halt the loop when pack V is known and ≤ `UGV_BATTERY_LOW_V` (default 9.5). Unknown / ADC-ish `v` does **not** block. Override: `UGV_SEEK_BATTERY_GATE=0`  
-- [x] **Nav-plan unit tests** (`tests/test_seek_nav.py`): near→no forward, reverse capped, no double reverse  
-- [x] **Drive signs** in `config.yaml` / env; exposed on `/api/status`  
-- [x] **AI agent** (`/ai`) + thinner Chat tab; motion caps default off; motion lock vs **Idle heartbeat** (navbar **HB**); Chat has fail/retry on live stream  
-- [x] **Ops log** drawer; **3D Twin** popup drawer  
-- [x] **Serial null guards**; session ESP32 WiFi stop (T:408, non-persistent)  
-- [x] **TTS** hardened if `pyttsx3` missing  
-- [x] **Operator guide** + Playwright `--catalog` screenshots (`docs/operator-guide.md`, `scripts/screenshot_ui.py`)  
-- [x] **`.env` / capabilities / control_mode** gitignored  
+### Modes
 
-### Remaining (todo)
+| Tab | What it does |
+|-----|----------------|
+| **Raw** | Stock teleop: sticks, PTZ, OpenCV. **AUTODRIVE** is line-follow only, not Seek. |
+| **Chat** | Thin vision chat against `/api/ai/chat`. Enable motion tools on `/ai` first. |
+| **Seek** | Finite scan-and-hop loop: L/C/R stills, a referee, then a timed hop / turn / reverse. Optional TTS if the referee says found. |
+| **Track** | Experimental. Camera hunts only — **wheels do not move**. Closed-list VOC labels use MobileNet-SSD and try to centre the bbox. Any other goal string uses the vision LLM and locks the current PTZ pose. |
 
-- [ ] **Reliable scene LLM** under load; less heuristic fallback  
-- [ ] **True localization** / map exploration (not heading-only trail)  
-- [ ] **Encoder odom** + **lidar-aware** obstacles when hardware present  
-- [ ] **Turn / pan closed-loop** feedback (not open-loop tables / synthetic pan)  
-- [ ] **Container boot**: always start rosbridge+bringup with `ugv_ros2`, not only on UI toggle / autoheal  
-- [ ] **Seek product polish**: look-map UI, richer cancel mid-drive  
-- [ ] **Security defaults** (hotspot / Jupyter token)  
-- [ ] **CI**: control_mode / autostart mocks (nav-plan + bringup-PID parse tests exist)  
-- [ ] **Chat ↔ `/ai` unification**; Twin offline CDN / real meshes  
-- [ ] **Docs**: expand operator-guide into a single printed runbook (guide exists; README historical sections below may lag labels)
+Navbar **STOP** zeros wheels, cancels Seek **and** Track, and clears the AI motion lock.
 
-### Quick operator notes
+### Seek (scan, then move)
+
+- **Modes:** `a` detector only · `b` detector + LLM nav (default) · `c` LLM referee + nav (free-text goals; anything not on the MobileNet-SSD list).
+- **LLM nav (when it works):** we ask the model to call `seek_nav_answer` (`tool_choice` required): estimated cm until a hit, can we go forward, hop length, turn vs reverse, rear-quarter clearance. If the call is empty, times out, or will not use the tool, Seek **falls back to image heuristics** — it does not sit still waiting for prose.
+- **This chassis:** `T:13` twist yaw does **not** turn the rover. Seek uses **UI-Fast `T:1` tank spins**. Soft linear (~0.12) stalls on thick floor transitions; hops are punchy (~0.22–0.28). Open-loop tables, timed on *this* rover 2026-08-13: short / medium / long ≈ 0.85s / 1.1s / 1.6s; turns ≈ 350 / 700 / 1100 ms. Restart Flask after changing hop tables. Another floor will need retuning.
+- **Indoor helpers (partially enforced):** cruise tilt ≈ −12°. Look-down L / front / R (≈ −22°) only when the cruise stills look close, and at most every 3 steps (looking down every hop ate the budget). Look-up (≈ +18°) if the cruise detector thinks a **person** is nearby. **Reverse** is allowed only if forward and turn both fail **and** both rear quarters look clear (left half of −135° and right half of +135°) — and never twice in a row. After a turn or reverse the cached hop is dropped (a leftover “drive forward next” used to ram whatever we just turned toward).
+- **Heuristic-only overrides:** doorway-commit (one more hop after a chute) and turn-away-from-wall run when the planner is **heuristic**. An LLM hop/turn is **not** rewritten by those helpers — we trust the schema when we get one.
+- **Battery gate:** refuse start / halt if pack V is known and ≤ `UGV_BATTERY_LOW_V` (default **9.5**). Missing or ADC-looking `v` does **not** block. Override: `UGV_SEEK_BATTERY_GATE=0`.
+- **Limits:** default 30 steps / 300 s (0 = unlimited). Config locks while running.
+- **Obstacles** are vision heuristics (Canny / texture / bright walls) — **not lidar**. Exploration is a heading trail, not a map.
+
+### PTZ HUD
+
+Commanded pan/tilt from `/api/ptz`, `T:133`, Seek, Track, and Chat gimbal go through `_publish_ptz_aim`. `/api/status.ptz` and a Socket.IO `ptz_aim` event update the Raw needles and Seek compass. Hardware pan feedback on this kit often sticks near 0°, so the HUD is **last command + a settle timer**, not a closed-loop encoder. Hard-refresh the UI after deploying this.
+
+### Chat / `/ai`
+
+- OpenAI-compatible (`OPENAI_BASE_URL` + `OPENAI_MODEL`; key from `.env`).
+- Chat completion budget defaults to **8192** tokens (`UGV_CHAT_MAX_TOKENS`) because **512 truncated tool JSON**. Seek nav uses 1024, retry 2048. Some compatible backends still return empty `content` or ignore `tool_choice`.
+- Motion tools default **off**. Enable on `/ai`. Set navbar **HB off** for timed AI drives.
+
+### Direct serial ↔ ROS 2
+
+Navbar chips. **Direct** (default for Seek / PTZ): Flask owns UART. **ROS 2**: Flask releases UART for `ugv_bringup`, sticks go via rosbridge (`ws://127.0.0.1:9090`). Leaving ROS 2 **stops `ugv_bringup`** in the container (`UGV_AUTOSTOP_BRINGUP`, default on) then reclaims UART. If rosbridge dies, serial fallback + background autoheal (`UGV_ROS_AUTOHEAL`).
+
+### Other chrome
+
+- Seek / Track logs are a **fixed height** with a scrollbar.
+- **Idle heartbeat (HB):** every 2s the UI re-sends the last wheel cmd (idle → stop). ON for sticks; OFF for timed AI drives.
+- Drive polarity: `base_config.drive_linear_sign` (this tree **`-1`**). After a yaml change, **restart the app** and check `GET /api/status`.
+- Ops log drawer, 3D Twin (box + CDN Three.js — not a digital twin), session-only ESP32 WiFi stop.
+- Unit tests: `tests/test_seek_nav.py`, `tests/test_ai_track.py` (planner / referee wiring — not a live find-rate).
+
+---
+
+## Honest limits
+
+- Seek is a **supervised loop**, not a product finder. It will scan and move. It will also miss the goal, call a bright wall “open”, or drive into furniture. Keep a hand on **STOP**.
+- Live indoor runs on this tree have **not** shown a reliable “found” rate. The detector often stays quiet; the LLM often faults or we navigate on heuristics.
+- Mixed OpenAI-compatible load balancers can be slow (seconds to tens of seconds) or return empty messages. `tool_choice=required` is attempted, then a looser retry, then heuristics.
+- Hops and turns are **open-loop time tables**, not encoder / IMU closed loop.
+- No map, no lidar, no true localization.
+- Track is experimental and PTZ-only. Treat it as a hunt/centre sketch, not a tracker you can walk away from.
+- ROS autoheal is best-effort `docker exec`, not a full container lifecycle. Wheel odom may still read zeros without encoder ticks.
+- Secrets stay in **gitignored `.env`**. Do not commit keys or camera dumps.
+
+### Still todo
+
+- [ ] Reliable scene LLM under load; less heuristic fallback
+- [ ] Localization / map; encoder odom; lidar when present
+- [ ] Closed-loop turn / pan (not open-loop tables / synthetic pan)
+- [ ] Always boot rosbridge + bringup with the ROS container
+- [ ] Seek look-map UI; richer cancel mid-drive
+- [ ] Security defaults (hotspot / Jupyter token)
+- [ ] CI for control_mode / autostart; Chat ↔ `/ai` unification; Twin offline meshes
+
+---
+
+## Env (no secrets in git)
+
+Copy to `ugv_rpi/.env` (already gitignored):
+
+| Variable | Role |
+|----------|------|
+| `OPENAI_API_KEY` | Required for Chat / Seek LLM / Track unique goals |
+| `OPENAI_BASE_URL` | Optional. Default official OpenAI. Set to your OpenAI-compatible `/v1` |
+| `OPENAI_MODEL` | Optional. Default `gpt-4o-mini` |
+| `UGV_CHAT_MAX_TOKENS` | Chat / agent completion budget (default **8192**, clamp 1024–32768) |
+| `UGV_AI_TOKEN` | If set, `/api/ai/*` and `/api/snapshot` require it |
+| `UGV_BATTERY_LOW_V` / `UGV_SEEK_BATTERY_GATE` | Seek pack-voltage gate |
+| `UGV_AUTOSTOP_BRINGUP` / `UGV_ROS_AUTOHEAL` | ROS 2 exit / retry |
+
+---
+
+## Quick operator notes
 
 | Control | Use for |
 |---------|---------|
-| **Raw** | Manual sticks, stock CV (**AUTODRIVE** = line-follow only) |
-| **Chat / AI** | Vision chat; enable motion tools on `/ai` first; set **HB off** for timed AI drives; use navbar **STOP** to halt |
-| **Seek** | Find-goal loop; prefer Direct; hand on **STOP**; default 30 steps / 300 s. Refuses start if pack V is known and low |
-| **Direct** | Flask owns UART — best default for PTZ + Seek demos |
-| **ROS 2** | Needs healthy rosbridge; autoheal retries; serial fallback if bridge dies |
-| **HB (Idle heartbeat)** | ON = re-send last wheel cmd every 2s (idle → stop). OFF for long AI timed drives |
-| **Drive sign** | After config change, **restart app** and check `/api/status` → `drive_linear_sign` |
+| **Raw** | Manual sticks, stock CV |
+| **Chat / AI** | Vision chat; enable motion on `/ai`; **HB off** for timed drives |
+| **Seek** | Scan-and-hop loop; prefer **Direct**; hand on **STOP**; skips start if pack V known-low |
+| **Track** | PTZ hunt only; chassis stays still |
+| **Direct** | Flask owns UART — best for PTZ + Seek |
+| **ROS 2** | Needs healthy rosbridge; autoheal + serial fallback |
+| **HB** | ON = resend last wheel cmd every 2s. OFF for long AI timed drives |
+| **Drive sign** | Restart app after config change; check `/api/status` → `drive_linear_sign` |
 
-Detailed historical notes follow (some button names in older sections may still say “Motors” / “Freq. stop” — UI chrome uses **Control** / **HB** / **Idle heartbeat**).
+More detail: [docs/operator-guide.md](docs/operator-guide.md). Implementation notes immediately below. Stock Waveshare install / hotspot / robot-type docs follow that.
 
-## Changes from upstream
+## Implementation notes (this fork)
 
 ### Serial port robustness (`base_ctrl.py`)
 
-- `serial.Serial()` init wrapped in try/except — app boots cleanly when `/dev/serial0` is absent or locked (e.g. ROS 2 already owns it)
-- `send_command` and `process_commands` guard against `self.ser = None` — no crash when serial unavailable
-- `feedback_data` and `on_data_received` return early / skip reset if serial is None
-- `ReadLine` returns empty bytes immediately when `s` is None rather than blocking
+- `serial.Serial()` init wrapped in try/except — app boots when `/dev/serial0` is absent or locked (e.g. ROS 2 already owns it)
+- `send_command` and `process_commands` guard against `self.ser = None`
+- `feedback_data` / `on_data_received` return early if serial is None
+- `ReadLine` returns empty bytes immediately when `s` is None
 
 ### ROS 2 control routing (`base_ctrl.py`, `app.py`, `templates/`)
 
-Unified **Control: Direct serial | ROS 2 relay** (navbar chips / `POST /api/control_mode`, `GET /api/status`).
+Unified **Control: Direct serial | ROS 2 relay** (`POST /api/control_mode`, `GET /api/status`).
 
-- **Direct:** Flask opens UART; chassis + PTZ serial JSON go to the ESP32.  
-- **ROS 2:** Flask **releases** UART for `ugv_bringup`; stick/AI motion prefer **rosbridge** (`ws://127.0.0.1:9090` by default).  
-- **Leaving ROS 2:** Flask **stops `ugv_bringup`** (container PID kill; `UGV_AUTOSTOP_BRINGUP=0` to skip) then **reclaims** UART. rosbridge is left running.  
-- If rosbridge is **down**: commands **fall back to serial** after reclaiming UART (so PTZ is not left on “Dropped serial cmd”).  
-- While mode stays **ROS 2**, a **background autoheal** thread (`UGV_ROS_AUTOHEAL=1`, interval `UGV_ROS_AUTOHEAL_S` ≈15s) retries rosbridge/bringup and re-releases UART when the bridge recovers.  
-- Legacy `enable_motor_control=False` still bypasses chassis-only on serial when the port is open; full ROS mode uses release + relay as above.  
+- **Direct:** Flask opens UART; chassis + PTZ JSON go to the ESP32.
+- **ROS 2:** Flask **releases** UART for `ugv_bringup`; stick/AI motion prefer **rosbridge**.
+- **Leaving ROS 2:** Flask **stops `ugv_bringup`** (container PID kill; `UGV_AUTOSTOP_BRINGUP=0` to skip) then **reclaims** UART. rosbridge is left running.
+- If rosbridge is **down**: commands **fall back to serial** after reclaim (so PTZ is not left on “Dropped serial cmd”).
+- While mode stays **ROS 2**, a **background autoheal** thread (`UGV_ROS_AUTOHEAL=1`, interval `UGV_ROS_AUTOHEAL_S` ≈15s) retries sidecars and re-releases UART when the bridge recovers.
 - Env: `UGV_MOTOR_BYPASS=1` at process start (dev); `UGV_AUTOSTART_ROSBRIDGE` / `UGV_AUTOSTART_BRINGUP` / `UGV_AUTOSTOP_BRINGUP` (default on).
 
-Gimbal kits: `base_config.module_type: 2` in `config.yaml`.
+Gimbal kits: `base_config.module_type: 2` in `config.yaml`. When ROS 2 + rosbridge are up, UI `T:133` is published over rosbridge; otherwise serial fallback after reclaim.
 
-### Pan/tilt via ROS 2 (optional)
+### Drive safety
 
-When control mode is ROS 2 and rosbridge is up, UI `T:133` is published over rosbridge (joint_states / PT controller topics → bringup → ESP32). If rosbridge is down, Flask uses **serial fallback** after reclaim (see above).
+- Body-frame positive linear = **camera-forward** in software. Hardware polarity is `drive_linear_sign` / `drive_angular_sign` in `config.yaml` (or `UGV_DRIVE_LINEAR_SIGN` / `UGV_DRIVE_ANGULAR_SIGN`). **This tree defaults linear to `-1`**.
+- AI chassis drives are **timed by default**; continuous motion needs an explicit flag. Motion tools must be enabled on `/ai` first.
+- **Idle heartbeat (navbar HB):** every 2s the UI re-sends the last wheel command (idle = L0/R0). Leave **ON** for manual teleop. **HB off** for AI timed drives so the heartbeat does not cut them short. Navbar **STOP** always clears the lock and zeros chassis.
 
-### AI vision agent (`/ai`)
+---
 
-OpenAI-compatible chat UI at `/ai` with optional live camera still attach.
+# Waveshare UGV Robots
 
-- **Env:** `OPENAI_API_KEY` (required), optional `OPENAI_BASE_URL` and `OPENAI_MODEL` (defaults: official OpenAI + `gpt-4o-mini`)
-- **Auth (optional):** when `UGV_AI_TOKEN` is set, `/api/ai/*` and `/api/snapshot` require that token
-- **Capabilities:** toggle tree persisted in `.ai_capabilities.json` — motion tools default **off** for safety; enable in the AI UI before the LLM can drive
-- **Tools:** telemetry, CV detections, snapshot metadata, and motion (direct serial or ROS 2 per `control_mode`)
-- **Vision:** attach checkbox sends a live JPEG on that turn; chat history stays text-only (no image re-send)
+This is a Raspberry Pi example for the [Waveshare](https://www.waveshare.com/) UGV robots: **WAVE ROVER**, **UGV Rover**, **UGV Beast**, **RaspRover**, **UGV01**, **UGV02**.
 
-### Drive safety / conventions
+![](./media/UGV-Rover-details-23.jpg)
 
-- Body-frame positive linear = **camera-forward** in software. Hardware polarity is applied once via `drive_linear_sign` / `drive_angular_sign` in `config.yaml` (or `UGV_DRIVE_LINEAR_SIGN` / `UGV_DRIVE_ANGULAR_SIGN`). **This tree defaults linear to `-1`** for the common Waveshare chassis wiring — verify after any change with `GET /api/status` and a short stick test (restart the app after editing yaml).
-- AI chassis drives are **timed by default**; continuous motion requires an explicit continuous flag.
-- Motion tools must be enabled in the AI capability UI before the LLM can call them.
-- **Idle heartbeat (navbar HB):** every 2s the UI re-sends the last wheel command (idle = L0/R0 stop). Leave **ON** for manual teleop. Set **HB off** for AI timed drives so the heartbeat does not cut them short. The server **AI motion lock** ignores those idle zeros during timed/continuous AI moves; navbar **STOP** always clears the lock and zeros chassis.
+> Upstream README from [waveshareteam/ugv_rpi](https://github.com/waveshareteam/ugv_rpi). Clone this fork instead if you want Seek / Track / Chat: `git clone https://github.com/matthewhand/ugv_rpi.git`
 
 ## Basic Description
 The Waveshare UGV robots utilize both an upper computer and a lower computer. This repository contains the program running on the upper computer, which is typically a Raspberry Pi in this setup.  

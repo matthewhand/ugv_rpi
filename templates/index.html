@@ -623,7 +623,7 @@
           <div class="ugv-seek-top">
             <div class="ugv-panel-card ugv-seek-preview-card">
               <h2>Track <span style="font-size:11px;color:#fbbf24;font-weight:600;">EXPERIMENTAL</span></h2>
-              <p class="hint">PTZ hunts only — wheels stay still. Detector for VOC classes; LLM vision for unique goals like <code>toilet</code>.</p>
+              <p class="hint">PTZ hunts only — wheels stay still. Detector for VOC classes; vision LLM for anything else.</p>
               <div class="ugv-seek-detector-bar" id="track-detector-bar" aria-live="polite">
                 <span class="ugv-seek-detector-dot" id="track-detector-dot" aria-hidden="true"></span>
                 <span class="ugv-seek-detector-label" id="track-detector-label">Track: idle</span>
@@ -647,13 +647,13 @@
           <div class="ugv-panel-card ugv-seek-config-card">
             <h2>What to track</h2>
             <p class="hint">
-              Type a <strong>VOC class</strong> (dog, person, chair…) to use MobileNet-SSD.
-              Type anything else (toilet, red mug…) to use the vision LLM.
+              Type a <strong>VOC class</strong> (person, chair, bottle…) to use MobileNet-SSD.
+              Type anything else to use the vision LLM.
             </p>
             <div class="ugv-seek-config-controls">
               <div class="ugv-seek-form">
                 <input type="text" id="track-goal-text" list="track-goal-list"
-                  placeholder="dog  or  toilet" autocomplete="off" />
+                  placeholder="person  or  red mug" autocomplete="off" />
                 <datalist id="track-goal-list"></datalist>
               </div>
               <p class="hint" id="track-referee-hint">Referee: —</p>

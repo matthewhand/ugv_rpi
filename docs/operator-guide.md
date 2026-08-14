@@ -84,7 +84,7 @@ Visual QA source of truth for Playwright feature catalog.
 | `seek.mode_a` | Object Detector only | Radio **a**; scene-nav checkbox disabled/unchecked |
 | `seek.mode_b` | Detector + LLM Nav | Radio **b** (default); scene nav enabled |
 | `seek.mode_c` | LLM Detection & Vision | Radio **c**; free-text goal field shown |
-| `seek.goal_select` | Detector goal class | Select shows VOC labels (e.g. dog) |
+| `seek.goal_select` | Detector goal class | Select shows VOC labels (e.g. person, chair) |
 | `seek.onfound_none` | Upon found = none | Do nothing selected; TTS field hidden |
 | `seek.onfound_tts` | Upon found = TTS | TTS phrase field visible |
 | `seek.scenenav_off` | Scene nav unchecked (b/c) | Checkbox off; interval may disable |
@@ -98,15 +98,15 @@ Visual QA source of truth for Playwright feature catalog.
 - **Battery gate:** Seek will not start (and will halt if already running) when pack voltage is known and ≤ `UGV_BATTERY_LOW_V` (default 9.5 V). If `v` is missing or looks like raw ADC, Seek does **not** block. Override: `UGV_SEEK_BATTERY_GATE=0`.
 - **Config is locked while Seek is running** (mode radios, goal, upon-found, scene nav, max steps, timeout). Card tooltip: “Config locked while Seek is running — Stop to edit”. Use **Stop** or navbar **STOP** to unlock and edit.
 - Leaving Seek while running prompts stop confirm.
-- Prefer mode **a** or **b** with `person`/`dog` for demos.
-- **This chassis:** Seek turns are **UI-Fast T:1** spins (soft twist yaw does nothing). Forward hops are punchy (~0.22–0.28) so the floor cable runner is crossed; short/medium/long ≈ 0.85s / 1.1s / 1.6s. Restart the Flask app after changing hop tables.
-- **House nav:** drive *away* from walls; after entering a doorway take another hop so the body is past the jambs; cruise tilt ≈ −12°. Approaching a wall/object/door triggers a **look-down L/front/R** (tilt ≈ −22°). A **person** in the cruise scan triggers a **look-up L/front/R** (tilt ≈ +18°) so faces stay identifiable. **Reverse** only if forward and turn are both impossible **and** both rear quarters are clear (left half of −135° and right half of +135°). PTZ from `/api/ptz` or Seek updates the Raw HUD needles and Seek compass.
+- Prefer mode **a** or **b** with a VOC class (`person`, `chair`, …) for detector demos; mode **c** for a free-text goal.
+- **This chassis:** Seek turns are **UI-Fast T:1** spins (soft twist yaw does nothing). Soft linear stalls on thick floor transitions; hops are punchy (~0.22–0.28). short/medium/long ≈ 0.85s / 1.1s / 1.6s. Restart the Flask app after changing hop tables.
+- **Indoor helpers:** drive *away* from walls when the planner is heuristic; after a doorway-like chute take another hop so the body is past the jambs. Cruise tilt ≈ −12°. Look-down L/front/R (≈ −22°) only when cruise stills look close, and at most every 3 steps. A **person** in the cruise scan can trigger look-up L/front/R (≈ +18°). **Reverse** only if forward and turn are both impossible **and** both rear quarters look clear. PTZ from `/api/ptz` or Seek updates the Raw HUD needles (last command, not HW encoder).
 
 ---
 
 ## 4b. Track mode (experimental)
 
-PTZ-only hunt: the camera sweeps; the chassis does not drive. Goal `dog`/`person`/… uses MobileNet-SSD and centres on the bbox. Unique text (`toilet`) uses the vision LLM and locks the current pose (no bbox). Navbar **STOP** cancels Track.
+PTZ-only hunt: the camera sweeps; the chassis does not drive. A VOC class uses MobileNet-SSD and tries to centre the bbox. Any other goal string uses the vision LLM and locks the current pose (no bbox). Navbar **STOP** cancels Track. Experimental — not a walk-away tracker.
 
 ---
 

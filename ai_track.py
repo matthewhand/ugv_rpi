@@ -1,7 +1,7 @@
 """PTZ Tracking mode: scan with the gimbal, lock and centre on a goal.
 
 No chassis motion. Detector for MobileNet-SSD classes; LLM vision for free-text
-goals (e.g. toilet) that are not on the closed list.
+goals that are not on the closed list.
 """
 from __future__ import annotations
 

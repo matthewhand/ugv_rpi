@@ -836,7 +836,7 @@
   function populateDetectorLabels(labels) {
     var sel = $('seek-goal-select');
     if (!sel) return;
-    var preferred = 'dog';
+    var preferred = 'person';
     sel.innerHTML = '';
     (labels || []).forEach(function (lab) {
       var opt = document.createElement('option');
