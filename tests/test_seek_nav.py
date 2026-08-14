@@ -245,6 +245,15 @@ class TestSeekNavSchema(unittest.TestCase):
         self.assertEqual(yes['action'], 'backward')
         self.assertEqual(yes['drive_distance'], 'short')
 
+    def test_forward_hop_none_is_not_a_drive(self):
+        m = seek_action_from_schema({
+            'can_forward': True, 'forward_clear_cm': 0, 'forward_hop': 'none',
+            'can_turn_left': True, 'can_turn_right': False,
+            'rear_left_clear': False, 'rear_right_clear': False,
+            'can_backward': False, 'backward_hop': 'none',
+        })
+        self.assertEqual(m['action'], 'turn_left')
+
 
 class TestBatteryGate(unittest.TestCase):
     def test_unknown_voltage_does_not_block(self):

@@ -4541,7 +4541,7 @@ def _seek_wait_pan_arrived(target_pan_deg, tol_deg=None, max_s=None, should_stop
             last_pan = float(pan)
             try:
                 _seek_publish_cam_aim(
-                    target, 0.0,
+                    target, float(_cam_aim_pub.get('tilt') or 0.0),
                     hw_pan=last_pan,
                     settled=False,
                     live_pan=last_pan,
@@ -4562,7 +4562,9 @@ def _seek_wait_pan_arrived(target_pan_deg, tol_deg=None, max_s=None, should_stop
         else:
             # No HW yet — keep cmd visible (publisher throttles)
             try:
-                _seek_publish_cam_aim(target, 0.0, settled=False)
+                _seek_publish_cam_aim(
+                    target, float(_cam_aim_pub.get('tilt') or 0.0), settled=False,
+                )
             except Exception:
                 pass
         time.sleep(_SEEK_PAN_POLL_S)
@@ -4796,9 +4798,15 @@ def _seek_publish_cam_aim(pan_deg, tilt_deg=0.0, hw_pan=None, settled=None, live
             ),
         }
         seek_controller.update(cam_aim=aim)
+        try:
+            if track_controller.is_running():
+                track_controller.update(cam_aim=aim)
+        except Exception:
+            pass
         _cam_aim_pub['t'] = now
         _cam_aim_pub['cmd'] = p
         _cam_aim_pub['live'] = float(show_f)
+        _cam_aim_pub['tilt'] = t
         _cam_aim_pub['settled'] = settled_b
     except Exception:
         pass
@@ -5854,9 +5862,9 @@ def _seek_unified_llm_analysis(
         try:
             msg, _body, _cfg = _openai_chat(
                 messages,
-                max_tokens=96,
+                max_tokens=1024,
                 temperature=0.0,
-                timeout=15,
+                timeout=20,
                 tools=[_SEEK_NAV_TOOL],
                 tool_choice={'type': 'function', 'function': {'name': _SEEK_NAV_TOOL_NAME}},
             )
@@ -5864,9 +5872,9 @@ def _seek_unified_llm_analysis(
             olog.warn('ai_seek', f'seek_nav tool_choice=required failed, retry auto: {e}')
             msg, _body, _cfg = _openai_chat(
                 messages,
-                max_tokens=96,
+                max_tokens=1024,
                 temperature=0.0,
-                timeout=15,
+                timeout=20,
                 tools=[_SEEK_NAV_TOOL],
                 tool_choice='auto',
             )
@@ -5874,6 +5882,20 @@ def _seek_unified_llm_analysis(
         if not isinstance(parsed, dict):
             txt = _message_text_content(msg) or ''
             parsed = _parse_json_from_text(txt)
+        if not isinstance(parsed, dict):
+            # 96-token-era failure mode: reasoning ate the tool JSON
+            olog.warn('ai_seek', 'seek_nav parse empty — retry larger completion')
+            msg, _body, _cfg = _openai_chat(
+                messages,
+                max_tokens=2048,
+                temperature=0.0,
+                timeout=25,
+                tools=[_SEEK_NAV_TOOL],
+                tool_choice='auto',
+            )
+            parsed = _parse_tool_call_args(msg, _SEEK_NAV_TOOL_NAME)
+            if not isinstance(parsed, dict):
+                parsed = _parse_json_from_text(_message_text_content(msg) or '')
         if isinstance(parsed, dict) and (
             'can_forward' in parsed
             or 'forward_clear_cm' in parsed
@@ -6971,21 +6993,10 @@ def _seek_loop(ctrl, label, conf, max_steps, timeout_s):
                     )
                 except Exception:
                     pass
-                # After reverse, re-plan. After a turn, commit a forward hop so we
-                # actually cover ground (LLM already chose the turn side).
-                if action == 'backward':
+                # After reverse or a turn, drop cache so the next step *looks*
+                # again. Blind forward-after-turn is how we drove into the pot.
+                if action in ('backward', 'turn_left', 'turn_right'):
                     cached_nav = None
-                elif action in ('turn_left', 'turn_right'):
-                    follow = _seek_nav_plan('forward', 'medium')
-                    cached_nav = {
-                        'action': 'forward',
-                        'drive_distance': 'medium',
-                        'reason': 'after turn: hop forward (LLM already chose the side)',
-                        'summary': follow['summary'],
-                        'magnitude': follow['magnitude'],
-                        'duration_ms': follow['duration_ms'],
-                        'source': 'after_turn_commit',
-                    }
                 ctrl.update(last_tools=[drive])
                 cam_note = ''
                 if isinstance(drive, dict) and drive.get('cam_look'):
@@ -7315,6 +7326,13 @@ def _track_loop(ctrl, label, conf, max_steps, timeout_s):
     locked = False
     lost = 0
     step = 0
+    check_seq = 0
+    pans = _TRACK_SCAN_PANS
+    tilts = _TRACK_SCAN_TILTS
+    if referee == REFEREE_LLM:
+        # Vision LLM is slow — fewer poses so a sweep finishes this decade
+        pans = (-60.0, 0.0, 60.0)
+        tilts = (-12.0, 12.0)
 
     def _halt(phase, message):
         try:
@@ -7339,10 +7357,10 @@ def _track_loop(ctrl, label, conf, max_steps, timeout_s):
                 step += 1
                 ctrl.update(step=step, locked=False, message=f'Scan {step}: sweeping PTZ for {label}…')
                 found = False
-                for tilt in _TRACK_SCAN_TILTS:
+                for tilt in tilts:
                     if ctrl.should_stop():
                         break
-                    for pan in _TRACK_SCAN_PANS:
+                    for pan in pans:
                         if ctrl.should_stop():
                             break
                         ctrl.update(
@@ -7353,9 +7371,10 @@ def _track_loop(ctrl, label, conf, max_steps, timeout_s):
                         chk = seek_goal_check(
                             label, referee=referee, conf_threshold=conf, jpeg=jpeg,
                         )
+                        check_seq += 1
                         ctrl.update(
                             last_detection=chk,
-                            last_check_seq=int((ctrl.status() or {}).get('last_check_seq') or 0) + 1,
+                            last_check_seq=check_seq,
                         )
                         raw = chk.get('raw_detections') or chk.get('labels_found') or []
                         ctrl.append_log(
