@@ -646,6 +646,88 @@ def seek_drive_log_verb(dry_run=None) -> str:
     return 'WOULD drive' if dry_run else 'driving'
 
 
+def seek_live_start_error(*, dry_run: bool, confirm_live: bool) -> Optional[str]:
+    """Live chassis Seek must be explicitly confirmed. Dry-run never needs this."""
+    if dry_run:
+        return None
+    if not confirm_live:
+        return (
+            'Live drive refused: set dry_run=true (default) or pass confirm_live=true. '
+            'Uncheck Dry run in the UI only when you mean to move the chassis.'
+        )
+    return None
+
+
+def seek_views_are_rear_cruise(views) -> bool:
+    """True when LEFT/RIGHT panels are rear ±135° (not look-down ±55°)."""
+    pans = []
+    for v in views or []:
+        if not isinstance(v, dict):
+            continue
+        if v.get('name') not in ('left', 'right'):
+            continue
+        try:
+            pans.append(abs(float(v.get('pan_deg'))))
+        except (TypeError, ValueError):
+            continue
+    if not pans:
+        return False
+    return all(p >= 90.0 for p in pans)
+
+
+def seek_found_confident(
+    check,
+    *,
+    min_conf: float = 0.45,
+    view_hits: int = 1,
+    scan_conf: float = 0.22,
+) -> Dict[str, Any]:
+    """Whether to HALT Seek as found. Weak single-view hits stay candidates.
+
+    Scan threshold (0.22) is for logging. Halt needs >= min_conf on one view
+    or >=2 views at the scan threshold (look-up / second panel confirmed).
+    """
+    if not isinstance(check, dict) or not check.get('found'):
+        return {'ok': False, 'reason': 'not found'}
+    best = check.get('best') if isinstance(check.get('best'), dict) else {}
+    raw_c = (
+        best.get('confidence')
+        if best.get('confidence') is not None
+        else check.get('confidence')
+    )
+    try:
+        conf = float(raw_c or 0.0)
+    except (TypeError, ValueError):
+        conf = 0.0
+    try:
+        hits = int(view_hits or check.get('view_hits') or 1)
+    except (TypeError, ValueError):
+        hits = 1
+    if hits >= 2 and conf >= float(scan_conf):
+        return {
+            'ok': True,
+            'reason': f'{hits} views conf={conf:.2f}',
+            'confidence': conf,
+            'view_hits': hits,
+        }
+    if conf >= float(min_conf):
+        return {
+            'ok': True,
+            'reason': f'conf={conf:.2f}',
+            'confidence': conf,
+            'view_hits': hits,
+        }
+    return {
+        'ok': False,
+        'reason': (
+            f'weak hit conf={conf:.2f} views={hits} '
+            f'(need ≥{float(min_conf):.2f} or 2 views)'
+        ),
+        'confidence': conf,
+        'view_hits': hits,
+    }
+
+
 def seek_sweep_scorecard(views, *, min_bytes: int = SEEK_SWEEP_MIN_JPEG_BYTES) -> Dict[str, Any]:
     """Per-view sweep QA: bytes, settle, labels. No OpenCV.
 

@@ -5,7 +5,7 @@
 **Workflows:** `.grok/workflows/ui-fix-improve.rhai` · `.grok/workflows/honesty-complete-64.rhai`  
 **Screenshots:** `ui_shots/` via `scripts/screenshot_ui.py --catalog`  
 **Sources of truth:** `docs/operator-guide.md`, `docs/ui-qa-report.md`, fork status in `README.md`  
-**Last honesty pass:** 2026-08-13
+**Last honesty pass:** 2026-08-14
 
 ## Done (UI / safety / ops chrome)
 
@@ -24,6 +24,8 @@
 - [x] Kill `ugv_bringup` when switching ROS 2 → Direct (`UGV_AUTOSTOP_BRINGUP`)  
 - [x] Seek battery gate (known low V); nav-plan extracted to `seek_nav.py` + unit tests  
 - [x] Seek hop/turn tables match this chassis (UI-Fast T:1 spins; punchy linear)  
+- [x] Seek dry-run default + confirm_live + exclusive chassis while Seek/Track runs  
+- [x] Detector FOUND bar 0.45 / two-view; rear ±135 not used as door jambs  
 
 ## Open (honest residual)
 

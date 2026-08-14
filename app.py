@@ -2814,11 +2814,53 @@ def _execute_agent_tool(name, arguments):
     return {'ok': False, 'error': f'unmapped tool: {name}'}
 
 
+_seek_drive_tls = threading.local()
+
+
+def _seek_drive_scope(active=True):
+    """Mark this thread as the Seek executor so Chat/UI cannot sneak a hop."""
+    prev = bool(getattr(_seek_drive_tls, 'ok', False))
+    _seek_drive_tls.ok = bool(active)
+    return prev
+
+
+def _seek_thread_may_drive() -> bool:
+    return bool(getattr(_seek_drive_tls, 'ok', False))
+
+
+def _autonomy_owns_chassis() -> bool:
+    """Seek or Track is running — sticks / Chat must not fight it."""
+    try:
+        if seek_controller.is_running():
+            return True
+    except Exception:
+        pass
+    try:
+        if track_controller.is_running():
+            return True
+    except Exception:
+        pass
+    return False
+
+
 def _execute_motion_via_mode(name, args):
     """AI motion tools follow the same control_mode as UI sticks."""
     mode = get_control_mode()
     args = args or {}
     level = 'warn' if name == 'stop_motors' else 'info'
+    if name == 'send_motor_command' and _autonomy_owns_chassis() and not _seek_thread_may_drive():
+        olog.info(
+            'ai_motion',
+            'Chassis busy: Seek/Track owns the wheels (Chat hop ignored)',
+            tool=name, control_mode=mode,
+        )
+        return {
+            'ok': True,
+            'skipped': 'seek_or_track_running',
+            'backend': 'none',
+            'path': 'blocked',
+            'control_mode': mode,
+        }
     if name == 'send_motor_command' and not _seek_chassis_allowed():
         olog.info(
             'ai_motion',
@@ -3540,6 +3582,7 @@ from ai_seek import (
     DEFAULT_SEEK_TIMEOUT_S,
     DEFAULT_SEEK_CONF,
     DEFAULT_SEEK_DRY_RUN,
+    DEFAULT_SEEK_FOUND_CONF,
     DEFAULT_SEEK_STEP_PAUSE_S,
     normalize_seek_max_steps,
     normalize_seek_timeout_s,
@@ -3568,6 +3611,9 @@ from seek_nav import (  # noqa: E402
     seek_chassis_allowed as _seek_chassis_allowed,
     seek_drive_log_verb as _seek_drive_log_verb,
     seek_sweep_scorecard as _seek_sweep_scorecard,
+    seek_live_start_error as _seek_live_start_error,
+    seek_views_are_rear_cruise as _seek_views_are_rear_cruise,
+    seek_found_confident as _seek_found_confident,
 )
 
 _SEEK_JUDGE_SYSTEM = (
@@ -3712,8 +3758,16 @@ def _seek_side_openness(views):
 
 
 def _seek_prefer_open_turn(views):
-    """Return turn_left or turn_right toward the more open side view."""
+    """Return turn_left/turn_right toward a more open *side* view, or None.
+
+    Cruise LEFT/RIGHT are rear ±135° — not port/starboard. Do not use them
+    as a turn hint (that made indoor Seek oscillate L/R).
+    """
+    if _seek_views_are_rear_cruise(views):
+        return None
     info = _seek_side_openness(views)
+    if not info.get('scores_ok'):
+        return None
     return 'turn_right' if info.get('prefer') == 'right' else 'turn_left'
 
 
@@ -6102,7 +6156,7 @@ def _seek_heuristic_room_nav(
     Goal: leave clutter toward free hallway space — longer hops when the centre is open.
     """
     side_info = side_info or _seek_side_openness(views)
-    prefer_turn = prefer_turn or _seek_prefer_open_turn(views)
+    prefer_turn = prefer_turn or _seek_prefer_open_turn(views) or 'turn_left'
     if lookdown and lookdown.get('prefer_turn') in ('turn_left', 'turn_right'):
         prefer_turn = lookdown['prefer_turn']
     prefer_side = prefer_side or ('right' if prefer_turn == 'turn_right' else 'left')
@@ -6199,12 +6253,13 @@ def _seek_heuristic_room_nav(
             action, dist, obs = 'forward', 'medium', 'unknown'
             reason = 'heuristic: unclear centre → forward medium (corridor progress)'
 
-    # Doorway/hall chute: don't stop in the frame (live: wedges on jambs).
+    # Doorway commit only from look-down L/R (true sides). Cruise ±135 is rear.
+    ld_side = lookdown if isinstance(lookdown, dict) else {}
     commit = _seek_commit_through_opening(
         last, last_dist or 'medium',
         obstacle_range='near' if blocked is True else ('none' if blocked is False else 'unknown'),
-        left_open=side_info.get('left'),
-        right_open=side_info.get('right'),
+        left_open=ld_side.get('left'),
+        right_open=ld_side.get('right'),
         centre_open=(blocked is False),
     )
     if commit:
@@ -6215,8 +6270,8 @@ def _seek_heuristic_room_nav(
     away = _seek_prefer_away_from_wall(
         action,
         obstacle_range='near' if blocked is True else 'unknown',
-        left_open=side_info.get('left'),
-        right_open=side_info.get('right'),
+        left_open=ld_side.get('left'),
+        right_open=ld_side.get('right'),
         prefer_turn=prefer_turn,
     )
     if away:
@@ -6283,7 +6338,7 @@ def _seek_nav_decide(views, goal_label, labels_hint=None):
     # No goal yet: bias into open corridor space (longer hop when centre free)
     corridor = _seek_centre_corridor_hint(views)
     if corridor.get('blocked') is True:
-        prefer = _seek_prefer_open_turn(views)
+        prefer = _seek_prefer_open_turn(views) or 'turn_left'
         plan = _seek_nav_plan(
             prefer, 'short',
             obstacle_range='near', path_clear_forward=False,
@@ -6465,11 +6520,21 @@ def _seek_execute_nav_action(action, drive_distance='medium', should_stop=None, 
     dist = plan['drive_distance']
     dry = _seek_dry_run_active()
     aim = _seek_aim_for_motion(action, open_side=open_side, should_stop=should_stop)
+
+    prev_scope = _seek_drive_scope(True)
+    try:
+        return _seek_execute_nav_action_inner(
+            plan, action, dist, dry, aim, should_stop=should_stop, open_side=open_side,
+        )
+    finally:
+        _seek_drive_scope(prev_scope)
+
+
+def _seek_execute_nav_action_inner(
+    plan, action, dist, dry, aim, *, should_stop=None, open_side=None,
+):
     last_res = None
     last_args = {}
-
-    # Aim already published via cam_aim inside _seek_aim_for_motion / _seek_look_deg.
-    # Keep a short cam_look string only for log lines — not a second pan SoT.
     cam_look = aim.get('label')
 
     if action == 'turn_left':
@@ -6631,10 +6696,11 @@ def _seek_loop(ctrl, label, conf, max_steps, timeout_s):
             if timeout_s > 0 and (time.time() - t0) >= timeout_s:
                 _halt('timeout', f'Timeout after {timeout_s}s', step=step - 1)
                 return
-            batt_block = _seek_battery_block_reason()
-            if batt_block:
-                _halt('failed', batt_block, step=step - 1)
-                return
+            if not dry:
+                batt_block = _seek_battery_block_reason()
+                if batt_block:
+                    _halt('failed', batt_block, step=step - 1)
+                    return
 
             if llm_scene_nav:
                 # Never reuse a reverse escape: after backing up we must re-plan (turn/open).
@@ -6642,8 +6708,8 @@ def _seek_loop(ctrl, label, conf, max_steps, timeout_s):
                 force_replan = False
                 if cached_nav:
                     ca = _seek_normalize_action(cached_nav.get('action'))
-                    # Re-plan after reverse only. After a turn we rewrite cache to a
-                    # forward hop so we cover ground instead of another 3-view+LLM wait.
+                    # Re-plan after reverse. Turns already drop the cache (no
+                    # blind forward-after-turn).
                     if ca == 'backward':
                         force_replan = True
                 is_calc_step = (
@@ -6683,17 +6749,44 @@ def _seek_loop(ctrl, label, conf, max_steps, timeout_s):
                         found_det = ld_found
                     
                     if found_det and found_det.get('found'):
+                        view_hits = 0
+                        try:
+                            view_hits = sum(
+                                1 for v in (views_to_analyze or [])
+                                if isinstance(v, dict) and v.get('has_target')
+                            )
+                        except Exception:
+                            view_hits = 1
+                        if lu_found and lu_found.get('found'):
+                            view_hits = max(view_hits, 2)
+                        verdict = _seek_found_confident(
+                            found_det,
+                            min_conf=DEFAULT_SEEK_FOUND_CONF,
+                            view_hits=view_hits or 1,
+                            scan_conf=conf,
+                        )
                         found_v = found_det.get('found_view', 'scan')
                         raw = found_det.get('raw_detections') or found_det.get('labels_found') or []
+                        if verdict.get('ok'):
+                            ctrl.append_log(
+                                'found',
+                                f'FOUND “{label}” via detector at step {step} ({found_v} view)'
+                                f' · {verdict.get("reason")} · saw {raw or "match"}',
+                                step=step, view=found_v,
+                            )
+                            _seek_run_on_found(ctrl, label)
+                            _halt(
+                                'found',
+                                message=f'Found {label} via detector at step {step} ({found_v} view)',
+                                step=step, last_detection=found_det,
+                            )
+                            return
                         ctrl.append_log(
-                            'found',
-                            f'FOUND “{label}” via detector at step {step} ({found_v} view)'
-                            f' · saw {raw or "match"}',
+                            'detect',
+                            f'Step {step}: weak “{label}” candidate — keep seeking '
+                            f'({verdict.get("reason")}) · saw {raw or "match"}',
                             step=step, view=found_v,
                         )
-                        _seek_run_on_found(ctrl, label)
-                        _halt('found', message=f'Found {label} via detector at step {step} ({found_v} view)', step=step, last_detection=found_det)
-                        return
 
                     stitched_jpeg = _stitch_panorama_views(views_to_analyze)
                     b64_pano = base64.b64encode(stitched_jpeg).decode('ascii') if stitched_jpeg else ''
@@ -6730,12 +6823,16 @@ def _seek_loop(ctrl, label, conf, max_steps, timeout_s):
                         lookup=lookup_hint,
                     )
                     
-                    if (referee == REFEREE_LLM and analysis.get('goal_found')) or (found_det and found_det.get('found')):
-                        found_v = analysis.get('goal_found_view') or (found_det.get('found_view') if found_det else 'straight')
+                    if (
+                        referee == REFEREE_LLM
+                        and analysis.get('goal_found')
+                        and analysis.get('source') == 'llm'
+                    ):
+                        found_v = analysis.get('goal_found_view') or 'straight'
                         for v in views_to_analyze:
                             if v.get('name') == found_v:
                                 v['has_target'] = True
-                        res_check = found_det or {
+                        res_check = {
                             'found': True, 'goal_label': label, 'referee': REFEREE_LLM,
                             'reason': analysis.get('reason') or 'LLM unified query identified goal',
                             'found_view': found_v
@@ -6750,19 +6847,24 @@ def _seek_loop(ctrl, label, conf, max_steps, timeout_s):
                         _halt('found', message=f'Found {label} via {referee} at step {step} ({found_v} view)', step=step, last_detection=res_check)
                         return
 
-                    prefer_turn = analysis.get('prefer_turn') or _seek_prefer_open_turn(views_to_analyze)
+                    prefer_turn = (
+                        analysis.get('prefer_turn')
+                        or _seek_prefer_open_turn(views_to_analyze)
+                        or 'turn_left'
+                    )
                     llm_said = (analysis.get('source') == 'llm')
                     plan = _seek_nav_plan(
                         analysis.get('action') or analysis.get('recommended_direction') or 'forward',
                         analysis.get('drive_distance') or 'medium',
                     )
                     # Heuristic-only: doorway commit / turn-away. Do not rewrite an LLM hop/turn.
+                    # Never use cruise ±135 rear panels as jambs — look-down sides only.
                     if not llm_said:
-                        side = analysis.get('side_openness') or {}
+                        side = {}
                         if lookdown_hint:
                             side = {
-                                'left': lookdown_hint.get('left', side.get('left')),
-                                'right': lookdown_hint.get('right', side.get('right')),
+                                'left': lookdown_hint.get('left'),
+                                'right': lookdown_hint.get('right'),
                             }
                         commit = _seek_commit_through_opening(
                             last_drive_action, last_drive_distance,
@@ -6870,10 +6972,26 @@ def _seek_loop(ctrl, label, conf, max_steps, timeout_s):
                         step=step,
                     )
                     if chk_centre.get('found'):
-                        ctrl.append_log('found', f'FOUND “{label}” via detector at step {step} (centre)', step=step)
-                        _seek_run_on_found(ctrl, label)
-                        _halt('found', message=f'Found {label} via detector at step {step}', step=step, last_detection=chk_centre)
-                        return
+                        verdict = _seek_found_confident(
+                            chk_centre,
+                            min_conf=DEFAULT_SEEK_FOUND_CONF,
+                            view_hits=1,
+                            scan_conf=conf,
+                        )
+                        if verdict.get('ok'):
+                            ctrl.append_log(
+                                'found',
+                                f'FOUND “{label}” via detector at step {step} (centre) · {verdict.get("reason")}',
+                                step=step,
+                            )
+                            _seek_run_on_found(ctrl, label)
+                            _halt('found', message=f'Found {label} via detector at step {step}', step=step, last_detection=chk_centre)
+                            return
+                        ctrl.append_log(
+                            'detect',
+                            f'Step {step}: weak centre “{label}” — keep seeking ({verdict.get("reason")})',
+                            step=step,
+                        )
 
                     # Update CENTRE image section in 180° panoramic scan live as we drive forward!
                     if straight_jpeg and views_to_analyze:
@@ -6949,14 +7067,36 @@ def _seek_loop(ctrl, label, conf, max_steps, timeout_s):
                 )
                 if found_chk and found_chk.get('found'):
                     found_v = found_chk.get('found_view', 'scan')
+                    view_hits = 0
+                    try:
+                        view_hits = sum(
+                            1 for v in (views or [])
+                            if isinstance(v, dict) and v.get('has_target')
+                        )
+                    except Exception:
+                        view_hits = 1
+                    if lu_found and lu_found.get('found'):
+                        view_hits = max(view_hits, 2)
+                    verdict = _seek_found_confident(
+                        found_chk,
+                        min_conf=DEFAULT_SEEK_FOUND_CONF,
+                        view_hits=view_hits or 1,
+                        scan_conf=conf,
+                    )
+                    if verdict.get('ok'):
+                        ctrl.append_log(
+                            'found',
+                            f'FOUND “{label}” in {found_v} view at step {step} · {verdict.get("reason")}',
+                            step=step, view=found_v,
+                        )
+                        _seek_run_on_found(ctrl, label)
+                        _halt('found', message=f'Found {label} in {found_v} view at step {step}', step=step, last_detection=found_chk)
+                        return
                     ctrl.append_log(
-                        'found',
-                        f'FOUND “{label}” in {found_v} view at step {step}',
+                        'detect',
+                        f'Step {step}: weak “{label}” — keep seeking ({verdict.get("reason")})',
                         step=step, view=found_v,
                     )
-                    _seek_run_on_found(ctrl, label)
-                    _halt('found', message=f'Found {label} in {found_v} view at step {step}', step=step, last_detection=found_chk)
-                    return
 
                 labels_h = (found_chk.get('labels_found') if isinstance(found_chk, dict) else []) or []
                 nav = _seek_nav_decide(views, label, labels_hint=labels_h)
@@ -7227,6 +7367,14 @@ def api_ai_seek_start():
         data.get('dry_run') if 'dry_run' in data else None,
         default=DEFAULT_SEEK_DRY_RUN,
     )
+    confirm_live = _parse_bool_flag(data.get('confirm_live'), default=False)
+    live_err = _seek_live_start_error(dry_run=dry_run, confirm_live=confirm_live)
+    if live_err:
+        return jsonify({
+            'success': False,
+            'error': live_err,
+            'dry_run_required': True,
+        }), 400
     batt_block = None if dry_run else _seek_battery_block_reason()
     if batt_block:
         volts = _read_battery_voltage_v()
@@ -8053,23 +8201,23 @@ def _route_json_command(cmd):
     chassis_types = {1, 13, '1', '13', f.get('cmd_config', {}).get('cmd_movition_ctrl')}
 
     # Dry-run Seek: refuse non-zero chassis (sticks + leftover heartbeats).
-    # Zeros / emergency STOP still go through.
+    # Live Seek/Track: same — autonomy owns the wheels. Zeros / STOP still go through.
     if (
         t in chassis_types
         and not force_stop
         and not _chassis_cmd_is_zero(cmd)
-        and not _seek_chassis_allowed()
-    ):
-        olog.info(
-            'ai_seek',
-            'Seek dry-run: dropped chassis cmd',
-            T=t, dry_run=True,
+        and (
+            not _seek_chassis_allowed()
+            or (_autonomy_owns_chassis() and not _seek_thread_may_drive())
         )
+    ):
+        why = 'seek_dry_run' if not _seek_chassis_allowed() else 'autonomy_owns_chassis'
+        olog.info('ai_seek', f'Dropped chassis cmd ({why})', T=t, reason=why)
         return {
-            'path': 'dry_run',
+            'path': 'blocked',
             'ok': True,
-            'reason': 'seek_dry_run',
-            'dry_run': True,
+            'reason': why,
+            'dry_run': not _seek_chassis_allowed(),
         }
 
     # UI 2s idle heartbeat sends T:1 L=0 R=0; do not clobber an in-flight AI drive.

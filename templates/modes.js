@@ -1491,6 +1491,7 @@
         llm_scene_nav: llmSceneNav,
         llm_nav_interval: llmNavInterval,
         dry_run: dryRun,
+        confirm_live: !dryRun,
       }),
     })
       .then(function (r) {

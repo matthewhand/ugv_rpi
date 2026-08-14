@@ -31,6 +31,9 @@ from seek_nav import (  # noqa: E402
     seek_chassis_allowed,
     seek_drive_log_verb,
     seek_sweep_scorecard,
+    seek_live_start_error,
+    seek_views_are_rear_cruise,
+    seek_found_confident,
 )
 
 
@@ -333,6 +336,33 @@ class TestDryRunAndSweep(unittest.TestCase):
         self.assertFalse(weak['ok'])
         self.assertEqual(weak['missing'], 2)
         self.assertIn('WEAK', weak['summary'])
+
+    def test_live_start_requires_confirm(self):
+        self.assertIsNone(seek_live_start_error(dry_run=True, confirm_live=False))
+        self.assertIsNotNone(seek_live_start_error(dry_run=False, confirm_live=False))
+        self.assertIsNone(seek_live_start_error(dry_run=False, confirm_live=True))
+
+    def test_rear_cruise_vs_lookdown(self):
+        cruise = [
+            {'name': 'left', 'pan_deg': -135},
+            {'name': 'straight', 'pan_deg': 0},
+            {'name': 'right', 'pan_deg': 135},
+        ]
+        lookdown = [
+            {'name': 'left', 'pan_deg': -55},
+            {'name': 'straight', 'pan_deg': 0},
+            {'name': 'right', 'pan_deg': 55},
+        ]
+        self.assertTrue(seek_views_are_rear_cruise(cruise))
+        self.assertFalse(seek_views_are_rear_cruise(lookdown))
+
+    def test_found_confident_thresholds(self):
+        weak = {'found': True, 'best': {'confidence': 0.30}}
+        self.assertFalse(seek_found_confident(weak, view_hits=1)['ok'])
+        self.assertTrue(seek_found_confident(weak, view_hits=2, scan_conf=0.22)['ok'])
+        strong = {'found': True, 'best': {'confidence': 0.70}}
+        self.assertTrue(seek_found_confident(strong, view_hits=1)['ok'])
+        self.assertFalse(seek_found_confident({'found': False}, view_hits=2)['ok'])
 
 
 if __name__ == '__main__':

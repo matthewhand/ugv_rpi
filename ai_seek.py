@@ -55,6 +55,8 @@ DEFAULT_SEEK_MAX_STEPS = 30
 DEFAULT_SEEK_DRY_RUN = True
 DEFAULT_SEEK_TIMEOUT_S = 300.0  # 5 minutes
 DEFAULT_SEEK_CONF = 0.22
+# Halt-as-found bar. Scan still uses DEFAULT_SEEK_CONF so weak hits are logged.
+DEFAULT_SEEK_FOUND_CONF = 0.45
 DEFAULT_SEEK_STEP_PAUSE_S = 0.35
 # Caps applied when a positive limit is requested
 SEEK_MAX_STEPS_CAP = 500

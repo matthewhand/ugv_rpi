@@ -29,7 +29,7 @@ Visual QA source of truth for Playwright feature catalog.
 **Operator notes**
 - Prefer **Direct** for simple Seek demos and reliable PTZ.
 - Leave **HB ON** for stick driving; turn **HB off** only when using AI timed drives.
-- **STOP** zeros wheels, cancels Seek, clears AI motion lock.
+- **STOP** zeros wheels, cancels Seek **and** Track, clears AI motion lock.
 - **ROS 2:** needs rosbridge; if it dies, firmware autoheal retries and serial fallback keeps motion alive (see README). Do not expect silent perfection if Docker/`ugv_ros2` is broken.
 - **Drive polarity:** after changing `drive_linear_sign`, **restart the Flask app** and check `GET /api/status` → `drive_linear_sign` (browser refresh alone does not reload yaml).
 - `shell.path_direct` / `shell.path_ros2` catalog shots depend on server path at capture time; flip the chip yourself if you need the other PNG (catalog never thrash-flips UART).
@@ -89,14 +89,15 @@ Visual QA source of truth for Playwright feature catalog.
 | `seek.onfound_tts` | Upon found = TTS | TTS phrase field visible |
 | `seek.scenenav_off` | Scene nav unchecked (b/c) | Checkbox off; interval may disable |
 | `seek.limits` | Finite limits | Max steps + timeout inputs visible |
+| `seek.dry_run` | Dry run default ON | Checkbox **Dry run (no drive)** checked |
 | `seek.pano_empty` | Panorama empty | Hint “No scan yet…”; no broken image |
 | `seek.actions` | Action bar | Seek / Stop / Check once (sticky on phone) |
 | `seek.running_chrome` | Simulated running chrome | Catalog-only (no motors): pill **Seek running · 3/30**; `body.seek-running`; config card `is-locked` + disabled mode/goal/on-found/scene-nav/limits; Start/Check disabled. Live run also updates phase via poll. |
 
 **Operator notes**
 - Defaults are **finite** (30 steps / 300s). Set 0 only for unlimited.
-- **Dry run (default ON):** camera sweep + decide only. No chassis. Uncheck and confirm to allow live drive.
-- **Battery gate:** Seek will not start (and will halt if already running) when pack voltage is known and ≤ `UGV_BATTERY_LOW_V` (default 9.5 V). If `v` is missing or looks like raw ADC, Seek does **not** block. Override: `UGV_SEEK_BATTERY_GATE=0`.
+- **Dry run (default ON):** camera sweep + decide only. No chassis. Uncheck and confirm to allow live drive. Battery gate does **not** apply in dry-run.
+- **Battery gate (live only):** Seek will not start (and will halt if already running) when pack voltage is known and ≤ `UGV_BATTERY_LOW_V` (default 9.5 V). If `v` is missing or looks like raw ADC, Seek does **not** block. Override: `UGV_SEEK_BATTERY_GATE=0`.
 - **Config is locked while Seek is running** (mode radios, goal, upon-found, scene nav, max steps, timeout). Card tooltip: “Config locked while Seek is running — Stop to edit”. Use **Stop** or navbar **STOP** to unlock and edit.
 - Leaving Seek while running prompts stop confirm.
 - Prefer mode **a** or **b** with a VOC class (`person`, `chair`, …) for detector demos; mode **c** for a free-text goal.
