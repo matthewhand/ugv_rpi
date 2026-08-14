@@ -26,6 +26,11 @@ from seek_nav import (  # noqa: E402
     seek_may_reverse,
     seek_hop_from_forward_cm,
     seek_action_from_schema,
+    set_seek_dry_run,
+    seek_dry_run_active,
+    seek_chassis_allowed,
+    seek_drive_log_verb,
+    seek_sweep_scorecard,
 )
 
 
@@ -287,6 +292,47 @@ class TestNoDuplicateNavPlan(unittest.TestCase):
         self.assertNotIn('def _seek_nav_plan(', text)
         self.assertIn('seek_nav_plan as _seek_nav_plan', text)
         self.assertIn('def _stop_ugv_bringup(', text)
+
+
+class TestDryRunAndSweep(unittest.TestCase):
+    def tearDown(self):
+        set_seek_dry_run(False)
+
+    def test_latch_blocks_chassis(self):
+        self.assertTrue(seek_chassis_allowed())
+        set_seek_dry_run(True)
+        self.assertTrue(seek_dry_run_active())
+        self.assertFalse(seek_chassis_allowed())
+        self.assertEqual(seek_drive_log_verb(), 'WOULD drive')
+        set_seek_dry_run(False)
+        self.assertTrue(seek_chassis_allowed())
+        self.assertEqual(seek_drive_log_verb(), 'driving')
+
+    def test_explicit_flag_overrides_latch(self):
+        set_seek_dry_run(False)
+        self.assertFalse(seek_chassis_allowed(dry_run=True))
+        set_seek_dry_run(True)
+        self.assertTrue(seek_chassis_allowed(dry_run=False))
+
+    def test_scorecard_ok_and_missing(self):
+        jpeg = b'\xff\xd8' + (b'x' * 1200)
+        views = [
+            {'name': 'left', 'jpeg': jpeg, 'bytes': len(jpeg), 'pan_settled': True, 'detected_labels': ['person']},
+            {'name': 'straight', 'jpeg': jpeg, 'bytes': len(jpeg), 'pan_settled': True},
+            {'name': 'right', 'jpeg': jpeg, 'bytes': len(jpeg), 'pan_settled': False},
+        ]
+        ok = seek_sweep_scorecard(views)
+        self.assertTrue(ok['ok'])
+        self.assertEqual(ok['n'], 3)
+        self.assertEqual(ok['missing'], 0)
+        weak = seek_sweep_scorecard([
+            {'name': 'left', 'jpeg': b'', 'bytes': 0},
+            {'name': 'straight', 'jpeg': jpeg, 'bytes': len(jpeg)},
+            {'name': 'right', 'jpeg': None, 'bytes': 12},
+        ])
+        self.assertFalse(weak['ok'])
+        self.assertEqual(weak['missing'], 2)
+        self.assertIn('WEAK', weak['summary'])
 
 
 if __name__ == '__main__':

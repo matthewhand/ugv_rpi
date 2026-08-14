@@ -2819,6 +2819,20 @@ def _execute_motion_via_mode(name, args):
     mode = get_control_mode()
     args = args or {}
     level = 'warn' if name == 'stop_motors' else 'info'
+    if name == 'send_motor_command' and not _seek_chassis_allowed():
+        olog.info(
+            'ai_motion',
+            'Seek dry-run: send_motor_command skipped (no chassis)',
+            tool=name, dry_run=True, control_mode=mode,
+        )
+        return {
+            'ok': True,
+            'dry_run': True,
+            'skipped': 'seek_dry_run',
+            'backend': 'none',
+            'path': 'dry_run',
+            'control_mode': mode,
+        }
 
     if mode == 'ros2':
         import ros_motion
@@ -2891,6 +2905,19 @@ def _execute_motion_via_mode(name, args):
         }
 
     if name == 'send_motor_command':
+        if not _seek_chassis_allowed():
+            olog.info(
+                'ai_motion',
+                'Seek dry-run: send_motor_command skipped (no chassis)',
+                tool=name, dry_run=True,
+            )
+            return {
+                'ok': True,
+                'dry_run': True,
+                'skipped': 'seek_dry_run',
+                'backend': 'none',
+                'path': 'dry_run',
+            }
         # Body-frame (camera-forward +linear) before hardware mapping
         body_lin = _clamp(float(args.get('linear_x', 0.0)), -max_lin, max_lin)
         body_ang = _clamp(float(args.get('angular_z', 0.0)), -max_ang, max_ang)
@@ -3512,6 +3539,7 @@ from ai_seek import (
     DEFAULT_SEEK_MAX_STEPS,
     DEFAULT_SEEK_TIMEOUT_S,
     DEFAULT_SEEK_CONF,
+    DEFAULT_SEEK_DRY_RUN,
     DEFAULT_SEEK_STEP_PAUSE_S,
     normalize_seek_max_steps,
     normalize_seek_timeout_s,
@@ -3535,6 +3563,11 @@ from seek_nav import (  # noqa: E402
     SEEK_NAV_TOOL as _SEEK_NAV_TOOL,
     SEEK_NAV_TOOL_NAME as _SEEK_NAV_TOOL_NAME,
     seek_action_from_schema as _seek_action_from_schema,
+    set_seek_dry_run as _set_seek_dry_run,
+    seek_dry_run_active as _seek_dry_run_active,
+    seek_chassis_allowed as _seek_chassis_allowed,
+    seek_drive_log_verb as _seek_drive_log_verb,
+    seek_sweep_scorecard as _seek_sweep_scorecard,
 )
 
 _SEEK_JUDGE_SYSTEM = (
@@ -3618,7 +3651,10 @@ _SEEK_TURN_SPEED_SCALE = 1.0
 
 
 def _seek_side_openness(views):
-    """Score LEFT vs RIGHT near-field openness (higher = more free space / less structure).
+    """Score cruise LEFT vs RIGHT panels.
+
+    Those panels are camera ±135° (rear-left / rear-right), not port/starboard.
+    Use them for reverse-quarter clearance, not as hallway walls.
 
     Returns dict: {left: float, right: float, prefer: 'left'|'right', scores_ok: bool}
     """
@@ -4470,8 +4506,8 @@ _SEEK_VIEW_PANS = (
     ('right', _SEEK_VIEW_PAN_DEG),
 )
 # Wait for HW pan feedback after each aim (not a blind sleep-only “settle”)
-_SEEK_PAN_TOL_DEG = 14.0       # larger swings to ±135°
-_SEEK_PAN_WAIT_MAX_S = 4.0     # allow time for full left/right pan
+_SEEK_PAN_TOL_DEG = 22.0       # HW often undershoots ±135°; 14° was too tight
+_SEEK_PAN_WAIT_MAX_S = 2.5     # then shutter anyway — 4s waits ate the sweep
 _SEEK_PAN_POLL_S = 0.08
 _SEEK_PAN_POST_ARRIVE_S = 0.12  # brief damp after arrival before shutter
 _SEEK_PAN_FALLBACK_SLEEP_S = 0.55  # if no HW pan feedback at all
@@ -4848,11 +4884,25 @@ def _seek_look_deg(pan_deg, tilt_deg=None, settle_s=None, wait_hw=True, should_s
     return look, res, arrival
 
 
-def _seek_grab_jpeg():
-    try:
-        return _grab_jpeg_bytes(max_width=480, quality=65)
-    except Exception:
-        return None
+def _seek_grab_jpeg(retries=3):
+    """Grab a real camera JPEG. Retry — first frames after a pan are often empty."""
+    last_err = None
+    for _i in range(max(1, int(retries))):
+        try:
+            jpeg = _grab_jpeg_bytes(max_width=640, quality=72)
+            if jpeg and len(jpeg) >= 800:
+                return jpeg
+            last_err = 'short_jpeg'
+        except Exception as e:
+            last_err = e
+        time.sleep(0.08)
+    if last_err:
+        olog.warn(
+            'ai_seek',
+            f'sweep grab failed after {retries} tries: {last_err}',
+            error=str(last_err)[:160],
+        )
+    return None
 
 
 def _seek_capture_triple_views(ctrl, step, steps_label, goal_label=None, conf_threshold=DEFAULT_SEEK_CONF, referee=REFEREE_DETECTOR):
@@ -4912,6 +4962,13 @@ def _seek_capture_triple_views(ctrl, step, steps_label, goal_label=None, conf_th
         except Exception:
             pass
         jpeg = _seek_grab_jpeg()
+        if not jpeg:
+            try:
+                time.sleep(0.15)
+                _seek_look_deg(pan_deg, wait_hw=True, should_stop=ctrl.should_stop)
+            except Exception:
+                pass
+            jpeg = _seek_grab_jpeg()
         data_url = None
         has_target = False
         det_labels = []
@@ -5006,6 +5063,12 @@ def _seek_capture_triple_views(ctrl, step, steps_label, goal_label=None, conf_th
         _seek_look_deg(0.0, wait_hw=True, should_stop=ctrl.should_stop)
     except Exception:
         pass
+    try:
+        card = _seek_sweep_scorecard(views)
+        ctrl.update(last_sweep=card)
+        ctrl.append_log('sweep', card.get('summary') or 'sweep', step=step)
+    except Exception:
+        pass
     return views, found_check
 
 
@@ -5024,10 +5087,8 @@ def _seek_should_inspect_floor(views, last_action=None, *, step=None, last_lookd
     cor = _seek_centre_corridor_hint(views)
     if cor.get('blocked') is True:
         return True
-    sides = _seek_side_openness(views)
-    lo, ro = sides.get('left'), sides.get('right')
-    if lo is not None and ro is not None and lo < 0.40 and ro < 0.40:
-        return True
+    # Do not treat cruise LEFT/RIGHT (±135°) as door jambs. Those panels are
+    # rear quarters (reverse clearance). A sofa behind you is not a chute.
     return False
 
 
@@ -5864,17 +5925,21 @@ def _seek_unified_llm_analysis(
                 messages,
                 max_tokens=1024,
                 temperature=0.0,
-                timeout=20,
+                timeout=8,
                 tools=[_SEEK_NAV_TOOL],
                 tool_choice={'type': 'function', 'function': {'name': _SEEK_NAV_TOOL_NAME}},
             )
         except Exception as e:
-            olog.warn('ai_seek', f'seek_nav tool_choice=required failed, retry auto: {e}')
+            # Timeouts used to retry another 20s and freeze the sweep. Fail fast.
+            err = str(e).lower()
+            olog.warn('ai_seek', f'seek_nav tool_choice=required failed: {e}')
+            if 'timed out' in err or 'timeout' in err:
+                raise
             msg, _body, _cfg = _openai_chat(
                 messages,
                 max_tokens=1024,
                 temperature=0.0,
-                timeout=20,
+                timeout=8,
                 tools=[_SEEK_NAV_TOOL],
                 tool_choice='auto',
             )
@@ -5889,7 +5954,7 @@ def _seek_unified_llm_analysis(
                 messages,
                 max_tokens=2048,
                 temperature=0.0,
-                timeout=25,
+                timeout=10,
                 tools=[_SEEK_NAV_TOOL],
                 tool_choice='auto',
             )
@@ -6257,6 +6322,25 @@ def _seek_fast_tank_turn(direction, duration_ms, should_stop=None):
     Matches Raw-mode left/right at Fast. Soft T:13 arcs (angular≈0.4–0.7) do
     not yaw this rover — live 2026-08-13: 350ms nudge, 700ms room turn, 1100ms large.
     """
+    if not _seek_chassis_allowed():
+        if direction in ('left', 'turn_left'):
+            side = 'left'
+        else:
+            side = 'right'
+        dur = max(200, int(duration_ms or 600))
+        olog.info(
+            'ai_seek',
+            f'Seek dry-run: skip Fast tank {side} {dur}ms',
+            side=side, duration_ms=dur, dry_run=True,
+        )
+        return {
+            'ok': True,
+            'dry_run': True,
+            'skipped': 'seek_dry_run',
+            'side': side,
+            'duration_ms': dur,
+            'path': 'dry_run',
+        }
     args_cfg = f.get('args_config') or {}
     max_speed = float(args_cfg.get('max_speed', 1.3) or 1.3)
     max_rate = float(args_cfg.get('max_rate', 1.0) or 1.0)
@@ -6374,10 +6458,12 @@ def _seek_execute_nav_action(action, drive_distance='medium', should_stop=None, 
     - forward/backward: punchy timed hop (cable runner needs ~0.26, not 0.12)
 
     Camera: forward+turns look 0°; reverse looks ±135° (rear).
+    Dry-run: still aims the camera, never sends T:1 / T:13.
     """
     plan = _seek_nav_plan(action, drive_distance)
     action = plan['action']
     dist = plan['drive_distance']
+    dry = _seek_dry_run_active()
     aim = _seek_aim_for_motion(action, open_side=open_side, should_stop=should_stop)
     last_res = None
     last_args = {}
@@ -6418,7 +6504,8 @@ def _seek_execute_nav_action(action, drive_distance='medium', should_stop=None, 
             'drive_distance': dist,
         }
         last_res = _execute_agent_tool('send_motor_command', last_args)
-        time.sleep(float(dur) / 1000.0 + 0.3)
+        if not dry:
+            time.sleep(float(dur) / 1000.0 + 0.3)
         # After reverse, return camera to front for the next step
         try:
             _seek_look_deg(0.0, wait_hw=True, should_stop=should_stop)
@@ -6436,7 +6523,8 @@ def _seek_execute_nav_action(action, drive_distance='medium', should_stop=None, 
             'drive_distance': dist,
         }
         last_res = _execute_agent_tool('send_motor_command', last_args)
-        time.sleep(float(dur) / 1000.0 + 0.3)
+        if not dry:
+            time.sleep(float(dur) / 1000.0 + 0.3)
 
     return {
         'name': 'send_motor_command' if action in ('forward', 'backward') else 'seek_fast_tank_turn',
@@ -6451,6 +6539,7 @@ def _seek_execute_nav_action(action, drive_distance='medium', should_stop=None, 
         'turn_deg': plan['turn_deg'],
         'speed_ctrl': 'fast' if action in ('turn_left', 'turn_right') else 'normal',
         'cam_look': cam_look,
+        'dry_run': dry,
     }
 
 
@@ -6472,6 +6561,8 @@ def _seek_loop(ctrl, label, conf, max_steps, timeout_s):
     last_drive_action = None  # for recovery: after reverse, turn to open
     last_drive_distance = None
     last_lookdown_step = None
+    dry = bool((st_dict or {}).get('dry_run', True))
+    _set_seek_dry_run(dry)
     try:
         _seek_reset_escape_cycle()
     except Exception:
@@ -6622,6 +6713,10 @@ def _seek_loop(ctrl, label, conf, max_steps, timeout_s):
                     straight_jpeg = straight_v.get('jpeg') if straight_v else None
 
                     ctrl.append_log('nav', f'Step {step}: consulting LLM for scene navigation…', step=step)
+                    ctrl.update(
+                        seek_phase='nav_decide',
+                        message=f'Step {step}/{steps_label}: asking LLM (8s, then heuristic)…',
+                    )
                     _seek_oled_set(
                         goal=label, referee=referee, phase='nav_decide', step=step,
                         activity='LLM think', detail='scene nav',
@@ -6726,14 +6821,15 @@ def _seek_loop(ctrl, label, conf, max_steps, timeout_s):
                         'goal_found': bool(analysis.get('goal_found')),
                         'safety_override': plan.get('safety_override'),
                         'vision_blocked_hint': analysis.get('vision_blocked_hint'),
-                        'source': 'llm',
+                        'source': analysis.get('source') or ('llm' if llm_said else 'heuristic'),
                     }
                     clear_s = 'clear' if analysis.get('path_forward_clear') else 'blocked'
                     stuck_s = ' · STUCK' if analysis.get('is_identical_to_previous') else ''
                     safe_s = ' · SAFETY' if plan.get('safety_override') else ''
+                    src_s = 'LLM' if llm_said else 'heuristic'
                     ctrl.append_log(
                         'nav',
-                        f'Step {step} LLM nav → {plan["summary"]} · obstacle={obs_r}'
+                        f'Step {step} {src_s} nav → {plan["summary"]} · obstacle={obs_r}'
                         f' · open={open_side} · path {clear_s}{stuck_s}{safe_s}'
                         f' — {reason or "(no reason)"}',
                         step=step, action=action, dist=dist,
@@ -6933,7 +7029,7 @@ def _seek_loop(ctrl, label, conf, max_steps, timeout_s):
                 _drive_obs = drive_plan.get('obstacle_range') or ''
             ctrl.append_log(
                 'drive',
-                f'Step {step}: driving {drive_plan["summary"]}'
+                f'Step {step}: {_seek_drive_log_verb()} {drive_plan["summary"]}'
                 + (f' — {reason[:100]}' if reason else ''),
                 step=step, action=action, dist=dist,
             )
@@ -6961,7 +7057,10 @@ def _seek_loop(ctrl, label, conf, max_steps, timeout_s):
                 prev_nav.setdefault('reason', reason)
             ctrl.update(
                 seek_phase='drive',
-                message=f'Step {step}/{steps_label}: driving {drive_plan["summary"]}…',
+                message=(
+                    f'Step {step}/{steps_label}: {_seek_drive_log_verb()} '
+                    f'{drive_plan["summary"]}…'
+                ),
                 last_nav=prev_nav,
             )
             # open_side for reverse camera aim (±135° rear); front for FWD/turns
@@ -7064,6 +7163,8 @@ def _seek_loop(ctrl, label, conf, max_steps, timeout_s):
         except Exception:
             pass
         ctrl.finish('failed', message=str(e)[:300], error=str(e)[:300])
+    finally:
+        _set_seek_dry_run(False)
 
 
 @app.route('/api/ai/seek/labels', methods=['GET'])
@@ -7106,10 +7207,27 @@ def _seek_battery_block_reason():
     )
 
 
+def _parse_bool_flag(raw, default=False):
+    if raw is None:
+        return bool(default)
+    if isinstance(raw, bool):
+        return raw
+    s = str(raw).strip().lower()
+    if s in ('1', 'true', 'yes', 'on'):
+        return True
+    if s in ('0', 'false', 'no', 'off'):
+        return False
+    return bool(default)
+
+
 @app.route('/api/ai/seek/start', methods=['POST'])
 def api_ai_seek_start():
     data = request.get_json(silent=True) or {}
-    batt_block = _seek_battery_block_reason()
+    dry_run = _parse_bool_flag(
+        data.get('dry_run') if 'dry_run' in data else None,
+        default=DEFAULT_SEEK_DRY_RUN,
+    )
+    batt_block = None if dry_run else _seek_battery_block_reason()
     if batt_block:
         volts = _read_battery_voltage_v()
         olog.warn('ai_seek', batt_block, voltage_v=volts, threshold=_BATTERY_LOW_V)
@@ -7153,13 +7271,15 @@ def api_ai_seek_start():
         on_found_tts=on_found_tts,
         llm_scene_nav=llm_scene_nav,
         llm_nav_interval=llm_nav_interval,
+        dry_run=dry_run,
     )
     code = 200 if result.get('success') else 400
     if result.get('success'):
         olog.info(
             'ai_seek',
-            f'Seek started ({referee}) for {result.get("status", {}).get("goal_label")} on_found={on_found}',
-            goal=goal, referee=referee, on_found=on_found,
+            f'Seek started ({referee}) for {result.get("status", {}).get("goal_label")} '
+            f'on_found={on_found} dry_run={dry_run}',
+            goal=goal, referee=referee, on_found=on_found, dry_run=dry_run,
         )
     return jsonify(result), code
 
@@ -7931,6 +8051,26 @@ def _route_json_command(cmd):
         f.get('cmd_config', {}).get('cmd_gimbal_base_ctrl'),
     }
     chassis_types = {1, 13, '1', '13', f.get('cmd_config', {}).get('cmd_movition_ctrl')}
+
+    # Dry-run Seek: refuse non-zero chassis (sticks + leftover heartbeats).
+    # Zeros / emergency STOP still go through.
+    if (
+        t in chassis_types
+        and not force_stop
+        and not _chassis_cmd_is_zero(cmd)
+        and not _seek_chassis_allowed()
+    ):
+        olog.info(
+            'ai_seek',
+            'Seek dry-run: dropped chassis cmd',
+            T=t, dry_run=True,
+        )
+        return {
+            'path': 'dry_run',
+            'ok': True,
+            'reason': 'seek_dry_run',
+            'dry_run': True,
+        }
 
     # UI 2s idle heartbeat sends T:1 L=0 R=0; do not clobber an in-flight AI drive.
     # Emergency STOP sets force_stop so zeros always land and clear motion.

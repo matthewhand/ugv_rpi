@@ -51,6 +51,8 @@ VALID_REFEREES = frozenset({REFEREE_DETECTOR, REFEREE_LLM})
 
 # Finite pilot defaults (0 still means unlimited when explicitly requested)
 DEFAULT_SEEK_MAX_STEPS = 30
+# Wheels stay still unless the operator explicitly turns dry-run off.
+DEFAULT_SEEK_DRY_RUN = True
 DEFAULT_SEEK_TIMEOUT_S = 300.0  # 5 minutes
 DEFAULT_SEEK_CONF = 0.22
 DEFAULT_SEEK_STEP_PAUSE_S = 0.35
@@ -380,7 +382,9 @@ class SeekController:
             'on_found_error': None,
             'llm_scene_nav': DEFAULT_LLM_SCENE_NAV,
             'llm_nav_interval': DEFAULT_LLM_NAV_INTERVAL,
+            'dry_run': DEFAULT_SEEK_DRY_RUN,
             'last_views': [],
+            'last_sweep': None,
             'panorama_data_url': None,
             # Single SoT for live pan overlay (written only by app._seek_publish_cam_aim)
             'cam_aim': None,
@@ -462,6 +466,7 @@ class SeekController:
         on_found_tts: str = DEFAULT_ON_FOUND_TTS,
         llm_scene_nav: bool = DEFAULT_LLM_SCENE_NAV,
         llm_nav_interval: int = DEFAULT_LLM_NAV_INTERVAL,
+        dry_run: bool = DEFAULT_SEEK_DRY_RUN,
     ) -> Dict[str, Any]:
         """Start seek. loop_fn(controller, goal_key, conf, max_steps, timeout_s) runs in a thread."""
         referee = parse_seek_referee(referee)
@@ -503,8 +508,13 @@ class SeekController:
                 'on_found_done': False,
                 'llm_scene_nav': bool(llm_scene_nav),
                 'llm_nav_interval': interval_val,
+                'dry_run': bool(dry_run),
                 'started_at': time.time(),
-                'message': f'Seeking {label} ({referee})…',
+                'message': (
+                    f'Seeking {label} ({referee})'
+                    + (' · DRY-RUN no drive' if dry_run else ' · LIVE DRIVE')
+                    + '…'
+                ),
                 'event_log': [],
                 'log_seq': 0,
             })
@@ -512,7 +522,8 @@ class SeekController:
         self.append_log(
             'start',
             f'Seek started · goal={label} · referee={referee} · on_found={on_found}'
-            f' · scene_nav={bool(llm_scene_nav)} · nav_interval={interval_val}',
+            f' · scene_nav={bool(llm_scene_nav)} · nav_interval={interval_val}'
+            f' · {"DRY-RUN no drive" if dry_run else "LIVE DRIVE"}',
             goal=label, referee=referee, on_found=on_found,
         )
         t = threading.Thread(

@@ -42,6 +42,7 @@ Navbar **STOP** zeros wheels, cancels Seek **and** Track, and clears the AI moti
 - **Heuristic-only overrides:** doorway-commit (one more hop after a chute) and turn-away-from-wall run when the planner is **heuristic**. An LLM hop/turn is **not** rewritten by those helpers — we trust the schema when we get one.
 - **Battery gate:** refuse start / halt if pack V is known and ≤ `UGV_BATTERY_LOW_V` (default **9.5**). Missing or ADC-looking `v` does **not** block. Override: `UGV_SEEK_BATTERY_GATE=0`.
 - **Limits:** default 30 steps / 300 s (0 = unlimited). Config locks while running.
+- **Dry run (default ON):** PTZ still sweeps; **wheels never move**. Logs say `WOULD drive`. Battery gate is skipped. Uncheck and confirm only for a live test. Process latch also drops T:1 / T:13 sticks while a dry-run Seek is running.
 - **Obstacles** are vision heuristics (Canny / texture / bright walls) — **not lidar**. Exploration is a heading trail, not a map.
 
 ### PTZ HUD

@@ -27,6 +27,7 @@ from ai_seek import (  # noqa: E402
     motion_lock_should_ignore_zero,
     DEFAULT_SEEK_MAX_STEPS,
     DEFAULT_SEEK_TIMEOUT_S,
+    DEFAULT_SEEK_DRY_RUN,
     SEEK_MAX_STEPS_CAP,
     SEEK_TIMEOUT_S_MIN,
     SEEK_TIMEOUT_S_CAP,
@@ -254,6 +255,20 @@ class TestSeekLimitDefaults(unittest.TestCase):
     def test_defaults_are_finite_and_nonzero(self):
         self.assertGreater(DEFAULT_SEEK_MAX_STEPS, 0)
         self.assertGreater(DEFAULT_SEEK_TIMEOUT_S, 0)
+        self.assertTrue(DEFAULT_SEEK_DRY_RUN)
+
+    def test_start_defaults_to_dry_run(self):
+        ctrl = SeekController()
+
+        def loop(c, label, conf, max_steps, timeout_s):
+            c.finish('timeout', message='done', step=0)
+
+        r = ctrl.start('person', loop_fn=loop, max_steps=1, timeout_s=5)
+        self.assertTrue(r['success'])
+        self.assertTrue((r.get('status') or {}).get('dry_run'))
+        deadline = time.time() + 2.0
+        while time.time() < deadline and ctrl.is_running():
+            time.sleep(0.02)
 
     def test_missing_uses_finite_default(self):
         self.assertEqual(normalize_seek_max_steps(None), DEFAULT_SEEK_MAX_STEPS)

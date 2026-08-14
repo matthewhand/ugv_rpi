@@ -604,6 +604,11 @@
                       <input type="number" id="seek-timeout-s" value="300" min="0" max="7200" style="width:5em;margin-left:4px;" />
                     </label>
                   </div>
+                  <label class="ugv-seek-scenenav-label" id="seek-dry-run-wrap"
+                    title="Default ON. Camera still sweeps. Wheels never move. Uncheck only for a live drive test.">
+                    <input type="checkbox" id="seek-dry-run" checked />
+                    <span>Dry run (no drive)</span>
+                  </label>
                 </div>
                 <div class="ugv-row-actions ugv-seek-actions" id="seek-actions-bar">
                   <button type="button" id="seek-start-btn">Seek</button>

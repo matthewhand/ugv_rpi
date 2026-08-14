@@ -510,6 +510,7 @@
   // ---------- Seek panel ----------
   var seekPollTimer = null;
   var SEEK_REFEREE_KEY = 'ugv_seek_referee';
+  var SEEK_DRY_KEY = 'ugv_seek_dry_run';
   var lastSeekCheckSeq = 0;
   var lastSeekStep = -1;
   var lastSeekLogSeq = 0;
@@ -559,6 +560,7 @@
       'seek-llm-nav-interval',
       'seek-max-steps',
       'seek-timeout-s',
+      'seek-dry-run',
     ];
     lockIds.forEach(function (id) {
       var el = $(id);
@@ -1437,6 +1439,19 @@
     if (isNaN(llmNavInterval) || llmNavInterval < 1) llmNavInterval = 10;
     var maxSteps = getSeekMaxSteps();
     var timeoutS = getSeekTimeoutS();
+    var dryRun = true;
+    var dryEl = $('seek-dry-run');
+    if (dryEl) dryRun = !!dryEl.checked;
+    if (!dryRun) {
+      var okLive = window.confirm(
+        'Dry run is OFF. Seek will drive the chassis.\n\n'
+        + 'Cancel unless you meant a live test.'
+      );
+      if (!okLive) {
+        seekLog('Start cancelled — dry run left off, live drive not confirmed', 'warn');
+        return;
+      }
+    }
     lastSeekCheckSeq = 0;
     lastSeekStep = -1;
     lastSeekLogSeq = 0;
@@ -1451,6 +1466,7 @@
         ' · scene nav: ' + (llmSceneNav ? 'every ' + llmNavInterval + ' steps' : 'disabled') +
         ' · limits: ' + (maxSteps === 0 ? '∞ steps' : maxSteps + ' steps') +
         ' / ' + (timeoutS === 0 ? 'no timeout' : timeoutS + 's') +
+        ' · ' + (dryRun ? 'DRY-RUN no drive' : 'LIVE DRIVE') +
         ' · upon found: ' +
         (onFound === 'tts' ? 'TTS “' + onFoundTts + '”' : 'do nothing'),
       'start'
@@ -1474,6 +1490,7 @@
         on_found_tts: onFoundTts,
         llm_scene_nav: llmSceneNav,
         llm_nav_interval: llmNavInterval,
+        dry_run: dryRun,
       }),
     })
       .then(function (r) {
@@ -1618,6 +1635,18 @@
       if (saved === 'detector' && $('seek-mode-detector')) $('seek-mode-detector').checked = true;
       if (saved === 'detector_llm_nav' && $('seek-mode-detector-llm')) $('seek-mode-detector-llm').checked = true;
       if (saved === 'llm_vision' && $('seek-mode-llm-vision')) $('seek-mode-llm-vision').checked = true;
+    } catch (e) {}
+    try {
+      var drySaved = localStorage.getItem(SEEK_DRY_KEY);
+      var dryEl = $('seek-dry-run');
+      if (dryEl) {
+        dryEl.checked = drySaved !== '0';
+        dryEl.addEventListener('change', function () {
+          try {
+            localStorage.setItem(SEEK_DRY_KEY, dryEl.checked ? '1' : '0');
+          } catch (e2) {}
+        });
+      }
     } catch (e) {}
     syncSeekRefereeUI();
 

@@ -5,6 +5,7 @@ Extracted so unit tests can prove safety overrides without booting app.py.
 from __future__ import annotations
 
 import re
+import threading
 from typing import Any, Dict, Optional
 
 # Chassis-calibrated 2026-08-13 (this Waveshare rover, carpet + floor cable runner).
@@ -611,3 +612,82 @@ def seek_battery_block_reason(
             'Charge or set UGV_SEEK_BATTERY_GATE=0 to override.'
         )
     return None
+
+
+# --- Dry-run (no chassis). Process-wide latch so every motor path can refuse. ---
+_DRY_RUN_LOCK = threading.Lock()
+_dry_run_active = False
+SEEK_SWEEP_MIN_JPEG_BYTES = 800
+
+
+def set_seek_dry_run(active: bool) -> bool:
+    """Latch Seek dry-run. True = chassis commands must no-op."""
+    global _dry_run_active
+    with _DRY_RUN_LOCK:
+        _dry_run_active = bool(active)
+        return _dry_run_active
+
+
+def seek_dry_run_active() -> bool:
+    with _DRY_RUN_LOCK:
+        return bool(_dry_run_active)
+
+
+def seek_chassis_allowed(*, dry_run=None) -> bool:
+    """False when Seek dry-run is on (explicit flag or process latch)."""
+    if dry_run is None:
+        dry_run = seek_dry_run_active()
+    return not bool(dry_run)
+
+
+def seek_drive_log_verb(dry_run=None) -> str:
+    if dry_run is None:
+        dry_run = seek_dry_run_active()
+    return 'WOULD drive' if dry_run else 'driving'
+
+
+def seek_sweep_scorecard(views, *, min_bytes: int = SEEK_SWEEP_MIN_JPEG_BYTES) -> Dict[str, Any]:
+    """Per-view sweep QA: bytes, settle, labels. No OpenCV.
+
+    A view is ok when it has a real JPEG (not a missing-camera tile).
+    """
+    cards = []
+    missing = 0
+    for v in views or []:
+        if not isinstance(v, dict):
+            continue
+        jpeg = v.get('jpeg') or b''
+        try:
+            nbytes = int(v.get('bytes') or (len(jpeg) if jpeg else 0))
+        except (TypeError, ValueError):
+            nbytes = len(jpeg) if jpeg else 0
+        ok = nbytes >= int(min_bytes)
+        if not ok:
+            missing += 1
+        labels = v.get('detected_labels') or []
+        if not isinstance(labels, list):
+            labels = [str(labels)]
+        cards.append({
+            'name': v.get('name'),
+            'pan_deg': v.get('pan_deg'),
+            'bytes': nbytes,
+            'settled': bool(v.get('pan_settled')),
+            'labels': [str(x) for x in labels[:8]],
+            'ok': ok,
+            'wait_reason': v.get('pan_wait_reason'),
+        })
+    n = len(cards)
+    all_ok = missing == 0 and n >= 3
+    names = ', '.join(
+        f"{c.get('name') or '?'}={'ok' if c.get('ok') else 'MISS'} {c.get('bytes') or 0}B"
+        for c in cards
+    ) or 'no views'
+    return {
+        'views': cards,
+        'n': n,
+        'missing': missing,
+        'ok': all_ok,
+        'summary': (
+            f'sweep {"OK" if all_ok else "WEAK"} {n} views, {missing} missing — {names}'
+        ),
+    }
