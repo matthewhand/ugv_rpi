@@ -2814,18 +2814,14 @@ def _execute_agent_tool(name, arguments):
     return {'ok': False, 'error': f'unmapped tool: {name}'}
 
 
-_seek_drive_tls = threading.local()
-
-
 def _seek_drive_scope(active=True):
     """Mark this thread as the Seek executor so Chat/UI cannot sneak a hop."""
-    prev = bool(getattr(_seek_drive_tls, 'ok', False))
-    _seek_drive_tls.ok = bool(active)
-    return prev
+    return _seek_nav_drive_scope(active)
 
 
 def _seek_thread_may_drive() -> bool:
-    return bool(getattr(_seek_drive_tls, 'ok', False))
+    from seek_nav import seek_thread_may_drive as _may
+    return _may()
 
 
 def _autonomy_owns_chassis() -> bool:
@@ -3614,7 +3610,17 @@ from seek_nav import (  # noqa: E402
     seek_live_start_error as _seek_live_start_error,
     seek_views_are_rear_cruise as _seek_views_are_rear_cruise,
     seek_found_confident as _seek_found_confident,
+    begin_seek_dry_run as _begin_seek_dry_run,
+    end_seek_dry_run as _end_seek_dry_run,
+    seek_drive_scope as _seek_nav_drive_scope,
+    register_autonomy_running as _register_autonomy_running,
 )
+
+try:
+    _register_autonomy_running(seek_controller.is_running)
+    _register_autonomy_running(track_controller.is_running)
+except Exception:
+    pass
 
 _SEEK_JUDGE_SYSTEM = (
     "You are a visual goal referee for a robot camera. "
@@ -6377,6 +6383,11 @@ def _seek_fast_tank_turn(direction, duration_ms, should_stop=None):
     Matches Raw-mode left/right at Fast. Soft T:13 arcs (angular≈0.4–0.7) do
     not yaw this rover — live 2026-08-13: 350ms nudge, 700ms room turn, 1100ms large.
     """
+    if should_stop and should_stop():
+        return {
+            'ok': False, 'skipped': 'stop_requested',
+            'path': 't1_fast',
+        }
     if not _seek_chassis_allowed():
         if direction in ('left', 'turn_left'):
             side = 'left'
@@ -6520,6 +6531,16 @@ def _seek_execute_nav_action(action, drive_distance='medium', should_stop=None, 
     dist = plan['drive_distance']
     dry = _seek_dry_run_active()
     aim = _seek_aim_for_motion(action, open_side=open_side, should_stop=should_stop)
+    if should_stop and should_stop():
+        return {
+            'ok': False,
+            'skipped': 'stop_requested',
+            'action': action,
+            'drive_distance': dist,
+            'summary': plan.get('summary'),
+            'dry_run': dry,
+            'cam_look': (aim or {}).get('label'),
+        }
 
     prev_scope = _seek_drive_scope(True)
     try:
@@ -6627,7 +6648,9 @@ def _seek_loop(ctrl, label, conf, max_steps, timeout_s):
     last_drive_distance = None
     last_lookdown_step = None
     dry = bool((st_dict or {}).get('dry_run', True))
-    _set_seek_dry_run(dry)
+    dry_gen = int((st_dict or {}).get('dry_run_gen') or 0)
+    if dry and not dry_gen:
+        dry_gen = int(_begin_seek_dry_run() or 0)
     try:
         _seek_reset_escape_cycle()
     except Exception:
@@ -7304,7 +7327,10 @@ def _seek_loop(ctrl, label, conf, max_steps, timeout_s):
             pass
         ctrl.finish('failed', message=str(e)[:300], error=str(e)[:300])
     finally:
-        _set_seek_dry_run(False)
+        if dry:
+            _end_seek_dry_run(dry_gen)
+        else:
+            _set_seek_dry_run(False)
 
 
 @app.route('/api/ai/seek/labels', methods=['GET'])
@@ -7739,6 +7765,11 @@ def api_ai_track_status():
 @app.route('/api/ai/track/stop', methods=['POST'])
 def api_ai_track_stop():
     track_controller.stop()
+    # Track is PTZ-only, but line-follow / Chat may still be moving.
+    try:
+        _emergency_stop_motion(source='track_stop', stop_seek=False)
+    except Exception:
+        pass
     return jsonify({'success': True, 'status': track_controller.status()})
 
 

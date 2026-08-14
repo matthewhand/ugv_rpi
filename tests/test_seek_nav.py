@@ -34,6 +34,9 @@ from seek_nav import (  # noqa: E402
     seek_live_start_error,
     seek_views_are_rear_cruise,
     seek_found_confident,
+    begin_seek_dry_run,
+    end_seek_dry_run,
+    chassis_serial_allowed,
 )
 
 
@@ -363,6 +366,25 @@ class TestDryRunAndSweep(unittest.TestCase):
         strong = {'found': True, 'best': {'confidence': 0.70}}
         self.assertTrue(seek_found_confident(strong, view_hits=1)['ok'])
         self.assertFalse(seek_found_confident({'found': False}, view_hits=2)['ok'])
+
+    def test_dry_run_generation_does_not_unlatch_newer(self):
+        g1 = begin_seek_dry_run()
+        g2 = begin_seek_dry_run()
+        self.assertTrue(seek_dry_run_active())
+        self.assertFalse(end_seek_dry_run(g1))
+        self.assertTrue(seek_dry_run_active())
+        self.assertTrue(end_seek_dry_run(g2))
+        self.assertFalse(seek_dry_run_active())
+
+    def test_uart_guard_blocks_nonzero_in_dry_run(self):
+        set_seek_dry_run(True)
+        try:
+            self.assertFalse(chassis_serial_allowed({'T': 1, 'L': 1.0, 'R': -1.0}))
+            self.assertFalse(chassis_serial_allowed({'T': 13, 'X': 0.2, 'Z': 0}))
+            self.assertTrue(chassis_serial_allowed({'T': 1, 'L': 0, 'R': 0}))
+            self.assertTrue(chassis_serial_allowed({'T': 133, 'X': 20, 'Y': 0}))
+        finally:
+            set_seek_dry_run(False)
 
 
 if __name__ == '__main__':

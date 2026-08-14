@@ -617,20 +617,116 @@ def seek_battery_block_reason(
 # --- Dry-run (no chassis). Process-wide latch so every motor path can refuse. ---
 _DRY_RUN_LOCK = threading.Lock()
 _dry_run_active = False
+_dry_run_gen = 0
+_DRIVE_TLS = threading.local()
+_autonomy_hooks = []
 SEEK_SWEEP_MIN_JPEG_BYTES = 800
 
 
-def set_seek_dry_run(active: bool) -> bool:
-    """Latch Seek dry-run. True = chassis commands must no-op."""
-    global _dry_run_active
+def begin_seek_dry_run() -> int:
+    """Turn dry-run on and return a generation token. Only that token can clear it."""
+    global _dry_run_active, _dry_run_gen
     with _DRY_RUN_LOCK:
-        _dry_run_active = bool(active)
-        return _dry_run_active
+        _dry_run_gen += 1
+        _dry_run_active = True
+        return int(_dry_run_gen)
+
+
+def end_seek_dry_run(generation) -> bool:
+    """Clear dry-run only if `generation` is still the current latch."""
+    global _dry_run_active
+    try:
+        gen = int(generation or 0)
+    except (TypeError, ValueError):
+        gen = 0
+    with _DRY_RUN_LOCK:
+        if gen and gen == _dry_run_gen:
+            _dry_run_active = False
+            return True
+        return False
+
+
+def set_seek_dry_run(active: bool) -> bool:
+    """Latch Seek dry-run. True = chassis commands must no-op.
+
+    Tests / simple callers: True starts a new generation; False force-clears.
+    Production Seek uses begin/end with a generation token.
+    """
+    global _dry_run_active
+    if active:
+        begin_seek_dry_run()
+        return True
+    with _DRY_RUN_LOCK:
+        _dry_run_active = False
+        return False
 
 
 def seek_dry_run_active() -> bool:
     with _DRY_RUN_LOCK:
         return bool(_dry_run_active)
+
+
+def seek_drive_scope(active: bool = True) -> bool:
+    """Mark this thread as the Seek executor. Returns previous flag."""
+    prev = bool(getattr(_DRIVE_TLS, 'ok', False))
+    _DRIVE_TLS.ok = bool(active)
+    return prev
+
+
+def seek_thread_may_drive() -> bool:
+    return bool(getattr(_DRIVE_TLS, 'ok', False))
+
+
+def register_autonomy_running(fn) -> None:
+    """fn() -> bool. Seek/Track register so UART can refuse foreign hops."""
+    if callable(fn):
+        _autonomy_hooks.append(fn)
+
+
+def autonomy_owns_chassis() -> bool:
+    for fn in list(_autonomy_hooks):
+        try:
+            if fn():
+                return True
+        except Exception:
+            continue
+    return False
+
+
+def chassis_cmd_is_zero(cmd) -> bool:
+    if not isinstance(cmd, dict):
+        return False
+    try:
+        t = int(cmd.get('T'))
+    except (TypeError, ValueError):
+        return False
+    try:
+        if t == 1:
+            return abs(float(cmd.get('L') or 0)) < 1e-6 and abs(float(cmd.get('R') or 0)) < 1e-6
+        if t == 13:
+            return abs(float(cmd.get('X') or 0)) < 1e-6 and abs(float(cmd.get('Z') or 0)) < 1e-6
+    except (TypeError, ValueError):
+        return False
+    return False
+
+
+def chassis_serial_allowed(cmd) -> bool:
+    """May this T:1/T:13 payload hit the UART? Zeros always yes."""
+    if not isinstance(cmd, dict):
+        return True
+    try:
+        t = int(cmd.get('T'))
+    except (TypeError, ValueError):
+        return True
+    if t not in (1, 13):
+        return True
+    if chassis_cmd_is_zero(cmd):
+        return True
+    if not seek_chassis_allowed():
+        return False
+    if autonomy_owns_chassis() and not seek_thread_may_drive():
+        return False
+    return True
 
 
 def seek_chassis_allowed(*, dry_run=None) -> bool:

@@ -385,6 +385,7 @@ class SeekController:
             'llm_scene_nav': DEFAULT_LLM_SCENE_NAV,
             'llm_nav_interval': DEFAULT_LLM_NAV_INTERVAL,
             'dry_run': DEFAULT_SEEK_DRY_RUN,
+            'dry_run_gen': 0,
             'last_views': [],
             'last_sweep': None,
             'panorama_data_url': None,
@@ -511,6 +512,7 @@ class SeekController:
                 'llm_scene_nav': bool(llm_scene_nav),
                 'llm_nav_interval': interval_val,
                 'dry_run': bool(dry_run),
+                'dry_run_gen': 0,
                 'started_at': time.time(),
                 'message': (
                     f'Seeking {label} ({referee})'
@@ -521,6 +523,15 @@ class SeekController:
                 'log_seq': 0,
             })
             start_ms, start_ts, start_conf = ms, ts, float(conf_threshold)
+        # Latch BEFORE the thread exists so sticks/CLI cannot sneak a hop.
+        if dry_run:
+            try:
+                from seek_nav import begin_seek_dry_run
+                gen = begin_seek_dry_run()
+                with self._lock:
+                    self._state['dry_run_gen'] = int(gen)
+            except Exception:
+                pass
         self.append_log(
             'start',
             f'Seek started · goal={label} · referee={referee} · on_found={on_found}'
