@@ -1,0 +1,128 @@
+# EXAMPLE profile (tracked Beast + RoArm module_type). Not the live machine file.
+# Do not copy this over the rover's config.yaml. Drive signs stay per-machine — measure F/B.
+# beast auto camera_prefer → USB UVC first, multi-index rediscovery (cv_ctrl / loadout.camera_strategy).
+# Selecting roarm2 in the Loadout tab does not start arm drivers on this consolidate build.
+args_config:
+  arm_default_e: 60
+  arm_default_r: 0
+  arm_default_z: 24
+  max_rate: 1.0
+  max_speed: 1.3
+  mid_rate: 0.66
+  min_rate: 0.3
+  slow_speed: 0.2
+audio_config:
+  audio_output: true
+  default_volume: 1.0
+  min_time_bewteen_play: 1
+  speed_rate: 180
+base_config:
+  add_osd: false
+  extra_sensor: false
+  main_type: 3
+  module_type: 1   # 0=None 1=RoArm-M2-S 2=Gimbal (PT) — type only; arm not wired here
+  robot_name: UGV Beast
+  sbc_version: 0.93
+  use_lidar: false
+  # auto on beast → USB UVC first. Override with csi | usb via Loadout / .loadout.json.
+  camera_prefer: auto
+  # Body frame: +linear = camera-forward, +angular = CCW/left turn.
+  # Applied once for T:1 L/R, T:13 X/Z, and ROS cmd_vel (AI + UI + Seek).
+  # EXAMPLE only: +1 is typical Beast wiring. Signs stay per-machine — measure; do not copy blindly.
+  # NOTE: linear sign also flips tank-turn left/right (both tracks negated).
+  # If F/B *and* L/R feel inverted, flip linear only (±1).
+  # Override with env UGV_DRIVE_LINEAR_SIGN / UGV_DRIVE_ANGULAR_SIGN (±1).
+  drive_linear_sign: 1
+  drive_angular_sign: 1
+# Not wired on this consolidate build — do not enable.
+# arm_config:
+#   transport: usb_serial   # CP2102 RoArm ESP32 — not base UART
+#   serial_port: ""         # or ROARM_SERIAL / by-id auto
+#   baud: 115200
+#   ui_aim_default: roarm   # Aim mode: not ported
+#   default_pose: travel_tuck  # boot tuck: not ported
+cmd_config:
+  cmd_arm_ctrl_ui: 144
+  cmd_gimbal_base_ctrl: 141
+  cmd_gimbal_ctrl: 133
+  cmd_gimbal_steady: 137
+  cmd_movition_ctrl: 1
+  cmd_pwm_ctrl: 11
+  cmd_servo_torque: 210
+  cmd_set_servo_id: 501
+  cmd_set_servo_mid: 502
+code:
+  base_ct: 10410
+  base_of: 10407
+  base_on: 10408
+  cv_auto: 10307
+  cv_clor: 10305
+  cv_face: 10303
+  cv_moti: 10302
+  cv_none: 10301
+  cv_objs: 10304
+  head_ct: 10409
+  led_aut: 10405
+  led_off: 10404
+  led_ton: 10406
+  max_res: 10101
+  mc_lock: 10501
+  mc_unlo: 10502
+  mid_res: 10102
+  min_res: 10103
+  mp_face: 10308
+  mp_hand: 10306
+  mp_pose: 10309
+  pic_cap: 10201
+  re_capt: 10402
+  re_none: 10401
+  re_reco: 10403
+  release: 10902
+  s_panid: 10901
+  s_tilid: 10904
+  set_mid: 10903
+  vid_end: 10203
+  vid_sta: 10202
+  zoom_x1: 10104
+  zoom_x2: 10105
+  zoom_x4: 10106
+cv:
+  aimed_error: 8
+  color_lower:
+  - 101
+  - 50
+  - 38
+  color_upper:
+  - 110
+  - 255
+  - 255
+  default_color: blue
+  min_radius: 12
+  sampling_rad: 25
+  track_acc_rate: 0.4
+  track_color_iterate: 0.023
+  track_faces_iterate: 0.045
+  track_spd_rate: 60
+fb:
+  base_light: 115
+  base_voltage: 112
+  cpu_load: 106
+  cpu_temp: 107
+  cv_movtion_mode: 114
+  detect_react: 103
+  detect_type: 101
+  led_mode: 102
+  pan_angle: 109
+  picture_size: 104
+  ram_usage: 108
+  tilt_angle: 110
+  video_fps: 113
+  video_size: 105
+  wifi_rssi: 111
+sbc_config:
+  disabled_http_log: true
+  feedback_interval: 0.001
+video:
+  default_quality: 20
+  default_res_h: 480
+  default_res_w: 640

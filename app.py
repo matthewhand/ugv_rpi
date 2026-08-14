@@ -45,6 +45,17 @@ thisPath = os.path.dirname(curpath)
 with open(thisPath + '/config.yaml', 'r') as yaml_file:
     f = yaml.safe_load(yaml_file)
 
+import loadout as loadout_mod
+_LOADOUT_PATH = os.path.join(thisPath, loadout_mod.LOADOUT_FILENAME)
+_loadout_store = loadout_mod.LoadoutStore(thisPath, _LOADOUT_PATH)
+_loadout_store.load(fallback_from_config=f)
+loadout_mod.apply_loadout_to_config(f, _loadout_store.get())
+# Honor persisted use_lidar without forcing lidar hardware at install time.
+try:
+    base.use_lidar = bool(f['base_config'].get('use_lidar'))
+except Exception:
+    pass
+
 base.base_oled(0, f["base_config"]["robot_name"])
 base.base_oled(1, f"sbc_version: {f['base_config']['sbc_version']}")
 base.base_oled(2, f"{f['base_config']['main_type']}{f['base_config']['module_type']}")
@@ -465,6 +476,7 @@ def api_status():
         'drive_linear_sign': _drive_sign('linear'),
         'drive_angular_sign': _drive_sign('angular'),
         'ptz': _ptz_aim_public(),
+        'loadout': _status_loadout(),
     })
 
 @app.route('/api/toggle_rtsp', methods=['POST'])
@@ -474,6 +486,56 @@ def api_toggle_rtsp():
     olog.info('rtsp_toggle', f'RTSP stream {"ON" if enable_rtsp_stream else "OFF"}',
               enable_rtsp_stream=enable_rtsp_stream)
     return jsonify({'success': True, 'enable_rtsp_stream': enable_rtsp_stream})
+
+
+def _status_loadout():
+    """Compact loadout slice for /api/status (no RoArm start, no yaml write)."""
+    pub = _loadout_store.public(f)
+    return {
+        'loadout': pub.get('loadout'),
+        'effective': pub.get('effective'),
+        'arm_status': pub.get('arm_status'),
+        'arm_message': pub.get('arm_message'),
+        'roarm_started': False,
+    }
+
+
+_LOADOUT_PATCH_KEYS = ('base', 'attachment', 'use_lidar', 'camera_prefer')
+
+
+@app.route('/api/loadout', methods=['GET', 'POST'])
+def api_loadout():
+    """Get or merge chassis/attachment loadout. Profile only — no RoArm, no T:900."""
+    if request.method == 'GET':
+        payload = _loadout_store.public(f)
+        payload['roarm_started'] = False
+        return jsonify(payload)
+    data = request.get_json(silent=True)
+    if data is None:
+        if request.get_data():
+            return jsonify({'ok': False, 'error': 'invalid JSON'}), 400
+        data = {}
+    elif not isinstance(data, dict):
+        return jsonify({'ok': False, 'error': 'invalid JSON'}), 400
+    patch = {k: data[k] for k in _LOADOUT_PATCH_KEYS if k in data}
+    _loadout_store.set(patch)
+    loadout_mod.apply_loadout_to_config(f, _loadout_store.get())
+    base.use_lidar = bool(f['base_config'].get('use_lidar'))
+    payload = _loadout_store.public(f)
+    payload['roarm_started'] = False
+    lo = payload.get('loadout') or {}
+    olog.info(
+        'loadout',
+        f'Loadout → {lo.get("base")}/{lo.get("attachment")} '
+        f'lidar={lo.get("use_lidar")} cam={lo.get("camera_prefer")}',
+        base=lo.get('base'),
+        attachment=lo.get('attachment'),
+        use_lidar=lo.get('use_lidar'),
+        camera_prefer=lo.get('camera_prefer'),
+        roarm_started=False,
+        arm_status=payload.get('arm_status'),
+    )
+    return jsonify(payload)
 
 def _control_mode_payload(mode=None, *, mode_changed=False, prev_mode=None):
     """Shared status + restart guidance after control_mode changes."""

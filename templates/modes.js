@@ -1,5 +1,5 @@
 /**
- * Multi-mode shell: Raw / Chat / Seek + shared navbar persistence.
+ * Multi-mode shell: Raw / Chat / Seek / Track / Loadout + shared navbar persistence.
  */
 (function () {
   'use strict';
@@ -253,6 +253,11 @@
       pauseLiveStream(seek);
       pauseLiveStream(raw);
       resumeLiveStream(track, 'mode-enter');
+    } else if (mode === 'loadout') {
+      pauseLiveStream(chat);
+      pauseLiveStream(seek);
+      pauseLiveStream(track);
+      pauseLiveStream(raw);
     } else {
       pauseLiveStream(chat);
       pauseLiveStream(seek);
@@ -301,7 +306,15 @@
   function setMode(mode, opts) {
     opts = opts || {};
     mode = mode || 'raw';
-    if (mode !== 'raw' && mode !== 'chat' && mode !== 'seek' && mode !== 'track') mode = 'raw';
+    if (
+      mode !== 'raw' &&
+      mode !== 'chat' &&
+      mode !== 'seek' &&
+      mode !== 'track' &&
+      mode !== 'loadout'
+    ) {
+      mode = 'raw';
+    }
     var prev = getActiveMode();
     // Leaving Seek while autonomy is running: confirm (or auto-stop when force).
     if (
@@ -350,6 +363,7 @@
       chat: $('mode-panel-chat'),
       seek: $('mode-panel-seek'),
       track: $('mode-panel-track'),
+      loadout: $('mode-panel-loadout'),
     };
     var tabs = document.querySelectorAll('.ugv-mode-tabs [data-mode]');
     Object.keys(panels).forEach(function (m) {
@@ -369,9 +383,19 @@
       localStorage.setItem(STORAGE_KEY, mode);
     } catch (e) {}
     window.ugvAppMode = mode;
-    // Re-open MJPEG when entering chat/seek (or any mode switch)
-    if (mode === 'chat' || mode === 'seek' || mode === 'track' || mode === 'raw') {
+    // Re-open MJPEG when entering chat/seek (or any mode switch).
+    // Loadout has no live feed — pause every MJPEG consumer.
+    if (
+      mode === 'chat' ||
+      mode === 'seek' ||
+      mode === 'track' ||
+      mode === 'raw' ||
+      mode === 'loadout'
+    ) {
       refreshLiveFeeds();
+    }
+    if (mode === 'loadout') {
+      window.ugvLoadoutRefresh && window.ugvLoadoutRefresh();
     }
     return true;
   }

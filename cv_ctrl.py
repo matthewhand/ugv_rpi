@@ -31,6 +31,20 @@ thisPath = os.path.dirname(curpath)
 with open(thisPath + '/config.yaml', 'r') as yaml_file:
     f = yaml.safe_load(yaml_file)
 
+# Camera order is independent of app.py. Rover/auto → CSI first so a leftover
+# UVC gadget cannot steal Picamera2. Beast / camera_prefer=usb → UVC first.
+try:
+    import loadout as _loadout_mod
+    _lo = _loadout_mod.load_effective(thisPath, f)
+    _cam_first = _loadout_mod.camera_strategy(_lo)
+except Exception:
+    _cam_first = 'csi'
+    try:
+        if int((f.get('base_config') or {}).get('main_type') or 2) == 3:
+            _cam_first = 'usb'
+    except Exception:
+        _cam_first = 'csi'
+
 
 class OpencvFuncs():
     """docstring for OpencvFuncs"""
@@ -155,18 +169,36 @@ class OpencvFuncs():
         self.add_osd = f['base_config']['add_osd']
 
         # camera type detection
-        self.usb_camera_connected = self.usb_camera_detection()
+        self.usb_camera_connected = False
         self.csi_camera_connected = False
         self.oak_camera_connected = False
+        self.usb_camera_index = None
+        self.camera = None
+        print(f"[cv_ctrl] camera first={_cam_first}")
 
-        # usb camera init
-        if self.usb_camera_connected:
-            self.camera = cv2.VideoCapture(0)
-            self.camera.set(cv2.CAP_PROP_FRAME_WIDTH, f['video']['default_res_w'])
-            self.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, f['video']['default_res_h'])
+        # rover / auto: Picamera2 first. usb-first (beast) skips this block.
+        if _cam_first == 'csi':
+            print("init csi camera.")
+            try:
+                self.encoder = H264Encoder(1000000)
+                self.picam2 = Picamera2()
+                self.picam2.configure(self.picam2.create_video_configuration(main={"format": 'XRGB8888', "size": (f['video']['default_res_w'], f['video']['default_res_h'])}))
+                self.picam2.start()
+                self.csi_camera_connected = True
+            except:
+                self.csi_camera_connected = False
 
-        # csi camera init
-        if not self.usb_camera_connected:
+        # usb camera init — index can jump after USB re-enumerate (video0 ↔ video1)
+        if _cam_first == 'usb' or not self.csi_camera_connected:
+            self.usb_camera_connected = self.usb_camera_detection()
+            if self.usb_camera_connected:
+                self.camera = self._open_usb_camera()
+                if self.camera is None:
+                    print("[cv_ctrl] USB Camera listed by lsusb but no V4L2 node opened")
+                    self.usb_camera_connected = False
+
+        # CSI fallback after USB-first miss (rover CSI already tried above)
+        if _cam_first != 'csi' and not self.usb_camera_connected and not self.csi_camera_connected:
             print("init csi camera.")
             try:
                 self.encoder = H264Encoder(1000000)
@@ -204,11 +236,25 @@ class OpencvFuncs():
     def frame_process(self):
         try:
             if self.usb_camera_connected:
-                success, input_frame = self.camera.read()
+                if self.camera is None:
+                    self.camera = self._open_usb_camera()
+                success, input_frame = (False, None)
+                if self.camera is not None:
+                    success, input_frame = self.camera.read()
                 if not success:
-                    self.camera.release()
-                    time.sleep(1)
-                    self.camera = cv2.VideoCapture(0)
+                    # USB cameras on this Beast re-enumerate under vibration;
+                    # rediscover index instead of hardcoding 0.
+                    try:
+                        if self.camera is not None:
+                            self.camera.release()
+                    except Exception:
+                        pass
+                    time.sleep(0.5)
+                    self.camera = self._open_usb_camera()
+                    if self.camera is not None:
+                        success, input_frame = self.camera.read()
+                    if not success:
+                        raise RuntimeError("usb camera read failed after reopen")
             elif self.csi_camera_connected:
                 input_frame = self.picam2.capture_array()
             elif self.oak_camera_connected:
@@ -359,6 +405,44 @@ class OpencvFuncs():
         else:
             print("USB Camera not connected")
             return False
+
+    def _open_usb_camera(self):
+        """Open first working UVC node (index or /dev/videoN).
+
+        After USB disconnect/reconnect the capture node often moves (e.g. video0→video1).
+        """
+        w = f['video']['default_res_w']
+        h = f['video']['default_res_h']
+        # Prefer current index if still good, then 0..4 and common paths
+        candidates = []
+        if self.usb_camera_index is not None:
+            candidates.append(self.usb_camera_index)
+        candidates.extend([0, 1, 2, 3, 4])
+        # de-dupe preserving order
+        seen = set()
+        ordered = []
+        for c in candidates:
+            if c not in seen:
+                seen.add(c)
+                ordered.append(c)
+
+        for idx in ordered:
+            try:
+                cap = cv2.VideoCapture(idx)
+                if not cap.isOpened():
+                    cap.release()
+                    continue
+                cap.set(cv2.CAP_PROP_FRAME_WIDTH, w)
+                cap.set(cv2.CAP_PROP_FRAME_HEIGHT, h)
+                ok, frame = cap.read()
+                if ok and frame is not None:
+                    self.usb_camera_index = idx
+                    print(f"[cv_ctrl] USB camera opened index={idx} shape={frame.shape}")
+                    return cap
+                cap.release()
+            except Exception as e:
+                print(f"[cv_ctrl] open index {idx} failed: {e}")
+        return None
 
 
     def osd_render(self, osd_frame):

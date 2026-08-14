@@ -8,6 +8,7 @@ templates/videos/video*
 .env
 .ai_capabilities.json
 .control_mode.json
+.loadout.json
 .kilo/
 *.log
 hailort.log

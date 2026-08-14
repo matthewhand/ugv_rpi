@@ -7,6 +7,7 @@
     <script src="./js-yaml.min.js"></script>
     <script src="./socket.io.js"></script>
     <link rel="stylesheet" type="text/css" href="./style.css?v=chat-live-1">
+    <link rel="stylesheet" type="text/css" href="./loadout.css?v=loadout-2">
     <style type="text/css">
       .seek-pano-card {
         margin-top: 8px;
@@ -91,6 +92,7 @@
         <button type="button" role="tab" data-mode="chat" id="mode-tab-chat" aria-selected="false">Chat</button>
         <button type="button" role="tab" data-mode="seek" id="mode-tab-seek" aria-selected="false">Seek</button>
         <button type="button" role="tab" data-mode="track" id="mode-tab-track" aria-selected="false" title="Experimental: PTZ hunt, no driving">Track</button>
+        <button type="button" role="tab" data-mode="loadout" id="mode-tab-loadout" aria-selected="false" title="Chassis and attachment software profile">Loadout</button>
       </div>
       <button type="button" id="global-stop-btn" class="ugv-global-stop" onclick="ugvEmergencyStop()"
         title="Emergency STOP: zero wheels, cancel Seek, clear AI motion lock. Available in every mode.">
@@ -681,6 +683,116 @@
       </div>
     </div>
 
+    <div id="mode-panel-loadout" class="mode-panel" role="tabpanel" aria-labelledby="mode-tab-loadout" hidden>
+      <div class="mode-panel-loadout">
+        <div class="loadout-hangar">
+          <header class="loadout-mast">
+            <div class="loadout-mast-mark" aria-hidden="true">
+              <svg viewBox="0 0 40 40">
+                <rect x="1.5" y="1.5" width="37" height="37" fill="none" stroke="currentColor" stroke-width="1"/>
+                <path d="M8 20 H32 M20 8 V32" fill="none" stroke="currentColor" stroke-width="0.8" opacity="0.45"/>
+                <path d="M14 26 L26 20 L14 14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="miter"/>
+              </svg>
+            </div>
+            <div class="loadout-mast-copy">
+              <p class="loadout-kicker">HANGAR BAY · SCHEMATIC</p>
+              <h2>LOADOUT</h2>
+            </div>
+            <p class="loadout-mast-note">Software profile only. Drive signs stay in config.yaml. Selecting RoArm records the type — it does not start the arm.</p>
+          </header>
+
+          <div class="loadout-bay">
+            <aside class="loadout-rail loadout-rail-base" aria-label="Base chassis">
+              <h3>BASE</h3>
+              <button type="button" class="loadout-card" id="loadout-card-rover" data-base="rover" aria-pressed="false">
+                <span class="loadout-card-thumb" id="loadout-thumb-rover"></span>
+                <span class="loadout-card-copy">
+                  <strong>Wheeled rover</strong>
+                  <span>wheels · main_type 2</span>
+                </span>
+              </button>
+              <button type="button" class="loadout-card" id="loadout-card-beast" data-base="beast" aria-pressed="false">
+                <span class="loadout-card-thumb" id="loadout-thumb-beast"></span>
+                <span class="loadout-card-copy">
+                  <strong>Tracked beast</strong>
+                  <span>tracks · main_type 3</span>
+                </span>
+              </button>
+            </aside>
+
+            <section class="loadout-stage-col" aria-label="Composite stage">
+              <div class="loadout-stage-frame">
+                <div class="loadout-stage-hud">
+                  <span class="loadout-stage-hud-kicker">COMPOSITE</span>
+                  <span id="loadout-stage-title">ROVER + PTZ</span>
+                  <span id="loadout-stage-meta">main_type 2 · module_type 2</span>
+                </div>
+                <svg class="loadout-stage" viewBox="0 0 400 260" role="img" aria-labelledby="loadout-stage-title">
+                  <defs>
+                    <pattern id="lo-grid" width="20" height="20" patternUnits="userSpaceOnUse">
+                      <path d="M 20 0 L 0 0 0 20" fill="none" stroke="#5b8cff" stroke-width="0.35" opacity="0.22"/>
+                    </pattern>
+                    <pattern id="lo-hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+                      <line x1="0" y1="0" x2="0" y2="6" stroke="#5b8cff" stroke-width="0.7" opacity="0.35"/>
+                    </pattern>
+                  </defs>
+                  <rect class="lo-stage-bg" x="0" y="0" width="400" height="260"/>
+                  <rect x="10" y="10" width="380" height="240" fill="url(#lo-grid)" stroke="#2a2f3d" stroke-width="0.8"/>
+                  <line x1="200" y1="18" x2="200" y2="242" class="lo-centerline"/>
+                  <line x1="18" y1="150" x2="382" y2="150" class="lo-centerline"/>
+                  <path d="M18 34 V18 H34" class="lo-corner"/>
+                  <path d="M382 34 V18 H366" class="lo-corner"/>
+                  <path d="M18 226 V242 H34" class="lo-corner"/>
+                  <path d="M382 226 V242 H366" class="lo-corner"/>
+                  <g id="loadout-base-layer"></g>
+                  <g id="loadout-attach-layer"></g>
+                </svg>
+                <div id="loadout-arm-banner" class="loadout-arm-banner" hidden>arm offline — not wired on this build yet</div>
+              </div>
+            </section>
+
+            <aside class="loadout-rail loadout-rail-attach" aria-label="Attachments">
+              <h3>ATTACHMENT</h3>
+              <button type="button" class="loadout-card" id="loadout-card-none" data-attachment="none" aria-pressed="false">
+                <span class="loadout-card-thumb" id="loadout-thumb-none"></span>
+                <span class="loadout-card-copy">
+                  <strong>None</strong>
+                  <span>module_type 0</span>
+                </span>
+              </button>
+              <button type="button" class="loadout-card" id="loadout-card-ptz" data-attachment="ptz" aria-pressed="false">
+                <span class="loadout-card-thumb" id="loadout-thumb-ptz"></span>
+                <span class="loadout-card-copy">
+                  <strong>PTZ turret</strong>
+                  <span>module_type 2</span>
+                </span>
+              </button>
+              <button type="button" class="loadout-card" id="loadout-card-roarm2" data-attachment="roarm2" aria-pressed="false">
+                <span class="loadout-card-thumb" id="loadout-thumb-roarm2"></span>
+                <span class="loadout-card-copy">
+                  <strong>RoArm-M2</strong>
+                  <span>module_type 1 · unwired</span>
+                </span>
+              </button>
+            </aside>
+          </div>
+
+          <footer class="loadout-dock">
+            <label class="loadout-lidar" for="loadout-use-lidar">
+              <input type="checkbox" id="loadout-use-lidar" />
+              <span>use_lidar</span>
+            </label>
+            <div class="loadout-signs" title="Read-only from this machine's config.yaml">
+              <span>drive_linear_sign <code id="loadout-lin-sign">—</code></span>
+              <span>drive_angular_sign <code id="loadout-ang-sign">—</code></span>
+            </div>
+            <button type="button" id="loadout-save-btn" class="loadout-save">SAVE</button>
+            <p id="loadout-status" class="loadout-status" role="status">Standby</p>
+          </footer>
+        </div>
+      </div>
+    </div>
+
 
     <!-- Ops log drawer (App log button in navbar) -->
     <style>
@@ -844,7 +956,8 @@
         <div style="background-image: url('./img/grey/delete.svg');"></div>
     </footer>
     <!-- <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.7.0/jquery.min.js"></script> -->
-    <script src="./modes.js?v=chat-live-1"></script>
+    <script src="./modes.js?v=loadout-1"></script>
+    <script src="./loadout.js?v=loadout-1"></script>
     <script src="./control.js?v=ui-iter-10"></script>
     <script src="./main.js"></script>
 </body>
