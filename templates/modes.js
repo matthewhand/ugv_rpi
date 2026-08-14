@@ -618,6 +618,11 @@
       }
     }
 
+    var dryEl = $('seek-dry-run');
+    if (dryEl && (st.phase === 'running' || st.phase === 'found' || st.phase === 'timeout')) {
+      dryEl.checked = st.dry_run !== false && st.dry_run !== 0;
+    }
+
     var onFoundSel = $('seek-on-found');
     if (onFoundSel && st.on_found) {
       onFoundSel.value = st.on_found === 'tts' ? 'tts' : 'none';

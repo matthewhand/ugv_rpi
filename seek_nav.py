@@ -869,3 +869,28 @@ def seek_sweep_scorecard(views, *, min_bytes: int = SEEK_SWEEP_MIN_JPEG_BYTES) -
             f'sweep {"OK" if all_ok else "WEAK"} {n} views, {missing} missing — {names}'
         ),
     }
+
+
+def seek_sweep_actionable(card) -> Dict[str, Any]:
+    """Whether a sweep is good enough to LLM-nav or drive forward.
+
+    Centre missing or 2+ tiles missing → do not drive forward.
+    One wing missing → still may turn, but treat as weak.
+    """
+    card = card if isinstance(card, dict) else {}
+    views = card.get('views') or []
+    missing = int(card.get('missing') or 0)
+    centre = next((v for v in views if isinstance(v, dict) and v.get('name') == 'straight'), None)
+    centre_ok = bool(centre and centre.get('ok'))
+    if missing >= 2 or not centre_ok:
+        return {
+            'ok': False,
+            'drive': False,
+            'reason': (
+                f'centre missing' if not centre_ok
+                else f'{missing} views missing'
+            ),
+        }
+    if missing == 1:
+        return {'ok': False, 'drive': True, 'reason': 'one wing missing'}
+    return {'ok': True, 'drive': True, 'reason': 'sweep ok'}

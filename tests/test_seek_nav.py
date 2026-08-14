@@ -37,6 +37,7 @@ from seek_nav import (  # noqa: E402
     begin_seek_dry_run,
     end_seek_dry_run,
     chassis_serial_allowed,
+    seek_sweep_actionable,
 )
 
 
@@ -339,6 +340,8 @@ class TestDryRunAndSweep(unittest.TestCase):
         self.assertFalse(weak['ok'])
         self.assertEqual(weak['missing'], 2)
         self.assertIn('WEAK', weak['summary'])
+        self.assertTrue(seek_sweep_actionable(ok)['drive'])
+        self.assertFalse(seek_sweep_actionable(weak)['drive'])
 
     def test_live_start_requires_confirm(self):
         self.assertIsNone(seek_live_start_error(dry_run=True, confirm_live=False))

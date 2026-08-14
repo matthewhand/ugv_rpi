@@ -2785,7 +2785,10 @@ def _execute_agent_tool(name, arguments):
                 'detections': enriched,
                 'count': len(enriched),
                 'labels_found': labels,
-                'found_dog': any(l.lower() == 'dog' for l in labels),
+                'found_goal': bool(
+                    filter_label
+                    and any(l.lower() == str(filter_label).lower() for l in labels)
+                ),
             }
             if warning:
                 out['warning'] = warning
@@ -3607,6 +3610,7 @@ from seek_nav import (  # noqa: E402
     seek_chassis_allowed as _seek_chassis_allowed,
     seek_drive_log_verb as _seek_drive_log_verb,
     seek_sweep_scorecard as _seek_sweep_scorecard,
+    seek_sweep_actionable as _seek_sweep_actionable,
     seek_live_start_error as _seek_live_start_error,
     seek_views_are_rear_cruise as _seek_views_are_rear_cruise,
     seek_found_confident as _seek_found_confident,
@@ -5187,6 +5191,15 @@ def _seek_capture_band_views(
             pan_deg, tilt_deg=tilt, wait_hw=True, should_stop=ctrl.should_stop,
         )
         jpeg = _seek_grab_jpeg()
+        if not jpeg:
+            try:
+                time.sleep(0.12)
+                _seek_look_deg(
+                    pan_deg, tilt_deg=tilt, wait_hw=True, should_stop=ctrl.should_stop,
+                )
+            except Exception:
+                pass
+            jpeg = _seek_grab_jpeg()
         data_url = None
         has_target = False
         det_labels = []
@@ -6735,12 +6748,13 @@ def _seek_loop(ctrl, label, conf, max_steps, timeout_s):
                     # blind forward-after-turn).
                     if ca == 'backward':
                         force_replan = True
-                is_calc_step = (
+                need_rescan = (
                     (step == 1)
-                    or ((step - 1) % llm_nav_interval == 0)
                     or (cached_nav is None)
                     or force_replan
                 )
+                need_llm = (step == 1) or ((step - 1) % llm_nav_interval == 0)
+                is_calc_step = need_rescan
                 if is_calc_step:
                     ctrl.update(
                         step=step,
@@ -6790,7 +6804,24 @@ def _seek_loop(ctrl, label, conf, max_steps, timeout_s):
                         )
                         found_v = found_det.get('found_view', 'scan')
                         raw = found_det.get('raw_detections') or found_det.get('labels_found') or []
-                        if verdict.get('ok'):
+                        rear_only = False
+                        try:
+                            fv = next(
+                                (v for v in (views_to_analyze or [])
+                                 if isinstance(v, dict) and v.get('name') == found_v),
+                                None,
+                            )
+                            rear_only = abs(float((fv or {}).get('pan_deg') or 0)) >= 90.0
+                        except (TypeError, ValueError):
+                            rear_only = found_v in ('left', 'right')
+                        if rear_only:
+                            ctrl.append_log(
+                                'detect',
+                                f'Step {step}: “{label}” only on rear {found_v} '
+                                f'— not FOUND (turn toward and re-check)',
+                                step=step, view=found_v,
+                            )
+                        elif verdict.get('ok'):
                             ctrl.append_log(
                                 'found',
                                 f'FOUND “{label}” via detector at step {step} ({found_v} view)'
@@ -6828,23 +6859,41 @@ def _seek_loop(ctrl, label, conf, max_steps, timeout_s):
                     straight_v = next((v for v in views_to_analyze if v.get('name') == 'straight'), None)
                     straight_jpeg = straight_v.get('jpeg') if straight_v else None
 
-                    ctrl.append_log('nav', f'Step {step}: consulting LLM for scene navigation…', step=step)
-                    ctrl.update(
-                        seek_phase='nav_decide',
-                        message=f'Step {step}/{steps_label}: asking LLM (8s, then heuristic)…',
-                    )
-                    _seek_oled_set(
-                        goal=label, referee=referee, phase='nav_decide', step=step,
-                        activity='LLM think', detail='scene nav',
-                        message=f'step {step} LLM', nav_summary='llm',
-                        obstacle='',
-                    )
-                    analysis = _seek_unified_llm_analysis(
-                        views_to_analyze, prev_center_jpeg, label,
-                        last_action=last_drive_action,
-                        lookdown=lookdown_hint,
-                        lookup=lookup_hint,
-                    )
+                    if need_llm:
+                        ctrl.append_log('nav', f'Step {step}: consulting LLM for scene navigation…', step=step)
+                        ctrl.update(
+                            seek_phase='nav_decide',
+                            message=f'Step {step}/{steps_label}: asking LLM (8s, then heuristic)…',
+                        )
+                        _seek_oled_set(
+                            goal=label, referee=referee, phase='nav_decide', step=step,
+                            activity='LLM think', detail='scene nav',
+                            message=f'step {step} LLM', nav_summary='llm',
+                            obstacle='',
+                        )
+                        analysis = _seek_unified_llm_analysis(
+                            views_to_analyze, prev_center_jpeg, label,
+                            last_action=last_drive_action,
+                            lookdown=lookdown_hint,
+                            lookup=lookup_hint,
+                        )
+                    else:
+                        ctrl.append_log(
+                            'nav',
+                            f'Step {step}: rescan after turn — heuristic only '
+                            f'(LLM every {llm_nav_interval} steps)',
+                            step=step,
+                        )
+                        ctrl.update(
+                            seek_phase='nav_decide',
+                            message=f'Step {step}/{steps_label}: heuristic nav (interval)…',
+                        )
+                        analysis = _seek_heuristic_room_nav(
+                            views_to_analyze,
+                            last_action=last_drive_action,
+                            lookdown=lookdown_hint,
+                            reason_prefix='interval — ',
+                        )
                     
                     if (
                         referee == REFEREE_LLM
@@ -7170,6 +7219,20 @@ def _seek_loop(ctrl, label, conf, max_steps, timeout_s):
                 _halt('stopped', 'Stopped by user', step=step)
                 return
 
+            # Weak sweep: never punch forward on a missing centre / 2+ dead tiles.
+            try:
+                card = (ctrl.status() or {}).get('last_sweep') or {}
+                sweep_act = _seek_sweep_actionable(card)
+                if not sweep_act.get('drive') and action == 'forward':
+                    action = prefer_turn if prefer_turn in ('turn_left', 'turn_right') else 'turn_left'
+                    dist = 'short'
+                    reason = (
+                        f'weak sweep ({sweep_act.get("reason")}) — turn {action} instead of forward'
+                        + (f' | {reason}' if reason else '')
+                    )
+                    ctrl.append_log('nav', f'Step {step}: {reason}', step=step)
+            except Exception:
+                pass
             # Drive — always show short|medium|long + physical magnitude
             drive_plan = _seek_nav_plan(action, dist)
             action = drive_plan['action']
@@ -7662,6 +7725,12 @@ def _track_loop(ctrl, label, conf, max_steps, timeout_s):
                         )
                         _track_goto(pan, tilt, should_stop=ctrl.should_stop)
                         jpeg = _seek_grab_jpeg()
+                        if not jpeg:
+                            ctrl.append_log(
+                                'detect',
+                                f'Scan {step} · pan {int(pan)}° tilt {int(tilt)}° · no jpeg — skip',
+                            )
+                            continue
                         chk = seek_goal_check(
                             label, referee=referee, conf_threshold=conf, jpeg=jpeg,
                         )
@@ -7677,7 +7746,13 @@ def _track_loop(ctrl, label, conf, max_steps, timeout_s):
                             f'{referee} saw [{", ".join(str(x) for x in raw) or "none"}]'
                             + (' · LOCK' if chk.get('found') else ''),
                         )
-                        if chk.get('found'):
+                        verdict = _seek_found_confident(
+                            chk,
+                            min_conf=DEFAULT_SEEK_FOUND_CONF,
+                            view_hits=1,
+                            scan_conf=conf,
+                        )
+                        if chk.get('found') and verdict.get('ok'):
                             found = True
                             locked = True
                             lost = 0
@@ -7703,6 +7778,13 @@ def _track_loop(ctrl, label, conf, max_steps, timeout_s):
                 _halt('stopped', 'Stopped by user')
                 return
             jpeg = _seek_grab_jpeg()
+            if not jpeg:
+                lost += 1
+                ctrl.append_log('nav', f'Lock lost ({lost}/4) — no jpeg')
+                if lost >= 4:
+                    locked = False
+                    ctrl.update(locked=False, message=f'Lost {label} — resuming PTZ sweep')
+                continue
             chk = seek_goal_check(label, referee=referee, conf_threshold=conf, jpeg=jpeg)
             ctrl.update(last_detection=chk)
             if chk.get('found'):
@@ -7728,7 +7810,7 @@ def _track_loop(ctrl, label, conf, max_steps, timeout_s):
     except Exception as e:
         olog.error('ai_track', f'Track loop crashed: {e}', error=str(e)[:300])
         try:
-            _execute_agent_tool('stop_motors', {})
+            _track_goto(0.0, 0.0)
         except Exception:
             pass
         ctrl.finish('failed', message=str(e)[:200], step=step)
