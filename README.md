@@ -10,6 +10,8 @@ This is a Raspberry Pi example for the [Waveshare](https://www.waveshare.com/) U
 > **Fork:** [matthewhand/ugv_rpi](https://github.com/matthewhand/ugv_rpi) (also [effectsmachine/ugv_rpi](https://github.com/effectsmachine/ugv_rpi)) — based on [waveshareteam/ugv_rpi](https://github.com/waveshareteam/ugv_rpi).  
 > The stock Waveshare app is still the base. This fork adds **Seek mode**, **ROS 2 control routing**, **ops tooling**, and UI polish. An honest status of that work is below.
 
+**Design authority for this Beast line:** [docs/BEAST_TECHNICAL_DESIGN.md](docs/BEAST_TECHNICAL_DESIGN.md) (TOC, diagrams, transfer plan). Older notes: [docs/CONFIG_PROFILES.md](docs/CONFIG_PROFILES.md), [docs/ROARM.md](docs/ROARM.md). The July merge checklist is historical: [docs/MERGE_PTZ_AND_ROARM_PLAN.md](docs/MERGE_PTZ_AND_ROARM_PLAN.md).
+
 ## Fork modifications — status
 
 ### What we set out to improve

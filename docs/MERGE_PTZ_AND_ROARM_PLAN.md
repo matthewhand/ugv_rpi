@@ -1,3 +1,5 @@
+> **Superseded as the living design.** Read [BEAST_TECHNICAL_DESIGN.md](BEAST_TECHNICAL_DESIGN.md) for the TDD, contracts, and rover transfer order. This file stays as the July 2026 execution log.
+
 # Plan: Merge PTZ-robot updates with Beast RoArm work
 
 **Date:** 2026-07-23  
