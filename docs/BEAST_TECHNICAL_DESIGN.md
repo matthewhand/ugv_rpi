@@ -1,7 +1,8 @@
 # Beast Branch Technical Design
 
 **Document type:** technical detailed design (TDD)  
-**Code line:** `beast/roarm-usb` @ `29250fa` (beast `main`, clean tree)  
+**Code line:** `beast/roarm-usb` @ `13506c6` (beast Pi `main`; published branch)  
+**Skeptic pass:** 2026-08-14, three grok agents on a rover worktree of this SHA. See errata in §§6, 7.3, 15, 21.
 **Machine:** UGV Beast, `ws@10.0.0.27`, hostname `beast`  
 **Split from rover:** `0a1258b` (`fix(seek): treat bright blank walls as blocked; correct drive linear sign`)  
 **Audience:** anyone porting this tree onto rover as a hybrid (profiles + loadout UI, RoArm last)  
@@ -187,13 +188,13 @@ There are **three** ownership questions. They are not the same switch.
 
 | Plane | Question | Beast default | Owners |
 |-------|----------|---------------|--------|
-| Chassis UART | Who writes `ttyAMA0`? | Direct, or ROS 2 when toggled | Flask `base_ctrl` **xor** `ugv_driver_min` |
+| Chassis UART | Who writes `ttyAMA0`? | Code default Direct; persist / `UGV_MOTOR_BYPASS=1` can boot ROS 2 | Flask `base_ctrl` **xor** ROS (`ugv_bringup` or `ugv_driver_min`) |
 | Arm USB | Who writes CP2102? | Flask hybrid | Flask `roarm_ctrl` and/or ROS arm driver |
-| Camera | Which V4L index? | Rediscover 0..4 | `cv_ctrl` only |
+| Camera | Which V4L index? | Rediscover 0..4 | `cv_ctrl` (scripts may also open a camera) |
 
 ```mermaid
 stateDiagram-v2
-  [*] --> Direct: boot default
+  [*] --> Direct: code default (env/persist can override)
   Direct --> ROS2: POST /api/control_mode ros2
   ROS2 --> Direct: POST /api/control_mode direct
   state Direct {
@@ -207,9 +208,11 @@ stateDiagram-v2
   }
 ```
 
+Boot precedence (`app.py`): `UGV_CONTROL_MODE` → else `UGV_MOTOR_BYPASS=1` means ROS 2 → else Direct → then `.control_mode.json` overwrites. `run_dev.sh` sets `UGV_MOTOR_BYPASS=1`, so a stock `./run_dev.sh` is **not** Direct.
+
 ### 6.1 Direct
 
-- `UGV_CONTROL_MODE=direct` (or UI toggle).
+- `UGV_CONTROL_MODE=direct` (aliases `serial` / `raw`) or UI toggle.
 - `base.enable_motor_control = True`.
 - Drive JSON (`T:1`, `T:13`) and lights (`T:132`) go serial from Flask.
 - Arm USB is unchanged.
@@ -217,9 +220,10 @@ stateDiagram-v2
 ### 6.2 ROS 2 chassis
 
 - Flask **releases** `ttyAMA0` so ROS can open it.
-- Motion goes Flask → rosbridge → `/cmd_vel` → `ugv_driver_min` → `{"T":13,"X","Z"}`.
-- PT path (rover/gimbal) can still use `/joint_states` → `T:134` / `T:133`. Beast should not use that as look-around.
-- On toggle, beast can auto-start rosbridge + the slim stack when Docker is allowed.
+- Motion goes Flask → rosbridge → `/cmd_vel` → a chassis driver → `{"T":13,"X","Z"}` (slim driver uses string `"13"`).
+- **UI toggle autostart** starts **rosbridge + `ugv_bringup`** (`UGV_AUTOSTART_*`, default on). It does **not** start `ugv_driver_min`. Slim driver is compose/entrypoint only.
+- Slim `ugv_driver_min` maps `/joint_states` → **T:134 only**. T:133 is Direct serial / stock bringup. Beast should not use either as look-around.
+- `UGV_ALLOW_DOCKER_RESTART` gates `docker restart`, not the first autostart.
 
 ### 6.3 Arm hybrid vs exclusive
 
@@ -227,7 +231,7 @@ stateDiagram-v2
 |----------------|----------------------|--------------|---------|----------------|
 | `direct` | `flask` (default) | Flask | Flask T:102 | optional mirror if rosbridge is up |
 | `ros2` | `flask` (**default hybrid**) | ROS `ugv_driver_min` | Flask T:102 **and** publish `/ugv/roarm/joint_command` | yes |
-| `ros2` | `driver` | ROS | ROS `roarm_driver_min` or host bridge | Flask must not open CP2102 |
+| `ros2` | `driver` | ROS | ROS `roarm_driver_min` or host bridge | Flask skips USB at boot; **late open if ROS publish fails** |
 
 Hybrid exists so the Aim:RoArm stick still works when the ROS arm node is down. Exclusive exists so a ROS graph can own the arm without Flask fighting the USB device.
 
@@ -239,7 +243,7 @@ Hybrid exists so the Aim:RoArm stick still works when the ROS arm node is down. 
 
 Confirmed on this build (`roarm_ctrl.py` header): **T:100 / 102 / 105 / 114 / 121 / 210** @ 115200, RTS/DTR off. Own ESP32 on the arm, not the chassis MCU.
 
-Port resolve order: configured `serial_port` → `ROARM_SERIAL` / `ROARM_PORT` → `/dev/serial/by-id/*CP2102*` → first `/dev/ttyUSB*`.
+Port resolve order: configured `serial_port` → `ROARM_SERIAL` / `ROARM_PORT` (must exist) → Silicon Labs **CP2102N** by-id glob → first `/dev/ttyUSB*`.
 
 ### 7.2 Named poses
 
@@ -249,7 +253,7 @@ Port resolve order: configured `serial_port` → `ROARM_SERIAL` / `ROARM_PORT` �
 | `tuck` | same | same | same | same | Alias for nav scripts |
 | `scan_ready` | 0 | −0.28 | 1.15 | 3.05 | Slightly more open peek |
 | `elbow_in` | 0 | −0.20 | 0.95 | 3.05 | Compact |
-| `home` | stock inverted L | | ~1.57 | | Long reach. Not a safe stow |
+| `home` | 0 | 0 | 1.5708 | 3.1416 | Inverted L. Long reach. Not a safe stow |
 
 JSON for default stow:
 
@@ -257,7 +261,7 @@ JSON for default stow:
 {"T":102,"base":0,"shoulder":-0.62,"elbow":0.88,"hand":3.05,"spd":0,"acc":10}
 ```
 
-Boot (`app.py`): if USB transport, `roarm.pose('travel_tuck')`. Do not send chassis `T:100` as “fold the arm”.
+Boot (`app.py` `__main__` only): if USB transport **and** Flask owns the arm, hardcoded `roarm.pose('travel_tuck')`. `arm_config.default_pose` is **not** read at runtime. `home()` still sends firmware **T:100**. Do not treat T:100 as a safe stow.
 
 ### 7.3 UI T:144 → joints
 
@@ -265,10 +269,10 @@ Stock overlay stick still emits **T:144 E/Z/R**. USB RoArm has no T:144 IK. `e_z
 
 | Stick | Maps to | Notes |
 |-------|---------|-------|
-| R (yaw-ish) | `base` radians | clamped |
-| Z (height-ish, default 24) | `shoulder` | delta × 0.012 |
-| E (reach, default 60, ~60..450) | `elbow` | more E → more extended |
-| hand | home 3.05 | stick does not drive gripper here |
+| R (yaw-ish degrees) | `base` | `radians(R - default_r)`, clamp ±1.2 |
+| Z (height-ish, default 24) | `shoulder` | `-(Z-24) * 0.012` (sign is negated) |
+| E (default 60, ~60..450) | `elbow` | `1.5708 - e_norm * 0.55`. **More E folds** (smaller elbow), it does not extend |
+| hand | `_HOME["hand"]` **3.1416** | stick does not drive gripper. Not the tuck hand 3.05 |
 
 Then `RoArmController` writes **T:102** on USB.
 
@@ -393,7 +397,7 @@ sequenceDiagram
 | 13 | out | X linear, Z angular | Flask Direct or `ugv_driver_min` |
 | 132 | out | IO4 / IO5 lights | Flask or `/ugv/led_ctrl` |
 | 133 | out | PT gimbal | PTZ robots; not Beast look-around |
-| 134 | out | PT joints degrees | ROS joint_states path |
+| 134 | out | PT joints degrees | **`ugv_driver_min` only** (`/joint_states` → T:134) |
 | 141 | out | gimbal base | PTZ |
 | 144 | out | E/Z/R arm UI | On Beast this is **intercepted** → USB T:102 |
 | 408 | out | WiFi stop (session) | `/api/esp32_wifi` |
@@ -414,7 +418,7 @@ Drive signs apply once for T:1, T:13, and ROS `cmd_vel`.
 
 ## 13. Module and file map
 
-Beast-only delta vs `0a1258b`: **26 files, +4,930 / −76**. Those files total **17,264 SLOC** on disk. Working tree is clean.
+Beast-only delta vs `0a1258b` at **`29250fa`**: **26 files, +4,930 / −76** (17,264 SLOC on disk). Tip `13506c6` adds this TDD (+622) and the README / merge-plan pointers.
 
 ### 13.1 Must keep (arm last)
 
@@ -474,11 +478,12 @@ Beast-relevant routes (plus the shared Seek / AI / logs set):
 |--------|------|------|
 | GET/POST | `/api/ui_aim_mode` | `roarm` ↔ `pt` |
 | GET/POST | `/api/control_mode` | `direct` ↔ `ros2` (UART release) |
-| POST | `/api/toggle_motors` | Direct ON / ROS bypass |
+| POST | `/api/toggle_motors` | Legacy alias: toggles `control_mode` (not a GPIO motor cut) |
 | POST | `/api/stack_restart` | rosbridge / bringup sidecar |
 | GET/POST | `/api/esp32_wifi` | Session T:408 (not persistent T:401) |
 | GET | `/api/status` | includes `ui_aim_mode`, `arm_transport`, `module_type` |
-| POST | `/send_command` | Intercepts USB-native T codes and T:144 when transport is USB |
+| POST | `/send_command` | Intercepts only via `base -c {json}` → `_route_json_command` |
+| Socket.IO | `/json` | **Live UI path** for T:144 / USB-native T-codes |
 
 `/api/loadout` is **not** on this tip. That is rover `consolidate/loadout-ui` work.
 
@@ -486,15 +491,15 @@ Beast-relevant routes (plus the shared Seek / AI / logs set):
 
 ## 15. Tests
 
-| File | What it protects |
+| File | What it actually is |
 |------|------------------|
-| `tests/test_dual_robot_gating.py` | Profile gates: USB vs PTZ, no accidental RoArm on gimbal |
-| `tests/test_roarm_control.py` | Poses, T:144 map, port resolve (offline) |
-| `tests/test_roarm_ros2.py` | Topic names, hybrid vs driver owner |
-| `tests/test_ros_integration.py` | cmd_vel / lights / UART release |
+| `tests/test_dual_robot_gating.py` | Offline AST/yaml gates (USB seek early-return). Does not prove “never open CP2102 on PTZ” |
+| `tests/test_roarm_control.py` | Mix of unit bits and live UART. **T:101** in this file is chassis UART, not USB (USB single-joint is T:121) |
+| `tests/test_roarm_ros2.py` | Topic names, hybrid vs driver owner (mostly offline) |
+| `tests/test_ros_integration.py` | **Live** Flask / rosbridge / UART release |
 | `tests/test_ai_seek.py` | Shared Seek (pre-split) |
 
-Offline tests are the merge safety net. Hardware proofs live under `$HOME/beast-image/roarm_proof*` and are **not** in git (keep it that way).
+Not an all-offline suite. Hardware proofs live under `$HOME/beast-image/roarm_proof*` on the beast Pi and are **not** in git (keep it that way).
 
 ---
 
@@ -585,6 +590,10 @@ Names only. Values live in gitignored `.env`.
 | `ROARM_SERIAL` / `ROARM_BAUD` | arm device | auto / 115200 |
 | `ROARM_ENABLE_DRIVER` | compose arm node | `0` |
 | `UGV_DRIVE_LINEAR_SIGN` / `UGV_DRIVE_ANGULAR_SIGN` | override yaml | unset; yaml wins |
+| `UGV_MOTOR_BYPASS` | legacy → boot `ros2` if `1` | unset |
+| `UGV_AUTOSTART_ROSBRIDGE` / `UGV_AUTOSTART_BRINGUP` | UI toggle starts rosbridge + **ugv_bringup** | `1` |
+| `ROARM_PORT` | alias of `ROARM_SERIAL` | unset |
+| `UGV_ROARM_JOINT_CMD_TOPIC` / `UGV_ROARM_JOINT_STATES_TOPIC` | arm topics | `/ugv/roarm/joint_command` / `.../joint_states` |
 | `OPENAI_API_KEY` / `OPENAI_BASE_URL` / `OPENAI_MODEL` | AI chat / Seek | copied from rover by request |
 
 ---
@@ -594,8 +603,8 @@ Names only. Values live in gitignored `.env`.
 | Topic | Type | Direction | Consumer |
 |-------|------|-----------|----------|
 | `/cmd_vel` | `geometry_msgs/Twist` | Flask → driver | chassis T:13 |
-| `/joint_states` | `sensor_msgs/JointState` | Flask → driver | PT T:134 / T:133 |
-| `/ugv/joint_states` | same | alt name | stock Waveshare |
+| `/joint_states` | `sensor_msgs/JointState` | Flask → driver | slim path **T:134**; T:133 is bringup/direct |
+| `/ugv/joint_states` | same | **driver subscribe only** (Flask does not publish this) | stock Waveshare alias |
 | `/ugv/led_ctrl` | `Float32MultiArray` | Flask → driver | T:132 |
 | `/ugv/roarm/joint_command` | `JointState` names `roarm_base, roarm_shoulder, roarm_elbow, roarm_hand` | Flask and/or UI tools | arm T:102 |
 | `/ugv/roarm/joint_states` | `JointState` | driver / hybrid mirror | feedback |
@@ -605,6 +614,7 @@ Names only. Values live in gitignored `.env`.
 ## 21. Appendix C — commit list since the split
 
 ```
+13506c6 docs: Beast TDD for rover hybrid transfer
 29250fa docs: honest dual-robot publish status for end of day
 1514392 docs: note dual-robot GitHub PR push path and local tip
 6bcc2c5 chore: ignore local runtime UI state and scratch media scripts
@@ -615,8 +625,8 @@ b650e33 merge: origin Seek/PTZ main with Beast USB RoArm preserve
 c0382cf wip(beast): USB RoArm path, travel_tuck, Aim mode, camera rediscovery
 ```
 
-Parent of this line: `0a1258b`. Rover continued past that with four local Seek commits (`e826209`…`24feda3`) that beast does not have. Hybrid = rover tip + selected beast files, not a reset to `b650e33`.
+Parent of this line: `0a1258b`. Rover `main` continued past that with **about 20 commits** to `24feda3` (STOP, Track, rosbridge autoheal, Seek honesty, UI). `e826209`…`24feda3` is only the last four Seek commits, not the whole rover delta. Hybrid = rover tip + selected beast files, not a reset to `b650e33`.
 
 ---
 
-*Generated 2026-08-14 from beast `29250fa` for the rover←beast transfer. Update the tip SHA in the header if this branch moves.*
+*Generated 2026-08-14 from beast `29250fa`, skeptic-corrected the same day against `13506c6`. Next commit after this patch will move HEAD again — update the header SHA when you land it.*
