@@ -75,9 +75,12 @@ else
 fi
 
 log "stack up: rosbridge_pid=$RB_PID driver_pid=$DRV_PID roarm_pid=${ROARM_PID:-none}"
-# Keep container alive while rosbridge + chassis driver run.
+# Keep container alive while rosbridge is up.
+# Chassis driver may be stopped by Flask (Direct UART reclaim) and later
+# restarted via docker exec — do not tear down rosbridge if the driver exits.
 # RoArm driver is optional: its exit does not tear down the stack.
-while kill -0 "$RB_PID" 2>/dev/null && kill -0 "$DRV_PID" 2>/dev/null; do
+# Do not auto-restart ugv_driver_min here: that would steal ttyAMA0 from Flask.
+while kill -0 "$RB_PID" 2>/dev/null; do
   # Soft-restart RoArm driver if it died while still enabled
   if [[ -n "${ROARM_PID}" ]]; then
     if ! kill -0 "$ROARM_PID" 2>/dev/null; then
@@ -92,5 +95,5 @@ while kill -0 "$RB_PID" 2>/dev/null && kill -0 "$DRV_PID" 2>/dev/null; do
   fi
   sleep 2
 done
-log "a child exited (rb=$(kill -0 $RB_PID 2>/dev/null && echo up || echo down) drv=$(kill -0 $DRV_PID 2>/dev/null && echo up || echo down))"
+log "rosbridge exited (rb=down drv=$(kill -0 $DRV_PID 2>/dev/null && echo up || echo down))"
 exit 1

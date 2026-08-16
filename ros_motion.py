@@ -1,10 +1,12 @@
 """
 ROS 2 motion bridge for the Flask AI agent.
 
-Flask (host) → rosbridge WebSocket → ROS graph in ugv_ros2 (host network)
-  → /cmd_vel → ugv_bringup → ESP32 serial
-  → /joint_states (PT joint names) → ugv_bringup → T:133 serial (physical robot)
+Flask (host) → rosbridge WebSocket → ROS graph in ugv_ros2 (host network :9090)
+  → /cmd_vel → chassis driver (ugv_driver_min or ugv_bringup) → ESP32 serial
+  → /joint_states (PT joint names) → ugv_driver_min T:134 or ugv_bringup T:133
   → /pt_joint_position_controller/commands → ros2_control (gazebo / full stack)
+
+Beast compose runs ugv_driver_min (no ugv_ws required). Rover images may have ugv_bringup.
 
 Configure via env (ugv_rpi/.env):
   UGV_MOTION_BACKEND=ros2|serial|none   (default: none)
@@ -39,6 +41,85 @@ except ImportError:  # pragma: no cover
 
 def motion_backend() -> str:
     return (os.environ.get('UGV_MOTION_BACKEND') or 'none').strip().lower()
+
+
+def preferred_motion_path(control_mode: str, rosbridge_ok: bool) -> str:
+    """Choose software path for chassis/gimbal commands.
+
+    - direct → always serial
+    - ros2 + rosbridge up → ros2
+    - ros2 + rosbridge down → serial_fallback (caller must reclaim UART)
+
+    Pure helper so unit tests can drive path selection without Flask/hardware.
+    """
+    mode = (control_mode or 'direct').strip().lower()
+    if mode in ('serial', 'raw'):
+        mode = 'direct'
+    if mode == 'ros2' and bool(rosbridge_ok):
+        return 'ros2'
+    if mode == 'ros2':
+        return 'serial_fallback'
+    return 'direct'
+
+
+def parse_ugv_bringup_pids(ps_text: Optional[str]) -> list:
+    """Parse `ps` / `pgrep -af` lines for real ugv_bringup PIDs (not wrappers).
+
+    Used when leaving ROS 2 so Flask can reclaim UART without `pkill -f`
+    matching the docker-exec / bash wrapper.
+    """
+    pids = []
+    if not ps_text:
+        return pids
+    skip = ('pgrep', 'pkill', 'grep -', 'awk', 'bash -lc', 'docker exec')
+    seen = set()
+    for line in str(ps_text).splitlines():
+        raw = line.strip()
+        if not raw or 'ugv_bringup' not in raw:
+            continue
+        low = raw.lower()
+        if any(tok in low for tok in skip):
+            continue
+        pid = None
+        for tok in raw.split():
+            if tok.isdigit():
+                pid = int(tok)
+                break
+        if pid is None or pid in seen:
+            continue
+        seen.add(pid)
+        pids.append(pid)
+    return pids
+
+
+def parse_chassis_driver_pids(ps_text: Optional[str]) -> list:
+    """PIDs for ugv_driver_min and/or ugv_bringup (not RoArm, not wrappers).
+
+    Beast compose runs python3 /opt/ugv_ros2/ugv_driver_min.py.
+    Rover images may run the stock ugv_bringup binary.
+    """
+    pids = list(parse_ugv_bringup_pids(ps_text))
+    if not ps_text:
+        return pids
+    skip = ('pgrep', 'pkill', 'grep -', 'awk', 'bash -lc', 'docker exec', 'roarm_')
+    seen = set(pids)
+    for line in str(ps_text).splitlines():
+        raw = line.strip()
+        if not raw or 'ugv_driver_min' not in raw:
+            continue
+        low = raw.lower()
+        if any(tok in low for tok in skip):
+            continue
+        pid = None
+        for tok in raw.split():
+            if tok.isdigit():
+                pid = int(tok)
+                break
+        if pid is None or pid in seen:
+            continue
+        seen.add(pid)
+        pids.append(pid)
+    return pids
 
 
 def pt_backend() -> str:

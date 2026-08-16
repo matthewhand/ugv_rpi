@@ -436,6 +436,45 @@ def get_control_mode():
         return _control_mode
 
 
+def _rosbridge_reachable():
+    """True when rosbridge websocket accepts connections (PTZ/drive ROS path)."""
+    try:
+        import ros_motion
+        return bool(ros_motion.rosbridge_status().get('ok'))
+    except Exception:
+        return False
+
+
+def _ensure_flask_serial(reason='fallback'):
+    """Reclaim UART for Flask when ROS path is dead so PTZ/drive are not silent.
+
+    Returns True if serial is open and owned by Flask after the call.
+    """
+    if base.serial_is_open() and not getattr(base, 'serial_released_for_ros', False):
+        return True
+    ok = bool(base.claim_serial_for_flask())
+    if ok:
+        # Allow chassis on serial while in fallback (ROS mode may have set this False)
+        base.enable_motor_control = True
+        olog.warn(
+            'serial',
+            f'Reclaimed UART for Flask ({reason}) — rosbridge unavailable; '
+            'PTZ/chassis use serial until ROS path is healthy',
+            reason=reason,
+            serial_open=True,
+            control_mode=get_control_mode(),
+        )
+    else:
+        olog.error(
+            'serial',
+            f'UART reclaim failed ({reason}) — PTZ/drive may be dead until Direct mode or rosbridge',
+            reason=reason,
+            serial_open=False,
+            control_mode=get_control_mode(),
+        )
+    return ok
+
+
 def _drive_sign(name, default=1.0):
     """Read ±1 drive sign from env (preferred) or config.yaml base_config."""
     env_key = 'UGV_DRIVE_LINEAR_SIGN' if name == 'linear' else 'UGV_DRIVE_ANGULAR_SIGN'
@@ -473,10 +512,11 @@ def body_to_hw_diff(left, right):
 
 
 def set_control_mode(mode, *, source='api'):
-    """Set 'direct' (Flask owns UART) or 'ros2' (release UART for ugv_bringup).
+    """Set 'direct' (Flask owns UART) or 'ros2' (release UART for chassis ROS).
 
     ros2: close /dev/ttyAMA0 so ROS can open it; motion goes via rosbridge.
-    direct: reclaim UART; motion JSON goes serial.
+    direct: stop chassis driver (ugv_driver_min / ugv_bringup), reclaim UART.
+    rosbridge stays up across the toggle.
     """
     global _control_mode
     mode = (mode or '').strip().lower()
@@ -495,6 +535,7 @@ def set_control_mode(mode, *, source='api'):
     # Port ownership: only one of Flask or ROS may hold the UART.
     # release_serial_for_ros() forces T:132 lights off before closing the port.
     serial_ok = True
+    fields_stop = None
     if mode == 'ros2':
         try:
             base.lights_ctrl(0, 0)
@@ -502,6 +543,13 @@ def set_control_mode(mode, *, source='api'):
             pass
         serial_ok = bool(base.release_serial_for_ros())
     else:
+        # Leaving ROS: stop chassis driver first so it does not keep /dev/ttyAMA0
+        if prev == 'ros2':
+            try:
+                fields_stop = _stop_ugv_bringup()
+            except Exception as e:
+                fields_stop = {'ok': False, 'detail': str(e)}
+                olog.warn('ros_autostop', f'chassis driver stop failed: {e}', error=str(e)[:200])
         serial_ok = bool(base.claim_serial_for_flask())
 
     _save_control_mode()
@@ -514,7 +562,9 @@ def set_control_mode(mode, *, source='api'):
         'source': source,
         'serial_ok': serial_ok,
     }
-    # Entering ROS mode: auto-start rosbridge (+ bringup) so UI PTZ/drive work
+    if mode == 'direct' and prev == 'ros2':
+        fields['ros_autostop'] = fields_stop
+    # Entering ROS mode: auto-start rosbridge (+ chassis driver) so UI PTZ/drive work
     if mode == 'ros2' and (prev != mode or source in ('api', 'ui_toggle', 'startup')):
         try:
             fields['ros_autostart'] = _ensure_ros2_sidecar_stack()
@@ -533,6 +583,26 @@ def set_control_mode(mode, *, source='api'):
         except Exception as e:
             fields['rosbridge_ok'] = False
             fields['rosbridge_error'] = str(e)
+        # Critical: if rosbridge is down after release, reclaim serial so PTZ is not dead.
+        if not fields.get('rosbridge_ok'):
+            reclaimed = _ensure_flask_serial(reason='ros2_without_rosbridge')
+            fields['serial_fallback'] = True
+            fields['serial_ok'] = reclaimed
+            fields['serial_open'] = base.serial_is_open()
+            fields['serial_released_for_ros'] = bool(
+                getattr(base, 'serial_released_for_ros', False)
+            )
+            fields['uart_owner'] = 'flask_fallback' if reclaimed else 'none'
+            fields['fallback_reason'] = (
+                'rosbridge not reachable — reclaimed UART so pan/tilt and drive work via serial. '
+                'Start rosbridge in ugv_ros2 or switch Control to Direct.'
+            )
+            olog.warn(
+                'control_mode',
+                fields['fallback_reason'],
+                rosbridge_error=fields.get('rosbridge_error'),
+                serial_open=fields['serial_open'],
+            )
     if prev != mode:
         olog.info(
             'control_mode',
@@ -554,19 +624,24 @@ if get_control_mode() == 'ros2':
     # release_serial_for_ros() turns lights off while UART is still held
     base.enable_motor_control = False
     base.release_serial_for_ros()
+    # Startup heal: do not leave ROS mode with closed UART and dead rosbridge
+    if not _rosbridge_reachable():
+        _ensure_flask_serial(reason='startup_ros2_no_rosbridge')
 else:
     base.enable_motor_control = True
     base.claim_serial_for_flask()
-    # Cosmetic boot animation only when Flask keeps the UART
-    threading.Thread(target=lambda: base.breath_light(15), daemon=True).start()
+    # Breath light starts after leftover chassis-driver stop (helpers defined later)
 olog.info(
     'startup',
     f'control_mode={get_control_mode()} '
     f'(uart_owner={"flask" if get_control_mode() == "direct" else "ros2"}, '
-    f'serial_open={base.serial_is_open()})',
+    f'serial_open={base.serial_is_open()}, '
+    f'serial_released={getattr(base, "serial_released_for_ros", False)})',
     control_mode=get_control_mode(),
     uart_owner='flask' if get_control_mode() == 'direct' else 'ros2',
     serial_open=base.serial_is_open(),
+    serial_released_for_ros=bool(getattr(base, 'serial_released_for_ros', False)),
+    rosbridge_ok=_rosbridge_reachable() if get_control_mode() == 'ros2' else None,
 )
 
 # Set to keep track of RTCPeerConnection instances
@@ -663,6 +738,16 @@ enable_rtsp_stream = False
 @app.route('/api/status')
 def api_status():
     mode = get_control_mode()
+    with _ros_autoheal_lock:
+        heal = dict(_ros_autoheal_state)
+    if heal.get('last_tick_at') is not None:
+        try:
+            heal['last_tick_age_s'] = round(time.time() - float(heal['last_tick_at']), 1)
+        except (TypeError, ValueError):
+            pass
+    br_ok = None
+    if mode == 'ros2':
+        br_ok = _rosbridge_reachable()
     roarm_st = None
     if _roarm is not None:
         try:
@@ -674,10 +759,15 @@ def api_status():
         'enable_motor_control': base.enable_motor_control,
         'control_mode': mode,  # 'direct' | 'ros2'
         'control_mode_label': 'Direct serial' if mode == 'direct' else 'ROS 2 relay',
-        'uart_owner': 'flask' if mode == 'direct' else 'ros2',
+        'uart_owner': (
+            'flask' if mode == 'direct'
+            else ('flask_fallback' if base.serial_is_open() and not getattr(base, 'serial_released_for_ros', False) else 'ros2')
+        ),
         'serial_open': base.serial_is_open() if hasattr(base, 'serial_is_open') else bool(getattr(base, 'ser', None)),
         'serial_released_for_ros': bool(getattr(base, 'serial_released_for_ros', False)),
         'esp32_wifi_stopped': bool(_esp32_wifi_session.get('stopped')),
+        'rosbridge_ok': br_ok,
+        'ros_autoheal': heal,
         'ui_aim_mode': get_ui_aim_mode(),  # 'roarm' | 'pt'
         'arm_transport': arm_transport(),  # 'usb_serial' | 'base_uart'
         'module_type': f.get('base_config', {}).get('module_type'),
@@ -769,17 +859,17 @@ def _uart_restart_advice(mode, *, prev_mode=None, mode_changed=False):
     # Always recommend after a live mode change; mild hint on GET when ros2 + serial free
     if mode == 'ros2':
         reason = (
-            'Flask released /dev/ttyAMA0. Restart the ROS container (or re-launch ugv_bringup) '
-            'so it can open the UART exclusively for chassis + PTZ.'
+            'Flask released /dev/ttyAMA0. Restart the ROS container (or re-launch the chassis '
+            'driver: ugv_driver_min or ugv_bringup) so it can open the UART exclusively.'
         )
         label = f'Restart {container}'
         detail = (
-            f'docker restart {container}  — then ensure bringup + rosbridge are running inside it. '
-            'Device node is already mounted; restart is for process re-open, not remount.'
+            f'docker restart {container}  — then ensure chassis driver + rosbridge are running '
+            'inside it. Device node is already mounted; restart is for process re-open, not remount.'
         )
     else:
         reason = (
-            'Flask reclaimed /dev/ttyAMA0. If ROS/bringup still holds the port, restart or stop '
+            'Flask reclaimed /dev/ttyAMA0. If ROS/chassis driver still holds the port, restart or stop '
             f'{container} so Direct serial can work alone.'
         )
         label = f'Restart {container}'
@@ -915,6 +1005,7 @@ def _ensure_rosbridge_running():
 
     if not has_proc:
         # docker exec -d so the launch survives after the exec returns
+        # Humble overlay is enough; ugv_ws is optional and often absent on Beast.
         start_script = r'''
 source /opt/ros/humble/setup.bash
 source /home/ws/ugv_ws/install/setup.bash 2>/dev/null || true
@@ -958,8 +1049,163 @@ exec ros2 launch rosbridge_server rosbridge_websocket_launch.xml port:=9090 \
     return out
 
 
+def _ensure_ros_container_running():
+    """Start an existing ugv_ros2 container if it is stopped.
+
+    Does not pull, compose-up, or swap images. Missing container is a no-op.
+    """
+    import subprocess
+    out = {
+        'ok': False,
+        'started': False,
+        'already_up': False,
+        'detail': '',
+        'container': _ros_container_name(),
+    }
+    name = out['container']
+    if not name or not all(c.isalnum() or c in '-_' for c in name):
+        out['detail'] = 'invalid container name'
+        return out
+    try:
+        insp = subprocess.run(
+            ['docker', 'inspect', '-f', '{{.State.Running}}', name],
+            capture_output=True, text=True, timeout=15,
+        )
+    except FileNotFoundError:
+        out['detail'] = 'docker CLI not found'
+        return out
+    except subprocess.TimeoutExpired:
+        out['detail'] = 'docker inspect timed out'
+        return out
+    except Exception as e:
+        out['detail'] = str(e)
+        return out
+    if insp.returncode != 0:
+        out['detail'] = f'container {name} not found (will not pull/recreate)'
+        return out
+    if (insp.stdout or '').strip().lower() == 'true':
+        out['ok'] = True
+        out['already_up'] = True
+        out['detail'] = f'{name} already running'
+        return out
+    try:
+        start = subprocess.run(
+            ['docker', 'start', name],
+            capture_output=True, text=True, timeout=60,
+        )
+    except subprocess.TimeoutExpired:
+        out['detail'] = f'docker start {name} timed out'
+        return out
+    except Exception as e:
+        out['detail'] = str(e)
+        return out
+    out['started'] = start.returncode == 0
+    out['ok'] = start.returncode == 0
+    out['detail'] = (start.stdout or start.stderr or '').strip() or f'start {name}'
+    if out['ok']:
+        olog.info('ros_autostart', f'started existing container {name}', container=name)
+    else:
+        olog.warn('ros_autostart', f'docker start {name} failed: {out["detail"][:160]}',
+                  container=name)
+    return out
+
+
+def _chassis_driver_ps():
+    """ps lines for chassis ROS nodes (not rosbridge, not RoArm)."""
+    _ok, so, se, _ = _docker_exec(
+        "ps -eo pid,args 2>/dev/null | grep -E 'ugv_bringup|ugv_driver_min' || true",
+        detach=False, timeout=15,
+    )
+    return so, se
+
+
+def _parse_chassis_driver_pids(ps_text):
+    try:
+        from ros_motion import parse_chassis_driver_pids
+        return parse_chassis_driver_pids(ps_text)
+    except Exception:
+        from ros_motion import parse_ugv_bringup_pids
+        return parse_ugv_bringup_pids(ps_text)
+
+
+def _host_ugv_driver_min_path():
+    return os.path.join(thisPath, 'ros2', 'ugv_driver_min.py')
+
+
+def _stage_ugv_driver_min_in_container():
+    """Return container path to ugv_driver_min.py, docker-cp from host if needed."""
+    _ok, so, _se, _ = _docker_exec(
+        'if [ -f /opt/ugv_ros2/ugv_driver_min.py ]; then echo /opt/ugv_ros2/ugv_driver_min.py; '
+        'elif [ -f /tmp/ugv_driver_min.py ]; then echo /tmp/ugv_driver_min.py; fi',
+        detach=False, timeout=15,
+    )
+    path = ''
+    if so:
+        for line in so.splitlines():
+            line = line.strip()
+            if line.endswith('ugv_driver_min.py'):
+                path = line
+                break
+    if path:
+        return path
+    host = _host_ugv_driver_min_path()
+    if not os.path.isfile(host):
+        return ''
+    import subprocess
+    dest = f'{_ros_container_name()}:/tmp/ugv_driver_min.py'
+    try:
+        cp = subprocess.run(
+            ['docker', 'cp', host, dest],
+            capture_output=True, text=True, timeout=20,
+        )
+    except Exception:
+        return ''
+    if cp.returncode == 0:
+        return '/tmp/ugv_driver_min.py'
+    return ''
+
+
+def _probe_chassis_driver_kind():
+    """What this ROS image can run. Prefer beast ugv_driver_min; never require ugv_ws.
+
+    Env: UGV_CHASSIS_DRIVER=auto|ugv_driver_min|ugv_bringup
+    Positive detections are cached; 'none' is not.
+    """
+    cached = getattr(_probe_chassis_driver_kind, '_kind', None)
+    if cached:
+        return cached
+    env = (os.environ.get('UGV_CHASSIS_DRIVER') or 'auto').strip().lower()
+    if env in ('ugv_driver_min', 'driver_min', 'min'):
+        _probe_chassis_driver_kind._kind = 'ugv_driver_min'  # type: ignore[attr-defined]
+        return 'ugv_driver_min'
+    if env in ('ugv_bringup', 'bringup'):
+        _probe_chassis_driver_kind._kind = 'ugv_bringup'  # type: ignore[attr-defined]
+        return 'ugv_bringup'
+
+    if _stage_ugv_driver_min_in_container():
+        _probe_chassis_driver_kind._kind = 'ugv_driver_min'  # type: ignore[attr-defined]
+        return 'ugv_driver_min'
+
+    _ok, so, _se, _ = _docker_exec(
+        'source /opt/ros/humble/setup.bash >/dev/null 2>&1; '
+        'if ros2 pkg prefix ugv_bringup >/dev/null 2>&1; then echo bringup; else echo none; fi',
+        detach=False, timeout=20,
+    )
+    kind = (so or '').strip().splitlines()[-1] if so else ''
+    if kind == 'bringup':
+        _probe_chassis_driver_kind._kind = 'ugv_bringup'  # type: ignore[attr-defined]
+        return 'ugv_bringup'
+    if os.path.isfile(_host_ugv_driver_min_path()):
+        return 'ugv_driver_min'
+    return 'none'
+
+
 def _ensure_ugv_bringup_running():
-    """Start ugv_bringup in container so /cmd_vel + /joint_states reach ESP32.
+    """Start the chassis ROS node so /cmd_vel + /joint_states reach ESP32.
+
+    Prefers this tree's ugv_driver_min (compose mount). Falls back to
+    ugv_bringup only if that package is actually in the image.
+    Does not start RoArm drivers. Does not require ugv_ws.
 
     Env: UGV_AUTOSTART_BRINGUP=1 (default on). Requires UART released (ros2 mode).
     """
@@ -969,40 +1215,82 @@ def _ensure_ugv_bringup_running():
         'started': False,
         'ok': False,
         'detail': '',
+        'kind': None,
     }
     if not _env_flag('UGV_AUTOSTART_BRINGUP', '1'):
         out['wanted'] = False
         out['detail'] = 'UGV_AUTOSTART_BRINGUP disabled'
         return out
 
-    ok_chk, so, se, _ = _docker_exec(
-        "pgrep -af '/lib/ugv_bringup/ugv_bringup|ugv_bringup ugv_bringup' || true",
-        detach=False, timeout=15,
-    )
-    # pgrep output may include the pgrep line itself in some shells — look for real binary
-    has_proc = bool(so and 'ugv_bringup' in so and 'pgrep' not in so.splitlines()[-1] if so else False)
-    if so:
-        for line in so.splitlines():
-            if 'ugv_bringup' in line and 'pgrep' not in line and 'bash -lc' not in line:
-                has_proc = True
-                break
-        else:
-            # any line with the installed executable path
-            has_proc = any(
-                '/ugv_bringup/ugv_bringup' in line or line.strip().endswith('ugv_bringup')
-                for line in so.splitlines()
-                if 'pgrep' not in line
-            )
-
-    if has_proc:
+    so, _se = _chassis_driver_ps()
+    pids = _parse_chassis_driver_pids(so)
+    if pids:
+        kind = 'ugv_driver_min' if so and 'ugv_driver_min' in so else 'ugv_bringup'
         out['already_up'] = True
         out['ok'] = True
-        out['detail'] = 'ugv_bringup already running'
+        out['kind'] = kind
+        out['detail'] = f'{kind} already running pids={pids}'
         return out
 
-    port = (os.environ.get('UGV_SERIAL_PORT') or '/dev/ttyAMA0').strip()
-    start_script = f'''
-set -e
+    kind = _probe_chassis_driver_kind()
+    out['kind'] = kind
+    port = (
+        os.environ.get('UGV_SERIAL_PORT')
+        or os.environ.get('UGV_SERIAL_DEV')
+        or '/dev/ttyAMA0'
+    ).strip()
+    if not port or not all(c.isalnum() or c in '/._-' for c in port):
+        port = '/dev/ttyAMA0'
+
+    if kind == 'ugv_driver_min':
+        script = _stage_ugv_driver_min_in_container()
+        if (
+            not script
+            or not script.endswith('ugv_driver_min.py')
+            or not all(c.isalnum() or c in '/._-' for c in script)
+        ):
+            out['detail'] = 'ugv_driver_min.py not in container and docker cp failed'
+            olog.warn('ros_autostart', out['detail'], component='chassis')
+            return out
+        start_script = f'''
+set +e
+source /opt/ros/humble/setup.bash
+mkdir -p /tmp/ugv_ros_logs
+export UGV_SERIAL_DEV={port}
+export UGV_SERIAL_PORT={port}
+nohup python3 {script} \
+  > /tmp/ugv_ros_logs/ugv_driver_min.log 2>&1 &
+sleep 0.5
+if pgrep -af ugv_driver_min | grep -v pgrep | grep -q ugv_driver_min; then
+  echo driver_ok
+  exit 0
+fi
+echo driver_start_uncertain
+tail -8 /tmp/ugv_ros_logs/ugv_driver_min.log 2>/dev/null || true
+exit 0
+'''
+        ok_st, so2, se2, code = _docker_exec(start_script, detach=False, timeout=40)
+        out['started'] = 'driver_ok' in (so2 or '')
+        out['ok'] = out['started']
+        out['detail'] = so2 or se2 or f'exit {code}'
+        if out['ok']:
+            olog.info(
+                'ros_autostart', 'ugv_driver_min started in container',
+                component='chassis', kind='ugv_driver_min', started=True,
+            )
+        else:
+            out['started'] = bool(ok_st)
+            out['ok'] = bool(ok_st) and 'driver_ok' in (so2 or '')
+            olog.info(
+                'ros_autostart',
+                f'ugv_driver_min start attempted: {out["detail"][:200]}',
+                component='chassis', kind='ugv_driver_min', ok=out['ok'],
+            )
+        return out
+
+    if kind == 'ugv_bringup':
+        start_script = f'''
+set +e
 source /opt/ros/humble/setup.bash
 source /home/ws/ugv_ws/install/setup.bash 2>/dev/null || true
 mkdir -p /tmp/ugv_ros_logs
@@ -1010,12 +1298,10 @@ nohup ros2 run ugv_bringup ugv_bringup --ros-args \
   -p serial_port:={port} -p baud_rate:=115200 \
   > /tmp/ugv_ros_logs/bringup.log 2>&1 &
 sleep 0.4
-# confirm process
 if pgrep -f '/lib/ugv_bringup/ugv_bringup' >/dev/null 2>&1; then
   echo bringup_ok
   exit 0
 fi
-# looser match
 if pgrep -af ugv_bringup | grep -v pgrep | grep -q ugv_bringup; then
   echo bringup_ok_loose
   exit 0
@@ -1024,37 +1310,325 @@ echo bringup_start_uncertain
 tail -5 /tmp/ugv_ros_logs/bringup.log 2>/dev/null || true
 exit 0
 '''
-    ok_st, so2, se2, code = _docker_exec(start_script, detach=False, timeout=40)
-    out['started'] = 'bringup_ok' in (so2 or '')
-    out['ok'] = out['started'] or ('bringup_ok' in (so2 or ''))
-    out['detail'] = so2 or se2 or f'exit {code}'
-    if out['ok']:
-        olog.info('ros_autostart', 'ugv_bringup started in container',
-                  component='bringup', started=True)
+        ok_st, so2, se2, code = _docker_exec(start_script, detach=False, timeout=40)
+        out['started'] = 'bringup_ok' in (so2 or '')
+        out['ok'] = out['started']
+        out['detail'] = so2 or se2 or f'exit {code}'
+        if out['ok']:
+            olog.info('ros_autostart', 'ugv_bringup started in container',
+                      component='chassis', kind='ugv_bringup', started=True)
+        else:
+            out['started'] = bool(ok_st)
+            out['ok'] = bool(ok_st)
+            olog.info(
+                'ros_autostart',
+                f'ugv_bringup start attempted: {out["detail"][:200]}',
+                component='chassis', kind='ugv_bringup', ok=out['ok'],
+            )
+        return out
+
+    out['detail'] = (
+        'no chassis ROS node in this image '
+        '(need /opt/ugv_ros2/ugv_driver_min.py or ugv_bringup; full workspace image not required)'
+    )
+    olog.warn('ros_autostart', out['detail'], component='chassis')
+    return out
+
+
+def _stop_ugv_bringup():
+    """Stop chassis ROS node in the ROS container so Flask can reclaim UART.
+
+    Stops ugv_driver_min and/or ugv_bringup. Does not stop rosbridge or RoArm.
+    Env: UGV_AUTOSTOP_BRINGUP=1 (default on). Kill is by PID inside the
+    container (not host `pkill -f`) so the docker-exec wrapper is not matched.
+    """
+    out = {
+        'wanted': True,
+        'stopped': False,
+        'already_down': False,
+        'ok': False,
+        'detail': '',
+        'pids': [],
+    }
+    if not _env_flag('UGV_AUTOSTOP_BRINGUP', '1'):
+        out['wanted'] = False
+        out['detail'] = 'UGV_AUTOSTOP_BRINGUP disabled'
+        return out
+
+    so, se = _chassis_driver_ps()
+    pids = _parse_chassis_driver_pids(so)
+    out['pids'] = pids
+    if not pids:
+        out['already_down'] = True
+        out['ok'] = True
+        if se and ('docker CLI not found' in se or 'No such container' in se
+                   or 'Cannot connect' in se):
+            out['detail'] = f'chassis stop skipped: {se[:160]}'
+        else:
+            out['detail'] = 'chassis driver not running'
+        return out
+
+    pid_list = ' '.join(str(p) for p in pids)
+    kill_script = (
+        'set +e\n'
+        f'kill -TERM {pid_list} 2>/dev/null || true\n'
+        'sleep 0.4\n'
+        f'kill -KILL {pid_list} 2>/dev/null || true\n'
+        'sleep 0.15\n'
+        "ps -eo pid,args 2>/dev/null | grep -E 'ugv_bringup|ugv_driver_min' || true\n"
+    )
+    _ok_st, so2, se2, _code = _docker_exec(kill_script, detach=False, timeout=20)
+    leftover = _parse_chassis_driver_pids(so2)
+    out['stopped'] = not leftover
+    out['ok'] = not leftover
+    if leftover:
+        out['detail'] = f'still running after kill: {leftover}'
+        olog.warn(
+            'ros_autostop',
+            out['detail'][:240],
+            component='chassis', leftover=leftover, pids=pids,
+        )
     else:
-        # still mark started attempt — process may be up without our match
-        out['started'] = bool(ok_st)
-        out['ok'] = bool(ok_st)
+        out['detail'] = f'stopped pids {pids}'
         olog.info(
-            'ros_autostart',
-            f'ugv_bringup start attempted: {out["detail"][:200]}',
-            component='bringup', ok=out['ok'],
+            'ros_autostop',
+            'chassis ROS node stopped in container (rosbridge left up)',
+            component='chassis', stopped=True, pids=pids,
         )
     return out
 
 
 def _ensure_ros2_sidecar_stack():
-    """When entering ros2 mode: ensure rosbridge (+ optionally bringup) are up."""
+    """When entering ros2 mode: ensure rosbridge + chassis driver are up."""
     result = {
+        'container': _ensure_ros_container_running(),
         'rosbridge': _ensure_rosbridge_running(),
         'bringup': None,
     }
-    # bringup needs UART free (caller should have released serial already)
+    # chassis driver needs UART free (caller should have released serial already)
     try:
         result['bringup'] = _ensure_ugv_bringup_running()
     except Exception as e:
         result['bringup'] = {'wanted': True, 'ok': False, 'detail': str(e)}
     return result
+
+
+# Booted in Direct: drop leftover chassis driver so a Flask restart can reclaim UART.
+# (set_control_mode() at import time cannot call this — helpers are defined here.)
+if get_control_mode() == 'direct':
+    try:
+        _startup_stop = _stop_ugv_bringup()
+        if _startup_stop.get('stopped'):
+            base.claim_serial_for_flask()
+            olog.info(
+                'ros_autostop',
+                'startup Direct: stopped leftover chassis ROS node',
+                **{k: _startup_stop.get(k) for k in ('ok', 'stopped', 'detail', 'pids')},
+            )
+    except Exception as e:
+        olog.warn(
+            'ros_autostop',
+            f'startup Direct chassis stop failed: {e}',
+            error=str(e)[:200],
+        )
+    # Preload rosbridge only. Chassis driver stays down so Flask keeps ttyAMA0.
+    try:
+        _rb = _ensure_rosbridge_running()
+        olog.info(
+            'ros_preload',
+            'startup Direct: rosbridge preload (no chassis driver)',
+            ok=_rb.get('ok'), already_up=_rb.get('already_up'),
+            started=_rb.get('started'), detail=str(_rb.get('detail') or '')[:160],
+        )
+    except Exception as e:
+        olog.warn('ros_preload', f'startup Direct rosbridge preload failed: {e}', error=str(e)[:200])
+    if base.serial_is_open() and not getattr(base, 'serial_released_for_ros', False):
+        threading.Thread(target=lambda: base.breath_light(15), daemon=True).start()
+
+
+# Background ROS2 heal: keep rosbridge/chassis driver up while control_mode=ros2.
+# Without this, a dead :9090 after a one-shot autostart left PTZ on "dropped serial".
+_ros_autoheal_lock = threading.Lock()
+_ros_autoheal_state = {
+    'enabled': True,
+    'last_tick_at': None,
+    'last_action': None,
+    'last_detail': '',
+    'last_ok': None,
+    'consecutive_down': 0,
+    'heals_attempted': 0,
+    'heals_ok': 0,
+}
+
+
+def _ros2_autoheal_tick():
+    """One heal cycle. Safe to call from a background thread.
+
+    Policy when control_mode is ros2:
+      - rosbridge up  → prefer UART released for chassis driver; re-release if we held fallback serial
+      - rosbridge down → restart sidecar stack; if still down, reclaim serial (PTZ lives)
+    Disabled with UGV_ROS_AUTOHEAL=0. Interval: UGV_ROS_AUTOHEAL_S (default 15).
+    """
+    global _ros_autoheal_state
+    if not _env_flag('UGV_ROS_AUTOHEAL', '1'):
+        with _ros_autoheal_lock:
+            _ros_autoheal_state['enabled'] = False
+            _ros_autoheal_state['last_action'] = 'disabled'
+        return {'ok': True, 'action': 'disabled'}
+
+    if get_control_mode() != 'ros2':
+        with _ros_autoheal_lock:
+            _ros_autoheal_state['last_action'] = 'skip_not_ros2'
+            _ros_autoheal_state['last_ok'] = True
+            _ros_autoheal_state['consecutive_down'] = 0
+        return {'ok': True, 'action': 'skip_not_ros2'}
+
+    bridge_ok = _rosbridge_reachable()
+    action = 'healthy'
+    detail = ''
+
+    if bridge_ok:
+        # Prefer ROS owning UART when the bridge is healthy.
+        if not getattr(base, 'serial_released_for_ros', False) or base.serial_is_open():
+            # We were on serial fallback — hand UART back so chassis driver can drive
+            base.enable_motor_control = False
+            base.release_serial_for_ros()
+            try:
+                _ensure_ugv_bringup_running()
+            except Exception as e:
+                detail = f'released serial; chassis ensure: {e}'
+            else:
+                detail = 'rosbridge healthy; UART released for chassis driver'
+            action = 'released_serial_for_ros'
+            olog.info(
+                'ros_autoheal',
+                detail,
+                rosbridge_ok=True,
+                serial_released=True,
+            )
+        else:
+            detail = 'rosbridge healthy; UART already released'
+            action = 'healthy'
+        with _ros_autoheal_lock:
+            _ros_autoheal_state.update({
+                'enabled': True,
+                'last_tick_at': time.time(),
+                'last_action': action,
+                'last_detail': detail,
+                'last_ok': True,
+                'consecutive_down': 0,
+            })
+        return {'ok': True, 'action': action, 'detail': detail}
+
+    # Bridge down — try restart sidecars (may need UART free for chassis driver)
+    with _ros_autoheal_lock:
+        _ros_autoheal_state['heals_attempted'] = int(
+            _ros_autoheal_state.get('heals_attempted') or 0
+        ) + 1
+        _ros_autoheal_state['consecutive_down'] = int(
+            _ros_autoheal_state.get('consecutive_down') or 0
+        ) + 1
+        down_n = _ros_autoheal_state['consecutive_down']
+
+    olog.warn(
+        'ros_autoheal',
+        f'rosbridge down (tick #{down_n}) — ensuring sidecar stack',
+        consecutive_down=down_n,
+        serial_open=base.serial_is_open(),
+        serial_released=bool(getattr(base, 'serial_released_for_ros', False)),
+    )
+
+    # Free UART before chassis restart if we hold it
+    if base.serial_is_open() or not getattr(base, 'serial_released_for_ros', False):
+        base.enable_motor_control = False
+        base.release_serial_for_ros()
+
+    try:
+        stack = _ensure_ros2_sidecar_stack()
+    except Exception as e:
+        stack = {'error': str(e)}
+        olog.warn('ros_autoheal', f'sidecar ensure failed: {e}', error=str(e)[:200])
+
+    bridge_ok = _rosbridge_reachable()
+    if bridge_ok:
+        action = 'healed_rosbridge'
+        detail = 'rosbridge restored by autoheal'
+        with _ros_autoheal_lock:
+            _ros_autoheal_state['heals_ok'] = int(
+                _ros_autoheal_state.get('heals_ok') or 0
+            ) + 1
+            _ros_autoheal_state['consecutive_down'] = 0
+        olog.info('ros_autoheal', detail, stack=str(stack)[:200])
+    else:
+        # Stay useful: serial fallback so PTZ is not dead
+        reclaimed = _ensure_flask_serial(reason='ros_autoheal_fallback')
+        action = 'serial_fallback'
+        detail = (
+            'rosbridge still down after ensure — serial reclaimed for PTZ/drive. '
+            f'stack={str(stack)[:160]}'
+        )
+        olog.warn(
+            'ros_autoheal',
+            detail,
+            reclaimed=reclaimed,
+            serial_open=base.serial_is_open(),
+        )
+
+    with _ros_autoheal_lock:
+        _ros_autoheal_state.update({
+            'enabled': True,
+            'last_tick_at': time.time(),
+            'last_action': action,
+            'last_detail': detail[:300],
+            'last_ok': bridge_ok,
+        })
+    return {
+        'ok': bridge_ok,
+        'action': action,
+        'detail': detail,
+        'stack': stack,
+    }
+
+
+def _ros2_autoheal_loop():
+    """Daemon: periodic rosbridge heal while ROS2 control mode is selected."""
+    # First tick after short delay so startup autostart can finish
+    time.sleep(8.0)
+    while True:
+        try:
+            interval = float(os.environ.get('UGV_ROS_AUTOHEAL_S') or 15)
+        except (TypeError, ValueError):
+            interval = 15.0
+        interval = max(5.0, min(120.0, interval))
+        try:
+            if _env_flag('UGV_ROS_AUTOHEAL', '1') and get_control_mode() == 'ros2':
+                _ros2_autoheal_tick()
+        except Exception as e:
+            try:
+                olog.warn('ros_autoheal', f'tick error: {e}', error=str(e)[:200])
+            except Exception:
+                print(f'[ros_autoheal] tick error: {e}')
+        time.sleep(interval)
+
+
+def _start_ros2_autoheal_thread():
+    if getattr(_start_ros2_autoheal_thread, '_started', False):
+        return
+    if not _env_flag('UGV_ROS_AUTOHEAL', '1'):
+        olog.info('ros_autoheal', 'UGV_ROS_AUTOHEAL disabled')
+        return
+    t = threading.Thread(target=_ros2_autoheal_loop, name='ros2-autoheal', daemon=True)
+    t.start()
+    _start_ros2_autoheal_thread._started = True  # type: ignore[attr-defined]
+    olog.info(
+        'ros_autoheal',
+        'ROS2 autoheal thread started '
+        f'(interval≈{os.environ.get("UGV_ROS_AUTOHEAL_S") or 15}s, only when control_mode=ros2)',
+    )
+
+
+# Start after function defs (module load order) — heal while control_mode=ros2
+_start_ros2_autoheal_thread()
 
 
 @app.route('/api/control_mode', methods=['GET', 'POST'])
@@ -1124,8 +1698,8 @@ def api_stack_restart():
         'serial_open': base.serial_is_open() if hasattr(base, 'serial_is_open') else None,
         'serial_released_for_ros': bool(getattr(base, 'serial_released_for_ros', False)),
         'note': (
-            'After restart, re-launch ugv_bringup + rosbridge inside the container if they '
-            'are not started by the container entrypoint.'
+            'After restart, re-launch chassis driver (ugv_driver_min or ugv_bringup) + '
+            'rosbridge inside the container if they are not started by the entrypoint.'
             if ok and mode == 'ros2' else
             ('ROS container restarted; UART should be free for Flask direct mode.'
              if ok else msg)
@@ -1344,18 +1918,35 @@ def api_ptz():
         before_pan = (before.get('hardware') or {}).get('pan_deg')
         before_tilt = (before.get('hardware') or {}).get('tilt_deg')
         try:
-            if mode == 'ros2' or getattr(base, 'serial_released_for_ros', False):
-                # UART released — drive via rosbridge (same as stick)
+            used_ros = False
+            if mode == 'ros2' and _rosbridge_reachable():
                 import ros_motion
                 result = ros_motion.publish_gimbal_from_ui(x, y, throttle=False)
-                path = 'ros2'
-                olog.info('ptz_cmd', f'PTZ goto X={x} Y={y} (ros2)', X=x, Y=y, path='ros2', ok=result.get('ok'))
-                if not result.get('ok'):
-                    return jsonify({'success': False, 'error': result.get('error'), 'command': cmd, 'path': path}), 500
-            else:
+                if result.get('ok'):
+                    path = 'ros2'
+                    used_ros = True
+                    olog.info('ptz_cmd', f'PTZ goto X={x} Y={y} (ros2)', X=x, Y=y, path='ros2', ok=True)
+                else:
+                    olog.warn(
+                        'ptz_cmd',
+                        f'PTZ ros2 failed, serial fallback: {result.get("error")}',
+                        X=x, Y=y, error=str(result.get('error') or '')[:160],
+                    )
+            if not used_ros:
+                if mode == 'ros2' and (
+                    getattr(base, 'serial_released_for_ros', False) or not base.serial_is_open()
+                ):
+                    if not _ensure_flask_serial(reason='ptz_api'):
+                        return jsonify({
+                            'success': False,
+                            'error': 'rosbridge down and serial reclaim failed — set Control: Direct',
+                            'command': cmd,
+                            'path': 'none',
+                        }), 500
                 base.base_json_ctrl({'T': 4, 'cmd': 2})  # gimbal module
                 base.base_json_ctrl(cmd)
-                olog.info('ptz_cmd', f'PTZ goto X={x} Y={y} (serial T:133)', X=x, Y=y, path='serial')
+                path = 'serial' if mode == 'direct' else 'serial_fallback'
+                olog.info('ptz_cmd', f'PTZ goto X={x} Y={y} ({path} T:133)', X=x, Y=y, path=path)
             try:
                 cvf.pan_angle = x
                 cvf.tilt_angle = -y
@@ -1409,18 +2000,33 @@ def _ptz_goto_raw(x, y, wait_s=1.5):
     before_pan = (before.get('hardware') or {}).get('pan_deg')
     before_tilt = (before.get('hardware') or {}).get('tilt_deg')
     try:
-        if mode == 'ros2' or getattr(base, 'serial_released_for_ros', False):
+        used_ros = False
+        if mode == 'ros2' and _rosbridge_reachable():
             import ros_motion
             result = ros_motion.publish_gimbal_from_ui(x, y, throttle=False)
-            path = 'ros2'
-            if not result.get('ok'):
-                return {
-                    'success': False, 'error': result.get('error'),
-                    'command_sent': cmd, 'path': path,
-                    'before': {'pan_deg': before_pan, 'tilt_deg': before_tilt},
-                    'moved': False,
-                }
-        else:
+            if result.get('ok'):
+                path = 'ros2'
+                used_ros = True
+            else:
+                olog.warn(
+                    'ptz_cmd',
+                    f'_ptz_goto_raw ros2 fail → serial: {result.get("error")}',
+                    error=str(result.get('error') or '')[:160],
+                )
+        if not used_ros:
+            if mode == 'ros2' and (
+                getattr(base, 'serial_released_for_ros', False) or not base.serial_is_open()
+            ):
+                if not _ensure_flask_serial(reason='ptz_goto_raw'):
+                    return {
+                        'success': False,
+                        'error': 'rosbridge down and serial reclaim failed — set Control: Direct',
+                        'command_sent': cmd,
+                        'path': 'none',
+                        'before': {'pan_deg': before_pan, 'tilt_deg': before_tilt},
+                        'moved': False,
+                    }
+            path = 'serial' if mode == 'direct' else 'serial_fallback'
             base.base_json_ctrl({'T': 4, 'cmd': 2})
             base.base_json_ctrl(cmd)
         try:
@@ -2169,7 +2775,7 @@ def _resolve_node_status(meta, caps, infra_ok, backend, bridge):
         err = bridge.get('error') or bridge.get('reason') or 'rosbridge not reachable'
         return 'unavailable', (
             f'On, but control_mode=ros2 and rosbridge down ({err}). '
-            'Toggle Control to Direct serial, or start rosbridge + ugv_bringup.'
+            'Toggle Control to Direct serial, or start rosbridge + chassis driver.'
         ), user_on
     return 'active', 'Offered to the LLM.', user_on
 
@@ -7247,25 +7853,62 @@ def _route_json_command(cmd):
     if t in gimbal_types:
         x = float(cmd.get('X', cmd.get('x', 0)) or 0)
         y = float(cmd.get('Y', cmd.get('y', 0)) or 0)
-        if mode == 'ros2':
+        tilt_sign_y = -y if t in (133, '133', f.get('cmd_config', {}).get('cmd_gimbal_ctrl')) else y
+
+        def _apply_cvf_pt():
             try:
-                import ros_motion
-                result = ros_motion.publish_gimbal_from_ui(x, y, throttle=True)
-                try:
-                    cvf.pan_angle = x
-                    cvf.tilt_angle = -y if t in (133, '133', f.get('cmd_config', {}).get('cmd_gimbal_ctrl')) else y
-                except Exception:
-                    pass
-                return {'path': 'ros2', 'ok': bool(result.get('ok')), 'mode': mode, 'result': result}
+                cvf.pan_angle = x
+                cvf.tilt_angle = tilt_sign_y
+            except Exception:
+                pass
+
+        import ros_motion as _rm
+        path_choice = _rm.preferred_motion_path(mode, _rosbridge_reachable())
+        if path_choice == 'ros2':
+            try:
+                result = _rm.publish_gimbal_from_ui(x, y, throttle=True)
+                if result.get('ok'):
+                    _apply_cvf_pt()
+                    return {'path': 'ros2', 'ok': True, 'mode': mode, 'result': result}
+                olog.warn(
+                    'motion_route',
+                    f'ROS2 gimbal returned not-ok; falling back to serial: {result.get("error")}',
+                    path='ros2', T=t, mode=mode, error=str(result.get('error') or '')[:160],
+                    throttle_s=3.0, throttle_key='ros2_gimbal_fallback',
+                )
+                path_choice = 'serial_fallback'
             except Exception as e:
                 olog.error(
-                    'motion_route', f'ROS2 gimbal failed: {e}',
+                    'motion_route', f'ROS2 gimbal failed; falling back to serial: {e}',
                     path='ros2', T=t, mode=mode, error=str(e),
                     throttle_s=3.0, throttle_key='ros2_gimbal_fail',
                 )
-                return {'path': 'ros2', 'ok': False, 'mode': mode, 'error': str(e)}
+                path_choice = 'serial_fallback'
+        elif path_choice == 'serial_fallback':
+            olog.warn(
+                'motion_route',
+                'ROS2 gimbal: rosbridge down — using serial fallback',
+                path='serial_fallback', T=t, mode=mode,
+                throttle_s=5.0, throttle_key='ros2_gimbal_no_bridge',
+            )
+
+        if path_choice != 'direct' and (
+            getattr(base, 'serial_released_for_ros', False) or not base.serial_is_open()
+        ):
+            if not _ensure_flask_serial(reason='gimbal_route'):
+                return {
+                    'path': 'none',
+                    'ok': False,
+                    'mode': mode,
+                    'error': 'rosbridge down and serial reclaim failed — switch Control to Direct',
+                }
         base.base_json_ctrl(cmd)
-        return {'path': 'direct', 'ok': True, 'mode': mode}
+        _apply_cvf_pt()
+        return {
+            'path': path_choice if path_choice in ('direct', 'serial_fallback') else 'serial_fallback',
+            'ok': True,
+            'mode': mode,
+        }
 
     # ---- Chassis wheels ----
     if t in chassis_types:
@@ -7289,7 +7932,7 @@ def _route_json_command(cmd):
             cmd['L'] = hw_L
             cmd['R'] = hw_R
 
-        if mode == 'ros2':
+        if mode == 'ros2' and _rosbridge_reachable():
             try:
                 import ros_motion
                 # Values already sign-mapped above for T:13; for T:1 derive twist from HW L/R
@@ -7303,16 +7946,36 @@ def _route_json_command(cmd):
                     lin = (L + R) / 2.0
                     ang = (R - L)
                 result = ros_motion.publish_cmd_vel(lin, ang)
-                return {'path': 'ros2', 'ok': bool(result.get('ok')), 'mode': mode, 'result': result}
+                if result.get('ok'):
+                    return {'path': 'ros2', 'ok': True, 'mode': mode, 'result': result}
+                olog.warn(
+                    'motion_route',
+                    f'ROS2 chassis not-ok; serial fallback: {result.get("error")}',
+                    path='ros2', T=t, error=str(result.get('error') or '')[:160],
+                    throttle_s=3.0, throttle_key='ros2_chassis_fallback',
+                )
             except Exception as e:
                 olog.error(
-                    'motion_route', f'ROS2 chassis failed: {e}',
+                    'motion_route', f'ROS2 chassis failed; serial fallback: {e}',
                     path='ros2', T=t, mode=mode, error=str(e),
                     throttle_s=3.0, throttle_key='ros2_chassis_fail',
                 )
-                return {'path': 'ros2', 'ok': False, 'mode': mode, 'error': str(e)}
+        if mode == 'ros2' and (
+            getattr(base, 'serial_released_for_ros', False) or not base.serial_is_open()
+        ):
+            if not _ensure_flask_serial(reason='chassis_route'):
+                return {
+                    'path': 'none',
+                    'ok': False,
+                    'mode': mode,
+                    'error': 'rosbridge down and serial reclaim failed — switch Control to Direct',
+                }
         base.base_json_ctrl(cmd)
-        return {'path': 'direct', 'ok': True, 'mode': mode}
+        return {
+            'path': 'direct' if mode == 'direct' else 'serial_fallback',
+            'ok': True,
+            'mode': mode,
+        }
 
     # Lights (T:132): use lights_ctrl so ROS mode publishes /ugv/led_ctrl
     if t in (132, '132'):
