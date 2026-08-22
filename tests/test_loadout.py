@@ -251,10 +251,15 @@ class TestSourceGates(unittest.TestCase):
         self.assertTrue(callable(roarm_ctrl.e_z_r_to_joints))
         joints = roarm_ctrl.e_z_r_to_joints(60, 24, 0)
         self.assertIn("base", joints)
+        self.assertTrue(callable(roarm_ctrl.current_roarm))
+        self.assertTrue(callable(roarm_ctrl.shutdown_roarm))
+        self.assertIsNone(roarm_ctrl.current_roarm())
 
     def test_gitignore_runtime_loadout(self):
         text = Path(ROOT, ".gitignore").read_text(encoding="utf-8")
         self.assertIn(".loadout.json", text)
+        self.assertIn("*.bak*", text)
+        self.assertIn(".env.*", text)
 
 
 class TestCameraPreferApplyUnit(unittest.TestCase):

@@ -74,6 +74,8 @@ Visual QA source of truth for Playwright feature catalog.
 **Operator notes**
 - Chat is a thin client of `/api/ai/chat`. Tool capability toggles live on **`/ai`** only.
 - Motion tools default off server-side; enable on `/ai` first.
+- **Grab still** freezes the JPEG that **Send** attaches when the checkbox is on. If no still has been grabbed, Send captures a live frame.
+- Voice Off / Browser / Robot needs `UGV_STT_URL` and `UGV_TTS_URL` in `.env`.
 
 ---
 
@@ -88,7 +90,7 @@ Visual QA source of truth for Playwright feature catalog.
 | `seek.goal_select` | Detector goal class | Select shows VOC labels (e.g. person, chair) |
 | `seek.onfound_none` | Upon found = none | Do nothing selected; TTS field hidden |
 | `seek.onfound_tts` | Upon found = TTS | TTS phrase field visible |
-| `seek.scenenav_off` | Scene nav unchecked (b/c) | Checkbox off; interval may disable |
+| `seek.scenenav_off` | Scene nav unchecked (b/c) | Checkbox off (mode c: scan/found only, no drive) |
 | `seek.limits` | Finite limits | Max steps + timeout inputs visible |
 | `seek.dry_run` | Dry run default ON | Checkbox **Dry run (no drive)** checked |
 | `seek.pano_empty` | Panorama empty | Hint “No scan yet…”; no broken image |
@@ -102,8 +104,9 @@ Visual QA source of truth for Playwright feature catalog.
 - **Config is locked while Seek is running** (mode radios, goal, upon-found, scene nav, max steps, timeout). Card tooltip: “Config locked while Seek is running — Stop to edit”. Use **Stop** or navbar **STOP** to unlock and edit.
 - Leaving Seek while running prompts stop confirm.
 - Prefer mode **a** or **b** with a VOC class (`person`, `chair`, …) for detector demos; mode **c** for a free-text goal.
+- **Mode a** is detector + L/C/R heuristic nav (no LLM). **Mode b** is detector found + front-first LLM hops. **Mode c** is LLM found + the same hops. Uncheck **LLM Scene Navigation** on b/c to scan without driving.
 - **This chassis:** Seek turns are **UI-Fast T:1** spins (soft twist yaw does nothing). Soft linear stalls on thick floor transitions; hops are punchy (~0.22–0.28). short/medium/long ≈ 0.85s / 1.1s / 1.6s. Restart the Flask app after changing hop tables.
-- **Indoor helpers:** drive *away* from walls when the planner is heuristic; after a doorway-like chute take another hop so the body is past the jambs. Cruise tilt ≈ −12°. Look-down L/front/R (≈ −22°) only when cruise stills look close, and at most every 3 steps. A **person** in the cruise scan can trigger look-up L/front/R (≈ +18°). **Reverse** only if forward and turn are both impossible **and** both rear quarters look clear. PTZ from `/api/ptz` or Seek updates the Raw HUD needles (last command, not HW encoder).
+- **Indoor helpers (mode a):** drive *away* from walls when the planner is heuristic; after a doorway-like chute take another hop so the body is past the jambs. Cruise tilt ≈ −12°. PTZ from `/api/ptz` or Seek updates the Raw HUD needles (last command, not HW encoder).
 
 ---
 

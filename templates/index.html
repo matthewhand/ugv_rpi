@@ -6,7 +6,7 @@
     <script src="./jquery-3.7.1.min.js"></script>
     <script src="./js-yaml.min.js"></script>
     <script src="./socket.io.js"></script>
-    <link rel="stylesheet" type="text/css" href="./style.css?v=chat-still-2">
+    <link rel="stylesheet" type="text/css" href="./style.css?v=chat-still-3">
     <link rel="stylesheet" type="text/css" href="./loadout.css?v=dual-hw-1">
     <style type="text/css">
       .seek-pano-card {
@@ -560,7 +560,7 @@
         <div class="ugv-chat-layout">
           <div class="ugv-panel-card ugv-chat-camera-card">
             <h2>Live camera</h2>
-            <p class="hint">Same MJPEG feed as Raw mode. Snapshots attach when you send.</p>
+            <p class="hint">Same MJPEG feed as Raw mode. Grab still, then send — the grabbed JPEG is what the model sees (not a new live frame).</p>
             <div class="ugv-live-preview-wrap" id="chat-live-wrap">
               <img class="ugv-preview-img" id="chat-live-preview" alt="Live feed" />
               <div class="ugv-live-fail ugv-live-fail--overlay" id="chat-live-fail" hidden>
@@ -613,8 +613,8 @@
             <div class="ugv-panel-card ugv-seek-preview-card">
               <h2>Live camera</h2>
               <p class="hint" id="seek-hint-camera">
-                Mode <strong>b</strong> (detector + LLM nav): each cycle L/straight/R photos → LLM picks
-                <strong>direction</strong> and <strong>short/medium/long</strong> distance, then drive, then re-scan.
+                Mode <strong>b</strong> (detector + LLM nav): each step a <strong>front</strong> still
+                (forced JSON: little/lot hop + subject). Sides only if front is blocked, then rotate and recentre.
                 MobileNet-SSD referee decides “found”.
               </p>
               <div class="ugv-seek-detector-bar" id="seek-detector-bar" aria-live="polite">
@@ -676,21 +676,21 @@
                   <input type="radio" name="seek-mode-type" value="detector" id="seek-mode-detector" />
                   <div>
                     <strong>a. Object Detector</strong>
-                    <span>MobileNet-SSD + classic navigation</span>
+                    <span>MobileNet-SSD + L/C/R heuristic nav (no LLM)</span>
                   </div>
                 </label>
                 <label class="ugv-seek-radio-card ugv-seek-radio-card--default">
                   <input type="radio" name="seek-mode-type" value="detector_llm_nav" id="seek-mode-detector-llm" checked />
                   <div>
                     <strong>b. Object Detector + LLM Navigation (Default)</strong>
-                    <span>MobileNet-SSD + ±135° near-360° LLM nav</span>
+                    <span>MobileNet-SSD found + front-first LLM hops</span>
                   </div>
                 </label>
                 <label class="ugv-seek-radio-card">
                   <input type="radio" name="seek-mode-type" value="llm_vision" id="seek-mode-llm-vision" />
                   <div>
                     <strong>c. LLM Detection &amp; Vision</strong>
-                    <span>Free-text goal + Vision LLM referee &amp; scene pilot</span>
+                    <span>Free-text goal; LLM found + front-first hops</span>
                   </div>
                 </label>
               </div>
@@ -719,7 +719,7 @@
                     <input type="checkbox" id="seek-llm-scene-nav" checked />
                     <span>LLM Scene Navigation</span>
                   </label>
-                  <div class="ugv-seek-scenenav-interval">
+                  <div class="ugv-seek-scenenav-interval" hidden title="Front-first loop analyzes every step; interval is unused.">
                     <span>Recalculate every</span>
                     <input type="number" id="seek-llm-nav-interval" value="10" min="1" max="100" />
                     <span>steps</span>
@@ -1094,7 +1094,30 @@
         <div style="background-image: url('./img/grey/delete.svg');"></div>
     </footer>
     <!-- <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.7.0/jquery.min.js"></script> -->
-    <script src="./modes.js?v=loadout-1"></script>
+    <script>
+      window.__UGV_AI_TOKEN__ = {{ ugv_ai_token|default('', true)|tojson }};
+      (function () {
+        var _fetch = window.fetch.bind(window);
+        window.fetch = function (url, opts) {
+          var u = String(url || '');
+          if (u.indexOf('/api/ai/') === 0 || u.indexOf('/api/snapshot') === 0) {
+            opts = opts || {};
+            var headers = {};
+            if (opts.headers) {
+              if (typeof opts.headers.forEach === 'function') {
+                opts.headers.forEach(function (v, k) { headers[k] = v; });
+              } else {
+                Object.keys(opts.headers).forEach(function (k) { headers[k] = opts.headers[k]; });
+              }
+            }
+            if (window.__UGV_AI_TOKEN__) headers['X-UGV-Token'] = window.__UGV_AI_TOKEN__;
+            opts = Object.assign({}, opts, { headers: headers });
+          }
+          return _fetch(url, opts);
+        };
+      })();
+    </script>
+    <script src="./modes.js?v=seek-chat-finish-1"></script>
     <script src="./loadout.js?v=dual-hw-1"></script>
     <script src="./control.js?v=ui-iter-10"></script>
     <script src="./main.js"></script>

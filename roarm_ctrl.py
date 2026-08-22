@@ -368,9 +368,15 @@ def termios_err():
     return OSError
 
 
-# Process-wide singleton (lazy). App sets this via get_roarm().
+# Process-wide singleton. Flask and tools must use these helpers — do not
+# keep a second handle in app.py (stop would leave this one open/stale).
 _roarm: Optional[RoArmController] = None
 _roarm_lock = threading.Lock()
+
+
+def current_roarm() -> Optional[RoArmController]:
+    """Return the live controller if one was started, without opening USB."""
+    return _roarm
 
 
 def get_roarm(
@@ -392,9 +398,11 @@ def get_roarm(
 def shutdown_roarm() -> None:
     global _roarm
     with _roarm_lock:
-        if _roarm is not None:
-            try:
-                _roarm.close()
-            except Exception:
-                pass
-            _roarm = None
+        arm = _roarm
+        _roarm = None
+    if arm is None:
+        return
+    try:
+        arm.close()
+    except Exception:
+        pass

@@ -25,9 +25,11 @@ from ai_seek import (  # noqa: E402
     normalize_seek_max_steps,
     normalize_seek_timeout_s,
     motion_lock_should_ignore_zero,
+    parse_forced_yesno,
     DEFAULT_SEEK_MAX_STEPS,
     DEFAULT_SEEK_TIMEOUT_S,
     DEFAULT_SEEK_DRY_RUN,
+    DEFAULT_SEEK_CONF,
     SEEK_MAX_STEPS_CAP,
     SEEK_TIMEOUT_S_MIN,
     SEEK_TIMEOUT_S_CAP,
@@ -99,6 +101,24 @@ class TestEvaluateGoal(unittest.TestCase):
         self.assertEqual(len(out), 1)
         self.assertAlmostEqual(out[0]['center_x'], 0.5)
         self.assertAlmostEqual(out[0]['offset_x'], 0.0)
+
+    def test_flat_threshold_applies_to_chair_and_sofa(self):
+        chair = [{'label': 'chair', 'confidence': 0.86, 'bbox_norm': [0, 0, 1, 1]}]
+        r = evaluate_goal_detections(chair, 'chair', conf_threshold=DEFAULT_SEEK_CONF)
+        self.assertTrue(r['found'])
+        sofa = [{'label': 'sofa', 'confidence': 0.90, 'bbox_norm': [0, 0, 1, 1]}]
+        r = evaluate_goal_detections(sofa, 'sofa', conf_threshold=DEFAULT_SEEK_CONF)
+        self.assertTrue(r['found'])
+        weak = [{'label': 'chair', 'confidence': 0.50, 'bbox_norm': [0, 0, 1, 1]}]
+        r = evaluate_goal_detections(weak, 'chair', conf_threshold=DEFAULT_SEEK_CONF)
+        self.assertFalse(r['found'])
+
+    def test_forced_yesno_parse(self):
+        self.assertEqual(parse_forced_yesno('YES'), 'yes')
+        self.assertEqual(parse_forced_yesno('true'), 'yes')
+        self.assertEqual(parse_forced_yesno('0'), 'no')
+        self.assertEqual(parse_forced_yesno(None), 'no')
+        self.assertEqual(parse_forced_yesno('maybe', default='no'), 'no')
 
 
 class TestRefereeAndLlmParse(unittest.TestCase):
@@ -337,6 +357,10 @@ class TestMotionLockZeroPolicy(unittest.TestCase):
         self.assertFalse(
             motion_lock_should_ignore_zero(False, True, force_stop=False)
         )
+
+    def test_no_per_class_detector_map(self):
+        import ai_seek
+        self.assertFalse(hasattr(ai_seek, 'DETECTOR_CLASS_MIN_CONF'))
 
     def test_seek_stop_clears_running_phase(self):
         """Shipped SeekController.stop() path used by emergency/seek stop APIs."""

@@ -15,7 +15,8 @@
 - [x] Seek sticky actions (phone); body.seek-running log expand; config lock while running  
 - [x] Seek mode-specific camera hints (`syncSeekCameraHint` a/b/c)  
 - [x] Seek radio highlight via `:has(input:checked)`  
-- [x] Chat → full `/ai` link; Chat/Seek live fail overlay + retry; single active MJPEG  
+- [x] Chat → full `/ai` link; Chat/Seek live fail overlay + retry; single active MJPEG
+- [x] Chat Grab still is the JPEG Send attaches (not a second live grab)  
 - [x] Twin larger drawer; ops/twin body classes  
 - [x] Playwright catalog + operator guide  
 - [x] Catalog does not auto-flip Direct↔ROS2 (UART)  

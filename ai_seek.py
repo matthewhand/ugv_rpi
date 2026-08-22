@@ -54,22 +54,14 @@ DEFAULT_SEEK_MAX_STEPS = 30
 # Wheels stay still unless the operator explicitly turns dry-run off.
 DEFAULT_SEEK_DRY_RUN = True
 DEFAULT_SEEK_TIMEOUT_S = 300.0  # 5 minutes
-DEFAULT_SEEK_CONF = 0.85  # Raised from 0.22 - empty corridors were showing false sofa/chair
-# Halt-as-found bar. Scan still uses DEFAULT_SEEK_CONF so weak hits are logged.
-DEFAULT_SEEK_FOUND_CONF = 0.45
+DEFAULT_SEEK_CONF = 0.85  # Flat min for every class (HUD + found)
+# Halt-as-found bar. Same as scan now that the baseline is 0.85.
+DEFAULT_SEEK_FOUND_CONF = 0.85
 DEFAULT_SEEK_STEP_PAUSE_S = 0.35
 # Caps applied when a positive limit is requested
 SEEK_MAX_STEPS_CAP = 500
 SEEK_TIMEOUT_S_MIN = 5.0
 SEEK_TIMEOUT_S_CAP = 7200.0
-
-# Per-class detector minimum confidence thresholds
-# Classes not in this map use the general conf_threshold parameter
-# Matthew: sofa and chair need 99% to avoid false positives (carpet, floor patterns)
-DETECTOR_CLASS_MIN_CONF = {
-    'sofa': 0.99,
-    'chair': 0.99,
-}
 
 
 def normalize_seek_max_steps(raw, default: int = DEFAULT_SEEK_MAX_STEPS) -> int:
@@ -126,6 +118,16 @@ def normalize_seek_timeout_s(raw, default: float = DEFAULT_SEEK_TIMEOUT_S) -> fl
     if ts > 0:
         return max(float(SEEK_TIMEOUT_S_MIN), min(float(SEEK_TIMEOUT_S_CAP), ts))
     return 0.0  # explicit 0 = no time limit
+
+
+def parse_forced_yesno(raw, default: str = 'no') -> str:
+    """Normalize forced-JSON yes/no fields from a vision LLM."""
+    s = str(raw if raw is not None else '').strip().lower()
+    if s in ('yes', 'y', 'true', '1'):
+        return 'yes'
+    if s in ('no', 'n', 'false', '0'):
+        return 'no'
+    return 'yes' if str(default).strip().lower() in ('yes', 'y', 'true', '1') else 'no'
 
 
 def motion_lock_should_ignore_zero(
@@ -323,12 +325,7 @@ def evaluate_goal_detections(
     """Detector-side goal judgment. LLM free-text is never consulted here.
 
     found is True only when at least one detection has matching label and
-    confidence >= conf_threshold (or per-class minimum, whichever is higher).
-    
-    Per-class minimums (DETECTOR_CLASS_MIN_CONF):
-    - sofa: 99% (0.99) - avoid false positives on textured carpet/floor
-    - chair: 99% (0.99) - avoid false positives on floor patterns
-    - Other classes use conf_threshold parameter
+    confidence >= conf_threshold (flat 0.85 for every class by default).
     """
     goal = (goal_label or '').strip().lower()
     thr = max(0.05, min(0.95, float(conf_threshold)))
@@ -339,13 +336,7 @@ def evaluate_goal_detections(
             c = float(d.get('confidence', 0) or 0)
         except (TypeError, ValueError):
             c = 0.0
-        
-        # Use per-class minimum if defined, otherwise use general threshold
-        label = (d.get('label') or '').strip().lower()
-        min_conf = DETECTOR_CLASS_MIN_CONF.get(label, thr)
-        effective_thr = max(thr, min_conf)
-        
-        if c >= effective_thr:
+        if c >= thr:
             matches.append(d)
     
     labels = sorted({(d.get('label') or '') for d in (dets or []) if isinstance(d, dict) and d.get('label')})

@@ -6,6 +6,9 @@ tutorial_cn/.ipynb_checkpoints/
 templates/pictures/photo*
 templates/videos/video*
 .env
+.env.*
+!.env.example
+*.bak*
 .ai_capabilities.json
 .control_mode.json
 .loadout.json

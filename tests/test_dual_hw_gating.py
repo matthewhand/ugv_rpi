@@ -90,6 +90,16 @@ class TestSeekRoArmGateInSource(unittest.TestCase):
         returns = [n for n in ast.walk(fn) if isinstance(n, ast.Return)]
         self.assertGreaterEqual(len(returns), 2, "expected RoArm early return + PTZ return")
 
+    def test_app_uses_roarm_ctrl_singleton(self):
+        src = Path(ROOT, "app.py").read_text(encoding="utf-8")
+        self.assertNotIn("\n_roarm = None\n", src)
+        stop = src[src.find("def _stop_roarm") : src.find("def _stop_roarm") + 900]
+        self.assertIn("shutdown_roarm", stop)
+        self.assertIn("current_roarm", stop)
+        start = src[src.find("def _start_roarm") : src.find("def _start_roarm") + 1400]
+        self.assertIn("roarm_ctrl.get_roarm", start)
+        self.assertIn("current_roarm", start)
+
 
 class TestDriverMinPrefer(unittest.TestCase):
     def test_prefer_helper_orders_driver_min(self):

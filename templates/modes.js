@@ -455,6 +455,8 @@
           select.title = 'Voice not configured — set UGV_STT_URL and UGV_TTS_URL in .env';
           voiceMode = 'off';
         }
+        var voiceBtnEl = $('chat-voice-btn');
+        if (voiceBtnEl) voiceBtnEl.hidden = (voiceMode === 'off');
       })
       .catch(function () {
         var select = $('chat-voice-mode');
@@ -604,18 +606,31 @@
     var message = (input.value || '').trim();
     if (!message) return;
     var attach = $('chat-attach') && $('chat-attach').checked;
+    var stillImg = $('chat-snap-preview');
+    var stillUrl = '';
+    if (
+      attach &&
+      stillImg &&
+      !stillImg.hidden &&
+      stillImg.src &&
+      stillImg.src.indexOf('data:image') === 0
+    ) {
+      stillUrl = stillImg.src;
+    }
     btn.disabled = true;
     chatAdd('user', message);
     input.value = '';
-    chatAdd('sys', 'Thinking…');
+    chatAdd('sys', attach ? (stillUrl ? 'Thinking with grabbed still…' : 'Thinking (live still)…') : 'Thinking…');
+    var payload = {
+      message: message,
+      history: chatHistory,
+      attach_snapshot: !!attach,
+    };
+    if (stillUrl) payload.snapshot_data_url = stillUrl;
     fetch('/api/ai/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        message: message,
-        history: chatHistory,
-        attach_snapshot: !!attach,
-      }),
+      body: JSON.stringify(payload),
     })
       .then(function (r) {
         return r.json();
@@ -718,7 +733,17 @@
           voiceMode = saved;
         }
       } catch (e) {}
-      
+      if (voiceBtn) {
+        voiceBtn.hidden = (voiceMode === 'off');
+        if (voiceMode === 'browser') {
+          voiceBtn.textContent = '🎤 Record (hold)';
+          voiceBtn.title = 'Hold to record from browser mic';
+        } else if (voiceMode === 'robot') {
+          voiceBtn.textContent = '🎤 Record (5s)';
+          voiceBtn.title = 'Record 5 seconds from robot mic';
+        }
+      }
+
       voiceSelect.addEventListener('change', function () {
         var newMode = voiceSelect.value;
         voiceMode = newMode;
@@ -1060,15 +1085,15 @@
 
   var SEEK_CAMERA_HINTS = {
     detector:
-      'Mode <strong>a</strong> (classic detector): MobileNet-SSD scans for the selected class, ' +
-      'then drives with classic CV navigation. No LLM L/C/R scene pilot.',
+      'Mode <strong>a</strong> (classic detector): each step L / front / R stills. ' +
+      'MobileNet-SSD decides “found”. Heuristic nav (no LLM). Works without an API key.',
     detector_llm_nav:
-      'Mode <strong>b</strong> (detector + LLM nav): each cycle L/straight/R photos → LLM picks ' +
-      '<strong>direction</strong> and <strong>short/medium/long</strong> distance, then drive, then re-scan. ' +
+      'Mode <strong>b</strong> (detector + LLM nav): each step a <strong>front</strong> still → forced JSON ' +
+      '(short hop / long hop / subject). Sides only if front is blocked, then rotate and recentre. ' +
       'MobileNet-SSD referee decides “found”.',
     llm_vision:
-      'Mode <strong>c</strong> (LLM vision): free-text goal. Each cycle L/straight/R photos → Vision LLM ' +
-      'pilots <strong>direction</strong>/<strong>distance</strong> and judges “found” against your goal.'
+      'Mode <strong>c</strong> (LLM vision): free-text goal. Same front-first hops as b, but the ' +
+      'vision LLM also judges “found”. Uncheck scene nav to scan without driving.'
   };
 
   function syncSeekCameraHint() {

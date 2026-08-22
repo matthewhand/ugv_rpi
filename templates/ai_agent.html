@@ -289,7 +289,7 @@
           <img id="snap-preview" alt="" hidden />
           <div class="snap-meta">
             <div>Last grab: <strong id="snap-status">none</strong></div>
-            <div id="snap-info">Used when “Attach live camera snapshot” is checked (or after Grab).</div>
+            <div id="snap-info">When Attach is checked, Send uses this grabbed JPEG if present; otherwise a new live frame.</div>
           </div>
           <div class="video-actions">
             <button id="snap-btn" class="secondary" style="background:#2a3142">Grab still now</button>
@@ -302,7 +302,7 @@
       <div class="composer">
         <textarea id="input" placeholder="Ask about what the robot sees… e.g. Describe the scene in front of the camera."></textarea>
         <div class="bar">
-          <label><input type="checkbox" id="attach" checked /> Attach still from camera when sending (vision)</label>
+          <label><input type="checkbox" id="attach" checked /> Attach grabbed still (or live frame) when sending</label>
           <span class="snap-meta" title="Main dashboard re-sends last wheel cmd every 2s when idle (Idle heartbeat). Server AI motion lock blocks those zeros during timed AI drives; set Idle heartbeat OFF on the control page for AI moves. Navbar STOP always clears the lock.">Tip: main UI “Idle heartbeat” OFF for AI moves · STOP always halts</span>
           <span class="spacer"></span>
           <span style="position:relative;display:inline-flex">
@@ -642,25 +642,35 @@
       if (!message) return;
       sendBtn.disabled = true;
       const wantAttach = !!attachEl.checked;
+      const stillEl = document.getElementById('snap-preview');
+      const stillUrl = (
+        wantAttach &&
+        stillEl &&
+        !stillEl.hidden &&
+        stillEl.src &&
+        stillEl.src.indexOf('data:image') === 0
+      ) ? stillEl.src : '';
       // User bubble first; thumb filled when server returns the attached frame
       const userEl = addMsg('user', message);
       if (wantAttach) {
         const pending = document.createElement('div');
         pending.className = 'msg-thumb-label';
-        pending.textContent = 'attaching camera still…';
+        pending.textContent = stillUrl ? 'attaching grabbed still…' : 'attaching live still…';
         userEl.appendChild(pending);
       }
       inputEl.value = '';
       const thinking = addMsg('sys', 'Thinking… (vision may take 10–60s on local GPU)');
       try {
+        const body = {
+          message,
+          history,
+          attach_snapshot: wantAttach,
+        };
+        if (stillUrl) body.snapshot_data_url = stillUrl;
         const r = await fetch('/api/ai/chat', {
           method: 'POST',
           headers: aiHeaders({ 'Content-Type': 'application/json' }),
-          body: JSON.stringify({
-            message,
-            history,
-            attach_snapshot: wantAttach,
-          }),
+          body: JSON.stringify(body),
         });
         const d = await r.json();
         thinking.remove();

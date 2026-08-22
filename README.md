@@ -36,14 +36,13 @@ Navbar **STOP** zeros wheels, cancels Seek **and** Track, and clears the AI moti
 
 ### Seek (scan, then move)
 
-- **Modes:** `a` detector only · `b` detector + LLM nav (default) · `c` LLM referee + nav (free-text goals; anything not on the MobileNet-SSD list).
-- **LLM nav (when it works):** we ask the model to call `seek_nav_answer` (`tool_choice` required): estimated cm until a hit, can we go forward, hop length, turn vs reverse, rear-quarter clearance. On this tree the compatible backend **usually times out**. Timeout → **heuristic immediately** (8s, no second 20s retry). Empty / non-timeout faults get one short retry, then heuristic. Live dry-runs have not yet landed a good schema call.
+- **Modes:** `a` detector + L/C/R heuristic nav (no LLM) · `b` detector found + front-first LLM hops (default) · `c` LLM found + the same hops (free-text goals). Uncheck **LLM Scene Navigation** on b/c to scan without driving.
+- **LLM nav (b/c):** each step one front JPEG with forced JSON (`clear_forward_little` / `clear_forward_lot` / `subject_in_scene`). Sides (±135° then taper) only if front is blocked; chassis turns only after the gimbal recentres. Optional **multi-image** checkbox sends all three views in one call. Timeout or schema reject → **heuristic fallback** (8s, no long retry). Detector FOUND is a flat **0.85** on every class.
 - **This chassis:** `T:13` twist yaw does **not** turn the rover. Seek uses **UI-Fast `T:1` tank spins**. Soft linear (~0.12) stalls on thick floor transitions; hops are punchy (~0.22–0.28). Open-loop tables, timed on *this* rover 2026-08-13: short / medium / long ≈ 0.85s / 1.1s / 1.6s; turns ≈ 350 / 700 / 1100 ms. Restart Flask after changing hop tables. Another floor will need retuning.
-- **Indoor helpers (partially enforced):** cruise tilt ≈ −12°. Look-down L / front / R (≈ −22°) only when the cruise stills look close, and at most every 3 steps (looking down every hop ate the budget). Look-up (≈ +18°) if the cruise detector thinks a **person** is nearby. **Reverse** is allowed only if forward and turn both fail **and** both rear quarters look clear (left half of −135° and right half of +135°) — and never twice in a row. After a turn or reverse the cached hop is dropped (a leftover “drive forward next” used to ram whatever we just turned toward).
-- **Heuristic-only overrides:** doorway-commit (one more hop after a chute) and turn-away-from-wall run when the planner is **heuristic**. An LLM hop/turn is **not** rewritten by those helpers — we trust the schema when we get one.
+- **Mode a indoor helpers:** cruise tilt ≈ −12°. Doorway-commit and turn-away-from-wall run on the **heuristic** planner only.
 - **Battery gate:** live Seek refuses start / halt if pack V is known and ≤ `UGV_BATTERY_LOW_V` (default **9.5**). **Dry-run skips this gate.** Missing or ADC-looking `v` does **not** block. Override: `UGV_SEEK_BATTERY_GATE=0`.
 - **Limits:** default 30 steps / 300 s (0 = unlimited). Config locks while running.
-- **Dry run (default ON):** PTZ still sweeps; **wheels never move**. Logs say `WOULD drive`. Uncheck and confirm only for a live test. API live start requires `confirm_live=true` (the UI sends that after the confirm dialog). Process latch also drops T:1 / T:13 sticks while Seek or Track owns the chassis. A dry-run cannot prove doorway-commit or reverse — the pose never changes. Detector **FOUND** needs ≥0.45 conf or two views; 0.22 is only a log candidate.
+- **Dry run (default ON):** PTZ still sweeps; **wheels never move**. Logs say `WOULD drive`. Uncheck and confirm only for a live test. API live start requires `confirm_live=true` (the UI sends that after the confirm dialog). Process latch also drops T:1 / T:13 sticks while Seek or Track owns the chassis.
 - **Obstacles** are vision heuristics (Canny / texture / bright walls) — **not lidar**. Exploration is a heading trail, not a map.
 
 ### PTZ HUD
@@ -53,8 +52,10 @@ Commanded pan/tilt from `/api/ptz`, `T:133`, Seek, Track, and Chat gimbal go thr
 ### Chat / `/ai`
 
 - OpenAI-compatible (`OPENAI_BASE_URL` + `OPENAI_MODEL`; key from `.env`).
-- Chat completion budget defaults to **8192** tokens (`UGV_CHAT_MAX_TOKENS`) because **512 truncated tool JSON**. Seek nav completion size is 1024 (one 2048 retry only if the parse is empty, not on timeout). Some compatible backends still return empty `content`, ignore `tool_choice`, or hang until the 8s Seek timeout.
-- Motion tools default **off**. Enable on `/ai`. Set navbar **HB off** for timed AI drives.
+- Chat completion budget defaults to **8192** tokens (`UGV_CHAT_MAX_TOKENS`) because **512 truncated tool JSON**. Seek nav forced-JSON calls wait 8s, then heuristic.
+- **Grab still** is the JPEG that Send attaches (not a new live grab) when the checkbox is on. If nothing has been grabbed, Send captures live.
+- Motion tools default **off**. Enable on `/ai`. Set navbar **HB off** for timed AI drives. Seek does **not** persist those tools on.
+- Chat voice (Off / Browser / Robot): `UGV_STT_URL` / `UGV_TTS_URL`.
 
 ### Direct serial ↔ ROS 2
 
@@ -105,6 +106,7 @@ Copy to `ugv_rpi/.env` (already gitignored):
 | `OPENAI_MODEL` | Optional. Default `gpt-4o-mini` |
 | `UGV_CHAT_MAX_TOKENS` | Chat / agent completion budget (default **8192**, clamp 1024–32768) |
 | `UGV_AI_TOKEN` | If set, `/api/ai/*` and `/api/snapshot` require it |
+| `UGV_STT_URL` / `UGV_TTS_URL` | Optional Chat voice (empty = voice disabled) |
 | `UGV_BATTERY_LOW_V` / `UGV_SEEK_BATTERY_GATE` | Seek pack-voltage gate |
 | `UGV_AUTOSTOP_BRINGUP` / `UGV_ROS_AUTOHEAL` | ROS 2 exit / retry |
 
