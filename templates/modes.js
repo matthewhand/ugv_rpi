@@ -1,5 +1,5 @@
 /**
- * Multi-mode shell: Raw / Chat / Seek + shared navbar persistence.
+ * Multi-mode shell: Raw / Chat / Seek / Track / Loadout + shared navbar persistence.
  */
 (function () {
   'use strict';
@@ -253,6 +253,11 @@
       pauseLiveStream(seek);
       pauseLiveStream(raw);
       resumeLiveStream(track, 'mode-enter');
+    } else if (mode === 'loadout') {
+      pauseLiveStream(chat);
+      pauseLiveStream(seek);
+      pauseLiveStream(track);
+      pauseLiveStream(raw);
     } else {
       pauseLiveStream(chat);
       pauseLiveStream(seek);
@@ -301,7 +306,15 @@
   function setMode(mode, opts) {
     opts = opts || {};
     mode = mode || 'raw';
-    if (mode !== 'raw' && mode !== 'chat' && mode !== 'seek' && mode !== 'track') mode = 'raw';
+    if (
+      mode !== 'raw' &&
+      mode !== 'chat' &&
+      mode !== 'seek' &&
+      mode !== 'track' &&
+      mode !== 'loadout'
+    ) {
+      mode = 'raw';
+    }
     var prev = getActiveMode();
     // Leaving Seek while autonomy is running: confirm (or auto-stop when force).
     if (
@@ -350,6 +363,7 @@
       chat: $('mode-panel-chat'),
       seek: $('mode-panel-seek'),
       track: $('mode-panel-track'),
+      loadout: $('mode-panel-loadout'),
     };
     var tabs = document.querySelectorAll('.ugv-mode-tabs [data-mode]');
     Object.keys(panels).forEach(function (m) {
@@ -369,9 +383,19 @@
       localStorage.setItem(STORAGE_KEY, mode);
     } catch (e) {}
     window.ugvAppMode = mode;
-    // Re-open MJPEG when entering chat/seek (or any mode switch)
-    if (mode === 'chat' || mode === 'seek' || mode === 'track' || mode === 'raw') {
+    // Re-open MJPEG when entering chat/seek (or any mode switch).
+    // Loadout has no live feed — pause every MJPEG consumer.
+    if (
+      mode === 'chat' ||
+      mode === 'seek' ||
+      mode === 'track' ||
+      mode === 'raw' ||
+      mode === 'loadout'
+    ) {
       refreshLiveFeeds();
+    }
+    if (mode === 'loadout') {
+      window.ugvLoadoutRefresh && window.ugvLoadoutRefresh();
     }
     return true;
   }
@@ -392,6 +416,11 @@
 
   // ---------- Chat panel ----------
   var chatHistory = [];
+  var voiceMode = 'off';  // 'off' | 'browser' | 'robot'
+  var voiceConfig = { stt_enabled: false, tts_enabled: false };
+  var mediaRecorder = null;
+  var audioChunks = [];
+  var VOICE_MODE_KEY = 'ugv_chat_voice_mode';
 
   function chatAdd(role, text) {
     var log = $('chat-log');
@@ -401,6 +430,171 @@
     div.textContent = text;
     log.appendChild(div);
     log.scrollTop = log.scrollHeight;
+  }
+
+  function checkVoiceConfig() {
+    fetch('/api/voice/config')
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        voiceConfig = d;
+        var select = $('chat-voice-mode');
+        if (!select) return;
+        
+        var configured = d.stt_enabled || d.tts_enabled;
+        var browserOpt = select.querySelector('option[value="browser"]');
+        var robotOpt = select.querySelector('option[value="robot"]');
+        
+        if (configured) {
+          if (browserOpt) browserOpt.disabled = false;
+          if (robotOpt) robotOpt.disabled = false;
+          select.title = 'Voice mode: Off, Browser (mic/speakers), or Robot (device mic/speakers)';
+        } else {
+          if (browserOpt) browserOpt.disabled = true;
+          if (robotOpt) robotOpt.disabled = true;
+          select.value = 'off';
+          select.title = 'Voice not configured — set UGV_STT_URL and UGV_TTS_URL in .env';
+          voiceMode = 'off';
+        }
+      })
+      .catch(function () {
+        var select = $('chat-voice-mode');
+        if (select) {
+          select.value = 'off';
+          var browserOpt = select.querySelector('option[value="browser"]');
+          var robotOpt = select.querySelector('option[value="robot"]');
+          if (browserOpt) browserOpt.disabled = true;
+          if (robotOpt) robotOpt.disabled = true;
+        }
+      });
+  }
+
+  function playTTSAudio(text) {
+    if (voiceMode === 'off' || !voiceConfig.tts_enabled) return;
+    
+    if (voiceMode === 'browser') {
+      // Browser mode: play audio in browser
+      fetch('/api/voice/tts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: text }),
+      })
+        .then(function (r) {
+          if (!r.ok) throw new Error('TTS failed');
+          return r.blob();
+        })
+        .then(function (audioBlob) {
+          var audio = new Audio(URL.createObjectURL(audioBlob));
+          audio.play().catch(function (e) {
+            console.warn('TTS audio play failed:', e);
+          });
+        })
+        .catch(function (e) {
+          console.warn('TTS error:', e);
+        });
+    } else if (voiceMode === 'robot') {
+      // Robot mode: play through robot's speakers
+      fetch('/api/voice/robot/speak', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: text }),
+      })
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          if (!d.success) {
+            console.warn('Robot TTS failed:', d.error);
+          }
+        })
+        .catch(function (e) {
+          console.warn('Robot TTS error:', e);
+        });
+    }
+  }
+
+  function startVoiceRecording() {
+    if (voiceMode === 'off' || !voiceConfig.stt_enabled) return;
+    
+    if (voiceMode === 'browser') {
+      // Browser mode: use browser mic
+      audioChunks = [];
+      navigator.mediaDevices.getUserMedia({ audio: true })
+        .then(function (stream) {
+          mediaRecorder = new MediaRecorder(stream);
+          mediaRecorder.ondataavailable = function (e) {
+            audioChunks.push(e.data);
+          };
+          mediaRecorder.onstop = function () {
+            var audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+            sendBrowserSTT(audioBlob);
+            stream.getTracks().forEach(function (track) { track.stop(); });
+          };
+          mediaRecorder.start();
+          chatAdd('sys', 'Recording (browser)… (release to send)');
+        })
+        .catch(function (e) {
+          chatAdd('err', 'Microphone access denied: ' + e.message);
+        });
+    } else if (voiceMode === 'robot') {
+      // Robot mode: use robot's mic
+      chatAdd('sys', 'Recording (robot mic)… (5 seconds)');
+      fetch('/api/voice/robot/record', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ duration: 5 }),
+      })
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          if (!d.success) {
+            chatAdd('err', 'Robot STT failed: ' + (d.error || 'unknown'));
+            return;
+          }
+          var text = d.text || '';
+          if (!text) {
+            chatAdd('sys', 'No speech detected.');
+            return;
+          }
+          var input = $('chat-input');
+          if (input) input.value = text;
+          chatSend();
+        })
+        .catch(function (e) {
+          chatAdd('err', 'Robot STT error: ' + e.message);
+        });
+    }
+  }
+
+  function stopVoiceRecording() {
+    // Only applies to browser mode
+    if (voiceMode === 'browser' && mediaRecorder && mediaRecorder.state !== 'inactive') {
+      mediaRecorder.stop();
+    }
+  }
+
+  function sendBrowserSTT(audioBlob) {
+    chatAdd('sys', 'Transcribing…');
+    
+    fetch('/api/voice/stt', {
+      method: 'POST',
+      headers: { 'Content-Type': 'audio/webm' },
+      body: audioBlob,
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (!d.success) {
+          chatAdd('err', 'STT failed: ' + (d.error || 'unknown'));
+          return;
+        }
+        var text = d.text || '';
+        if (!text) {
+          chatAdd('sys', 'No speech detected.');
+          return;
+        }
+        var input = $('chat-input');
+        if (input) input.value = text;
+        chatSend();
+      })
+      .catch(function (e) {
+        chatAdd('err', 'STT error: ' + e.message);
+      });
   }
 
   function chatSend() {
@@ -440,7 +634,8 @@
           var slot = $('chat-still-slot');
           if (slot) slot.classList.remove('is-empty');
         }
-        chatAdd('ai', d.reply || '(empty)');
+        var reply = d.reply || '(empty)';
+        chatAdd('ai', reply);
         if (Array.isArray(d.tool_calls) && d.tool_calls.length) {
           d.tool_calls.forEach(function (tc) {
             chatAdd(
@@ -453,8 +648,13 @@
           });
         }
         chatHistory.push({ role: 'user', content: message });
-        chatHistory.push({ role: 'assistant', content: d.reply || '' });
+        chatHistory.push({ role: 'assistant', content: reply });
         if (chatHistory.length > 24) chatHistory = chatHistory.slice(-24);
+        
+        // Play TTS for reply if voice mode is enabled (browser or robot)
+        if (voiceMode !== 'off' && reply && reply !== '(empty)') {
+          playTTSAudio(reply);
+        }
       })
       .catch(function (e) {
         chatAdd('err', String(e.message || e));
@@ -469,6 +669,9 @@
     var clear = $('chat-clear-btn');
     var snap = $('chat-snap-btn');
     var input = $('chat-input');
+    var voiceSelect = $('chat-voice-mode');
+    var voiceBtn = $('chat-voice-btn');
+    
     if (send) send.addEventListener('click', chatSend);
     if (clear) {
       clear.addEventListener('click', function () {
@@ -504,6 +707,76 @@
         }
       });
     }
+    
+    // Voice mode select
+    if (voiceSelect) {
+      // Restore saved mode
+      try {
+        var saved = localStorage.getItem(VOICE_MODE_KEY) || 'off';
+        if (saved === 'browser' || saved === 'robot' || saved === 'off') {
+          voiceSelect.value = saved;
+          voiceMode = saved;
+        }
+      } catch (e) {}
+      
+      voiceSelect.addEventListener('change', function () {
+        var newMode = voiceSelect.value;
+        voiceMode = newMode;
+        try {
+          localStorage.setItem(VOICE_MODE_KEY, newMode);
+        } catch (e) {}
+        
+        if (voiceBtn) {
+          voiceBtn.hidden = (newMode === 'off');
+          if (newMode === 'browser') {
+            voiceBtn.textContent = '🎤 Record (hold)';
+            voiceBtn.title = 'Hold to record from browser mic';
+          } else if (newMode === 'robot') {
+            voiceBtn.textContent = '🎤 Record (5s)';
+            voiceBtn.title = 'Record 5 seconds from robot mic';
+          }
+        }
+        
+        if (newMode === 'off') {
+          chatAdd('sys', 'Voice disabled.');
+        } else if (newMode === 'browser') {
+          chatAdd('sys', 'Voice: Browser mode (mic/speakers in browser).');
+        } else if (newMode === 'robot') {
+          chatAdd('sys', 'Voice: Robot mode (device mic/speakers on the robot).');
+        }
+      });
+    }
+    
+    // Voice record button
+    if (voiceBtn) {
+      // For browser mode: hold to record
+      voiceBtn.addEventListener('mousedown', function () {
+        if (voiceMode === 'browser') startVoiceRecording();
+      });
+      voiceBtn.addEventListener('touchstart', function (e) {
+        e.preventDefault();
+        if (voiceMode === 'browser') startVoiceRecording();
+      });
+      voiceBtn.addEventListener('mouseup', function () {
+        if (voiceMode === 'browser') stopVoiceRecording();
+      });
+      voiceBtn.addEventListener('touchend', function (e) {
+        e.preventDefault();
+        if (voiceMode === 'browser') stopVoiceRecording();
+      });
+      voiceBtn.addEventListener('mouseleave', function () {
+        if (voiceMode === 'browser') stopVoiceRecording();
+      });
+      
+      // For robot mode: click to start 5s recording
+      voiceBtn.addEventListener('click', function () {
+        if (voiceMode === 'robot') startVoiceRecording();
+      });
+    }
+    
+    // Check voice config on init
+    checkVoiceConfig();
+    
     chatAdd('sys', 'Chat mode ready. Attach a still when you want vision context.');
   }
 
@@ -558,6 +831,7 @@
       'seek-on-found-tts',
       'seek-llm-scene-nav',
       'seek-llm-nav-interval',
+      'seek-multi-image',
       'seek-max-steps',
       'seek-timeout-s',
       'seek-dry-run',
@@ -1442,6 +1716,7 @@
     var onFoundTts = getSeekOnFoundTts();
     var llmNavInterval = parseInt(($('seek-llm-nav-interval') && $('seek-llm-nav-interval').value) || '10', 10);
     if (isNaN(llmNavInterval) || llmNavInterval < 1) llmNavInterval = 10;
+    var seekMultiImage = !!($('seek-multi-image') && $('seek-multi-image').checked);
     var maxSteps = getSeekMaxSteps();
     var timeoutS = getSeekTimeoutS();
     var dryRun = true;
@@ -1495,6 +1770,7 @@
         on_found_tts: onFoundTts,
         llm_scene_nav: llmSceneNav,
         llm_nav_interval: llmNavInterval,
+        seek_multi_image: seekMultiImage,
         dry_run: dryRun,
         confirm_live: !dryRun,
       }),

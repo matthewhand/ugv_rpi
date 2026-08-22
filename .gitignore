@@ -8,6 +8,7 @@ templates/videos/video*
 .env
 .ai_capabilities.json
 .control_mode.json
+.loadout.json
 .kilo/
 *.log
 hailort.log
@@ -16,3 +17,4 @@ ai_proof/
 # Playwright UI screenshots & local tooling
 ui_shots/
 .tools/
+.ui_aim_mode.json

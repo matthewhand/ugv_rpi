@@ -54,7 +54,7 @@ DEFAULT_SEEK_MAX_STEPS = 30
 # Wheels stay still unless the operator explicitly turns dry-run off.
 DEFAULT_SEEK_DRY_RUN = True
 DEFAULT_SEEK_TIMEOUT_S = 300.0  # 5 minutes
-DEFAULT_SEEK_CONF = 0.22
+DEFAULT_SEEK_CONF = 0.85  # Raised from 0.22 - empty corridors were showing false sofa/chair
 # Halt-as-found bar. Scan still uses DEFAULT_SEEK_CONF so weak hits are logged.
 DEFAULT_SEEK_FOUND_CONF = 0.45
 DEFAULT_SEEK_STEP_PAUSE_S = 0.35
@@ -62,6 +62,14 @@ DEFAULT_SEEK_STEP_PAUSE_S = 0.35
 SEEK_MAX_STEPS_CAP = 500
 SEEK_TIMEOUT_S_MIN = 5.0
 SEEK_TIMEOUT_S_CAP = 7200.0
+
+# Per-class detector minimum confidence thresholds
+# Classes not in this map use the general conf_threshold parameter
+# Matthew: sofa and chair need 99% to avoid false positives (carpet, floor patterns)
+DETECTOR_CLASS_MIN_CONF = {
+    'sofa': 0.99,
+    'chair': 0.99,
+}
 
 
 def normalize_seek_max_steps(raw, default: int = DEFAULT_SEEK_MAX_STEPS) -> int:
@@ -315,7 +323,12 @@ def evaluate_goal_detections(
     """Detector-side goal judgment. LLM free-text is never consulted here.
 
     found is True only when at least one detection has matching label and
-    confidence >= conf_threshold.
+    confidence >= conf_threshold (or per-class minimum, whichever is higher).
+    
+    Per-class minimums (DETECTOR_CLASS_MIN_CONF):
+    - sofa: 99% (0.99) - avoid false positives on textured carpet/floor
+    - chair: 99% (0.99) - avoid false positives on floor patterns
+    - Other classes use conf_threshold parameter
     """
     goal = (goal_label or '').strip().lower()
     thr = max(0.05, min(0.95, float(conf_threshold)))
@@ -326,8 +339,15 @@ def evaluate_goal_detections(
             c = float(d.get('confidence', 0) or 0)
         except (TypeError, ValueError):
             c = 0.0
-        if c >= thr:
+        
+        # Use per-class minimum if defined, otherwise use general threshold
+        label = (d.get('label') or '').strip().lower()
+        min_conf = DETECTOR_CLASS_MIN_CONF.get(label, thr)
+        effective_thr = max(thr, min_conf)
+        
+        if c >= effective_thr:
             matches.append(d)
+    
     labels = sorted({(d.get('label') or '') for d in (dets or []) if isinstance(d, dict) and d.get('label')})
     best = matches[0] if matches else None
     return {
@@ -469,6 +489,7 @@ class SeekController:
         on_found_tts: str = DEFAULT_ON_FOUND_TTS,
         llm_scene_nav: bool = DEFAULT_LLM_SCENE_NAV,
         llm_nav_interval: int = DEFAULT_LLM_NAV_INTERVAL,
+        seek_multi_image: bool = False,
         dry_run: bool = DEFAULT_SEEK_DRY_RUN,
     ) -> Dict[str, Any]:
         """Start seek. loop_fn(controller, goal_key, conf, max_steps, timeout_s) runs in a thread."""
@@ -511,6 +532,7 @@ class SeekController:
                 'on_found_done': False,
                 'llm_scene_nav': bool(llm_scene_nav),
                 'llm_nav_interval': interval_val,
+                'seek_multi_image': bool(seek_multi_image),
                 'dry_run': bool(dry_run),
                 'dry_run_gen': 0,
                 'started_at': time.time(),

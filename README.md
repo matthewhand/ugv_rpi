@@ -12,7 +12,7 @@ The stock dashboard, Jupyter tutorials, and OpenCV toys are still here. This tre
 |---|---|
 | **This repo** | [matthewhand/ugv_rpi](https://github.com/matthewhand/ugv_rpi) |
 | **Upstream** | [waveshareteam/ugv_rpi](https://github.com/waveshareteam/ugv_rpi) |
-| **UI** | `http://<pi>:5000` — tabs **Raw · Chat · Seek · Track** |
+| **UI** | `http://<pi>:5000` — tabs **Raw · Chat · Seek · Track · Loadout** |
 | **Full agent** | `http://<pi>:5000/ai` |
 | **Operator guide** | [docs/operator-guide.md](docs/operator-guide.md) |
 
@@ -30,6 +30,7 @@ The original Waveshare README (install, hotspot, robot type) is unchanged **belo
 | **Chat** | Thin vision chat against `/api/ai/chat`. Enable motion tools on `/ai` first. |
 | **Seek** | Finite scan-and-hop loop: L/C/R stills, a referee, then a timed hop / turn / reverse. Optional TTS if the referee says found. |
 | **Track** | Experimental. Camera hunts only — **wheels do not move**. Closed-list VOC labels use MobileNet-SSD and try to centre the bbox. Any other goal string uses the vision LLM and locks the current PTZ pose. |
+| **Loadout** | Chassis + attachment profile (rover/beast × none/ptz/roarm2). Runtime `.loadout.json` via `/api/loadout`. Examples: [docs/CONFIG_PROFILES.md](docs/CONFIG_PROFILES.md). USB RoArm starts **only** when hangar attachment=`roarm2`; rover+PTZ keeps `roarm_started=false`. |
 
 Navbar **STOP** zeros wheels, cancels Seek **and** Track, and clears the AI motion lock.
 
@@ -57,15 +58,16 @@ Commanded pan/tilt from `/api/ptz`, `T:133`, Seek, Track, and Chat gimbal go thr
 
 ### Direct serial ↔ ROS 2
 
-Navbar chips. **Direct** (default for Seek / PTZ): Flask owns UART. **ROS 2**: Flask releases UART for `ugv_bringup`, sticks go via rosbridge (`ws://127.0.0.1:9090`). Leaving ROS 2 **stops `ugv_bringup`** in the container (`UGV_AUTOSTOP_BRINGUP`, default on) then reclaims UART. If rosbridge dies, serial fallback + background autoheal (`UGV_ROS_AUTOHEAL`).
+Navbar chips. **Direct** (default for Seek / PTZ): Flask owns UART. **ROS 2**: Flask releases UART for the chassis driver (`ugv_driver_min` preferred, else `ugv_bringup`; no `ugv_ws` required), sticks go via rosbridge (`ws://127.0.0.1:9090`). Leaving ROS 2 **stops the chassis driver** in the container (`UGV_AUTOSTOP_BRINGUP`, default on) then reclaims UART. If rosbridge dies, serial fallback + background autoheal (`UGV_ROS_AUTOHEAL`).
 
 ### Other chrome
 
 - Seek / Track logs are a **fixed height** with a scrollbar.
 - **Idle heartbeat (HB):** every 2s the UI re-sends the last wheel cmd (idle → stop). ON for sticks; OFF for timed AI drives.
 - Drive polarity: `base_config.drive_linear_sign` (this tree **`-1`**). After a yaml change, **restart the app** and check `GET /api/status`.
+- **Loadout** tab / `GET|POST /api/loadout`: chassis + attachment; live `camera_prefer` re-init; RoArm gated on `roarm2`. Examples `config.rover.yaml` / `config.beast.yaml` — live file stays `config.yaml`. [docs/CONFIG_PROFILES.md](docs/CONFIG_PROFILES.md).
 - Ops log drawer, 3D Twin (box + CDN Three.js — not a digital twin), session-only ESP32 WiFi stop.
-- Unit tests: `tests/test_seek_nav.py`, `tests/test_ai_track.py` (planner / referee wiring — not a live find-rate).
+- Unit tests: `tests/test_seek_nav.py`, `tests/test_ai_track.py`, `tests/test_loadout.py`, `tests/test_dual_hw_gating.py` (planner / referee / hangar gates — not a live find-rate).
 
 ---
 

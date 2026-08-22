@@ -231,7 +231,7 @@ class TestSeekController(unittest.TestCase):
             self.assertFalse(miss['found'])
             # Hit
             hit = evaluate_goal_detections(
-                [{'label': label, 'confidence': 0.8, 'bbox_norm': [0.2, 0.2, 0.6, 0.7]}],
+                [{'label': label, 'confidence': 0.92, 'bbox_norm': [0.2, 0.2, 0.6, 0.7]}],
                 label,
                 conf,
             )

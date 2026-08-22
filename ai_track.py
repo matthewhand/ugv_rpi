@@ -20,7 +20,7 @@ from ai_seek import (
 
 DEFAULT_TRACK_MAX_STEPS = 40
 DEFAULT_TRACK_TIMEOUT_S = 180.0
-DEFAULT_TRACK_CONF = 0.22
+DEFAULT_TRACK_CONF = 0.85  # Raised from 0.22 - avoid false positives
 # Horizontal / vertical FOV used to turn bbox offset into T:133 degrees
 TRACK_HFOV_DEG = 72.0
 TRACK_VFOV_DEG = 54.0

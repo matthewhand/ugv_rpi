@@ -25,6 +25,7 @@ Visual QA source of truth for Playwright feature catalog.
 | `shell.ops_log` | App log open | Purple ops drawer bottom-right; level filter, follow, clear |
 | `shell.twin_drawer` | 3D Twin open | Blue twin drawer; iframe of `/3d`; larger default size |
 | `shell.navbar_phone` | Phone landscape chrome | Single sticky row; brand may hide; **STOP** visible |
+| `shell.loadout` | Mode Loadout | Tab **Loadout** active; hangar bay with rover/beast stencils and attachment overlay |
 
 **Operator notes**
 - Prefer **Direct** for simple Seek demos and reliable PTZ.

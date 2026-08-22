@@ -6,7 +6,8 @@
     <script src="./jquery-3.7.1.min.js"></script>
     <script src="./js-yaml.min.js"></script>
     <script src="./socket.io.js"></script>
-    <link rel="stylesheet" type="text/css" href="./style.css?v=chat-live-1">
+    <link rel="stylesheet" type="text/css" href="./style.css?v=chat-still-2">
+    <link rel="stylesheet" type="text/css" href="./loadout.css?v=dual-hw-1">
     <style type="text/css">
       .seek-pano-card {
         margin-top: 8px;
@@ -80,6 +81,102 @@
         background: #00e676;
         color: #000;
       }
+      /* Voice mode select */
+      .ugv-voice-mode-label {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 13px;
+        user-select: none;
+      }
+      .ugv-voice-mode-select {
+        padding: 4px 8px;
+        border-radius: 4px;
+        border: 1px solid #3a3f4d;
+        background: #1a1d27;
+        color: #e0e0e0;
+        font-size: 13px;
+        cursor: pointer;
+      }
+      .ugv-voice-mode-select:disabled {
+        cursor: not-allowed;
+        opacity: 0.5;
+      }
+      .ugv-voice-mode-select option[disabled] {
+        color: #666;
+      }
+      /* RoArm sliders (grip + height) */
+      .roarm-sliders-box {
+        margin-top: 12px;
+        padding: 8px 12px;
+        background: rgba(20, 23, 32, 0.9);
+        border: 1px solid #2a2f3d;
+        border-radius: 6px;
+        max-width: 280px;
+      }
+      .roarm-slider-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 8px;
+      }
+      .roarm-slider-row:last-child {
+        margin-bottom: 0;
+      }
+      .roarm-slider-label {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        font-size: 12px;
+        font-weight: 600;
+        color: #9aa3b2;
+        min-width: 70px;
+        user-select: none;
+      }
+      .roarm-slider-icon {
+        font-size: 14px;
+      }
+      .roarm-slider {
+        flex: 1;
+        height: 6px;
+        background: #2a2f3d;
+        border-radius: 3px;
+        outline: none;
+        -webkit-appearance: none;
+        appearance: none;
+      }
+      .roarm-slider::-webkit-slider-thumb {
+        -webkit-appearance: none;
+        appearance: none;
+        width: 16px;
+        height: 16px;
+        background: #4FF5C0;
+        border-radius: 50%;
+        cursor: pointer;
+        transition: background 0.15s;
+      }
+      .roarm-slider::-webkit-slider-thumb:hover {
+        background: #3dd68c;
+      }
+      .roarm-slider::-moz-range-thumb {
+        width: 16px;
+        height: 16px;
+        background: #4FF5C0;
+        border: none;
+        border-radius: 50%;
+        cursor: pointer;
+        transition: background 0.15s;
+      }
+      .roarm-slider::-moz-range-thumb:hover {
+        background: #3dd68c;
+      }
+      .roarm-slider-value {
+        font-size: 11px;
+        font-weight: 700;
+        color: #4FF5C0;
+        min-width: 50px;
+        text-align: right;
+      }
     </style>
   </head>
 <body>
@@ -91,6 +188,7 @@
         <button type="button" role="tab" data-mode="chat" id="mode-tab-chat" aria-selected="false">Chat</button>
         <button type="button" role="tab" data-mode="seek" id="mode-tab-seek" aria-selected="false">Seek</button>
         <button type="button" role="tab" data-mode="track" id="mode-tab-track" aria-selected="false" title="Experimental: PTZ hunt, no driving">Track</button>
+        <button type="button" role="tab" data-mode="loadout" id="mode-tab-loadout" aria-selected="false" title="Chassis and attachment software profile">Loadout</button>
       </div>
       <button type="button" id="global-stop-btn" class="ugv-global-stop" onclick="ugvEmergencyStop()"
         title="Emergency STOP: zero wheels, cancel Seek, clear AI motion lock. Available in every mode.">
@@ -190,6 +288,27 @@
                                         <div class="ctrl_base_box">
                                             <div class="ctrl_base ctrl_base_s" id="ctrl_base">
                                                 <div class="ctrl_stick ctrl_stick_s" id="ctrl_stick"></div>
+                                            </div>
+                                        </div>
+                                        <!-- RoArm grip + height sliders (module_type=1 only) -->
+                                        <div id="roarm-sliders-box" class="roarm-sliders-box" style="display:none;">
+                                            <div class="roarm-slider-row">
+                                                <label for="roarm-grip-slider" class="roarm-slider-label">
+                                                    <span class="roarm-slider-icon">🤏</span>
+                                                    <span>Grip</span>
+                                                </label>
+                                                <input type="range" id="roarm-grip-slider" class="roarm-slider" 
+                                                    min="0" max="100" value="0" step="1" />
+                                                <span id="roarm-grip-value" class="roarm-slider-value">Closed</span>
+                                            </div>
+                                            <div class="roarm-slider-row">
+                                                <label for="roarm-height-slider" class="roarm-slider-label">
+                                                    <span class="roarm-slider-icon">↕</span>
+                                                    <span>Height</span>
+                                                </label>
+                                                <input type="range" id="roarm-height-slider" class="roarm-slider" 
+                                                    min="-100" max="100" value="0" step="5" />
+                                                <span id="roarm-height-value" class="roarm-slider-value">0</span>
                                             </div>
                                         </div>
                                     </div>
@@ -439,7 +558,7 @@
     <div id="mode-panel-chat" class="mode-panel" role="tabpanel" aria-labelledby="mode-tab-chat" hidden>
       <div class="mode-panel-chat">
         <div class="ugv-chat-layout">
-          <div class="ugv-panel-card">
+          <div class="ugv-panel-card ugv-chat-camera-card">
             <h2>Live camera</h2>
             <p class="hint">Same MJPEG feed as Raw mode. Snapshots attach when you send.</p>
             <div class="ugv-live-preview-wrap" id="chat-live-wrap">
@@ -456,7 +575,7 @@
               </label>
             </div>
             <div class="ugv-still-slot is-empty" id="chat-still-slot">
-              <img class="ugv-preview-img" id="chat-snap-preview" alt="" hidden style="max-height:160px" />
+              <img class="ugv-still-img" id="chat-snap-preview" alt="Attached still" hidden />
             </div>
           </div>
           <div class="ugv-panel-card">
@@ -469,6 +588,15 @@
               <textarea id="chat-input" placeholder="Ask about what the robot sees…"></textarea>
             </div>
             <div class="ugv-row-actions">
+              <label class="ugv-voice-mode-label" title="Voice input/output mode (requires STT/TTS in .env)">
+                Voice:
+                <select id="chat-voice-mode" class="ugv-voice-mode-select">
+                  <option value="off">Off</option>
+                  <option value="browser">Browser</option>
+                  <option value="robot">Robot</option>
+                </select>
+              </label>
+              <button type="button" class="secondary" id="chat-voice-btn" title="Hold to record voice input" hidden>🎤 Record</button>
               <button type="button" class="secondary" id="chat-clear-btn">Clear</button>
               <button type="button" id="chat-send-btn">Send</button>
             </div>
@@ -596,6 +724,10 @@
                     <input type="number" id="seek-llm-nav-interval" value="10" min="1" max="100" />
                     <span>steps</span>
                   </div>
+                  <label class="ugv-seek-scenenav-label" title="When unchecked (default), send ONE image per LLM inference. When checked, send all 3 views (FRONT/REAR-LEFT/REAR-RIGHT) in a single call. Newest LLMs may handle single images better.">
+                    <input type="checkbox" id="seek-multi-image" />
+                    <span>Multi-image LLM (3 views in 1 call)</span>
+                  </label>
                   <div class="ugv-seek-limits" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;font-size:11px;color:#9aa3b2;">
                     <label title="0 = unlimited (not recommended)">Max steps
                       <input type="number" id="seek-max-steps" value="30" min="0" max="500" style="width:4.5em;margin-left:4px;" />
@@ -677,6 +809,124 @@
               </div>
             </div>
           </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="mode-panel-loadout" class="mode-panel" role="tabpanel" aria-labelledby="mode-tab-loadout" hidden>
+      <div class="mode-panel-loadout">
+        <div class="loadout-hangar">
+          <header class="loadout-mast">
+            <div class="loadout-mast-mark" aria-hidden="true">
+              <svg viewBox="0 0 40 40">
+                <rect x="1.5" y="1.5" width="37" height="37" fill="none" stroke="currentColor" stroke-width="1"/>
+                <path d="M8 20 H32 M20 8 V32" fill="none" stroke="currentColor" stroke-width="0.8" opacity="0.45"/>
+                <path d="M14 26 L26 20 L14 14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="miter"/>
+              </svg>
+            </div>
+            <div class="loadout-mast-copy">
+              <p class="loadout-kicker">HANGAR BAY · SCHEMATIC</p>
+              <h2>LOADOUT</h2>
+            </div>
+            <p class="loadout-mast-note">Software profile. Drive signs stay in config.yaml. RoArm USB drivers start only when attachment is RoArm-M2; rover+PTZ keeps the arm off.</p>
+          </header>
+
+          <div class="loadout-bay">
+            <aside class="loadout-rail loadout-rail-base" aria-label="Base chassis">
+              <h3>BASE</h3>
+              <button type="button" class="loadout-card" id="loadout-card-rover" data-base="rover" aria-pressed="false">
+                <span class="loadout-card-thumb" id="loadout-thumb-rover"></span>
+                <span class="loadout-card-copy">
+                  <strong>Wheeled rover</strong>
+                  <span>wheels · main_type 2</span>
+                </span>
+              </button>
+              <button type="button" class="loadout-card" id="loadout-card-beast" data-base="beast" aria-pressed="false">
+                <span class="loadout-card-thumb" id="loadout-thumb-beast"></span>
+                <span class="loadout-card-copy">
+                  <strong>Tracked beast</strong>
+                  <span>tracks · main_type 3</span>
+                </span>
+              </button>
+            </aside>
+
+            <section class="loadout-stage-col" aria-label="Composite stage">
+              <div class="loadout-stage-frame">
+                <div class="loadout-stage-hud">
+                  <span class="loadout-stage-hud-kicker">COMPOSITE</span>
+                  <span id="loadout-stage-title">ROVER + PTZ</span>
+                  <span id="loadout-stage-meta">main_type 2 · module_type 2</span>
+                </div>
+                <svg class="loadout-stage" viewBox="0 0 400 260" role="img" aria-labelledby="loadout-stage-title">
+                  <defs>
+                    <pattern id="lo-grid" width="20" height="20" patternUnits="userSpaceOnUse">
+                      <path d="M 20 0 L 0 0 0 20" fill="none" stroke="#5b8cff" stroke-width="0.35" opacity="0.22"/>
+                    </pattern>
+                    <pattern id="lo-hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+                      <line x1="0" y1="0" x2="0" y2="6" stroke="#5b8cff" stroke-width="0.7" opacity="0.35"/>
+                    </pattern>
+                  </defs>
+                  <rect class="lo-stage-bg" x="0" y="0" width="400" height="260"/>
+                  <rect x="10" y="10" width="380" height="240" fill="url(#lo-grid)" stroke="#2a2f3d" stroke-width="0.8"/>
+                  <line x1="200" y1="18" x2="200" y2="242" class="lo-centerline"/>
+                  <line x1="18" y1="150" x2="382" y2="150" class="lo-centerline"/>
+                  <path d="M18 34 V18 H34" class="lo-corner"/>
+                  <path d="M382 34 V18 H366" class="lo-corner"/>
+                  <path d="M18 226 V242 H34" class="lo-corner"/>
+                  <path d="M382 226 V242 H366" class="lo-corner"/>
+                  <g id="loadout-base-layer"></g>
+                  <g id="loadout-attach-layer"></g>
+                </svg>
+                <div id="loadout-arm-banner" class="loadout-arm-banner" hidden>RoArm USB path — drivers start on SAVE when attachment=roarm2</div>
+              </div>
+            </section>
+
+            <aside class="loadout-rail loadout-rail-attach" aria-label="Attachments">
+              <h3>ATTACHMENT</h3>
+              <button type="button" class="loadout-card" id="loadout-card-none" data-attachment="none" aria-pressed="false">
+                <span class="loadout-card-thumb" id="loadout-thumb-none"></span>
+                <span class="loadout-card-copy">
+                  <strong>None</strong>
+                  <span>module_type 0</span>
+                </span>
+              </button>
+              <button type="button" class="loadout-card" id="loadout-card-ptz" data-attachment="ptz" aria-pressed="false">
+                <span class="loadout-card-thumb" id="loadout-thumb-ptz"></span>
+                <span class="loadout-card-copy">
+                  <strong>PTZ turret</strong>
+                  <span>module_type 2</span>
+                </span>
+              </button>
+              <button type="button" class="loadout-card" id="loadout-card-roarm2" data-attachment="roarm2" aria-pressed="false">
+                <span class="loadout-card-thumb" id="loadout-thumb-roarm2"></span>
+                <span class="loadout-card-copy">
+                  <strong>RoArm-M2</strong>
+                  <span>module_type 1 · unwired</span>
+                </span>
+              </button>
+            </aside>
+          </div>
+
+          <footer class="loadout-dock">
+            <label class="loadout-lidar" for="loadout-use-lidar">
+              <input type="checkbox" id="loadout-use-lidar" />
+              <span>use_lidar</span>
+            </label>
+            <label class="loadout-cam" for="loadout-camera-prefer">
+              <span>camera_prefer</span>
+              <select id="loadout-camera-prefer" aria-label="Camera preference">
+                <option value="auto">auto</option>
+                <option value="csi">csi</option>
+                <option value="usb">usb</option>
+              </select>
+            </label>
+            <div class="loadout-signs" title="Read-only from this machine's config.yaml">
+              <span>drive_linear_sign <code id="loadout-lin-sign">—</code></span>
+              <span>drive_angular_sign <code id="loadout-ang-sign">—</code></span>
+            </div>
+            <button type="button" id="loadout-save-btn" class="loadout-save">SAVE</button>
+            <p id="loadout-status" class="loadout-status" role="status">Standby</p>
+          </footer>
         </div>
       </div>
     </div>
@@ -844,7 +1094,8 @@
         <div style="background-image: url('./img/grey/delete.svg');"></div>
     </footer>
     <!-- <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.7.0/jquery.min.js"></script> -->
-    <script src="./modes.js?v=chat-live-1"></script>
+    <script src="./modes.js?v=loadout-1"></script>
+    <script src="./loadout.js?v=dual-hw-1"></script>
     <script src="./control.js?v=ui-iter-10"></script>
     <script src="./main.js"></script>
 </body>

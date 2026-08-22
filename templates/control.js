@@ -507,12 +507,9 @@ function applyHudPtz(panX, tiltY) {
 function joyStickCtrl(inputX, inputY) {
     if (module_type == 1) {
         var x_cmd = Math.max(-180, Math.min(inputX/7, 180));
-        console.log(inputY);
-        // cmdSend(144, -inputX/7, -inputY/2);
-        var armLimit = pointInCircle(510, armE, -inputY/2);
-        armE = armLimit.x;
-        armZ = armLimit.y;
+        // Stick X controls base yaw (armR), stick Y ignored (height slider owns armZ).
         armR = -inputX/7;
+        // Re-send current E/Z/R without overwriting height slider's Z.
         cmdJsonCmd({"T":cmd_arm_ctrl_ui,"E":armE,"Z":armZ,"R":armR});
 
         RotateAngle = document.getElementById("Pan").innerHTML = x_cmd.toFixed(2);
@@ -2195,3 +2192,119 @@ fetch('/api/status').then(function (r) { return r.json(); }).then(function (d) {
 }).catch(function () {
     updateChassisHeartbeatBtn();
 });
+
+// ---- RoArm grip + height sliders (module_type=1) ----
+var roarmGripPercent = 0; // 0=closed, 100=open
+var roarmCurrentJoints = { base: 0.0, shoulder: 0.0, elbow: 1.5708, hand: 3.1416 };
+
+function updateRoarmSlidersVisibility() {
+    var box = document.getElementById('roarm-sliders-box');
+    if (box) {
+        box.style.display = (module_type == 1) ? 'block' : 'none';
+    }
+}
+
+function roarmGripPercentToRad(percent) {
+    // 0% (closed) → 3.14 rad, 100% (open) → 1.08 rad
+    var closedRad = 3.14;
+    var openRad = 1.08;
+    return closedRad - (percent / 100.0) * (closedRad - openRad);
+}
+
+function roarmSendGrip(percent) {
+    roarmGripPercent = percent;
+    var handRad = roarmGripPercentToRad(percent);
+    
+    // Fetch current joints from server to ensure accuracy
+    fetch('/api/ui_aim_mode')
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+            if (d.ok && d.roarm && d.roarm.last_joints) {
+                var j = d.roarm.last_joints;
+                roarmCurrentJoints = {
+                    base: j.base || 0.0,
+                    shoulder: j.shoulder || 0.0,
+                    elbow: j.elbow || 1.5708,
+                    hand: handRad
+                };
+            } else {
+                // Fallback: estimate from E/Z/R if API fails
+                roarmCurrentJoints.hand = handRad;
+            }
+            
+            // Send T:102 with current joints + new hand
+            cmdJsonCmd({
+                'T': 102,
+                'base': roarmCurrentJoints.base,
+                'shoulder': roarmCurrentJoints.shoulder,
+                'elbow': roarmCurrentJoints.elbow,
+                'hand': roarmCurrentJoints.hand,
+                'spd': 0,
+                'acc': 12
+            });
+            
+            console.log('[roarm] grip=' + percent + '% → hand=' + handRad.toFixed(3) + ' rad');
+        })
+        .catch(function (e) {
+            console.warn('[roarm] grip: failed to fetch joints, sending with cached values', e);
+            cmdJsonCmd({
+                'T': 102,
+                'base': roarmCurrentJoints.base,
+                'shoulder': roarmCurrentJoints.shoulder,
+                'elbow': roarmCurrentJoints.elbow,
+                'hand': handRad,
+                'spd': 0,
+                'acc': 12
+            });
+        });
+}
+
+function roarmSendHeight(heightDelta) {
+    // Height slider adjusts armZ from default (arm_default_z typically 24)
+    var newZ = arm_default_z + heightDelta;
+    armZ = newZ;
+    // Re-send T:144 with updated Z (this will call e_z_r_to_joints and update shoulder)
+    cmdJsonCmd({'T': cmd_arm_ctrl_ui, 'E': armE, 'Z': armZ, 'R': armR});
+    console.log('[roarm] height delta=' + heightDelta + ' → Z=' + newZ);
+}
+
+// Wire up sliders
+(function initRoarmSliders() {
+    var gripSlider = document.getElementById('roarm-grip-slider');
+    var gripValue = document.getElementById('roarm-grip-value');
+    var heightSlider = document.getElementById('roarm-height-slider');
+    var heightValue = document.getElementById('roarm-height-value');
+    
+    if (gripSlider && gripValue) {
+        gripSlider.addEventListener('input', function () {
+            var pct = parseInt(this.value, 10);
+            if (pct === 0) {
+                gripValue.textContent = 'Closed';
+            } else if (pct === 100) {
+                gripValue.textContent = 'Open';
+            } else {
+                gripValue.textContent = pct + '%';
+            }
+        });
+        
+        gripSlider.addEventListener('change', function () {
+            var pct = parseInt(this.value, 10);
+            roarmSendGrip(pct);
+        });
+    }
+    
+    if (heightSlider && heightValue) {
+        heightSlider.addEventListener('input', function () {
+            var delta = parseInt(this.value, 10);
+            heightValue.textContent = (delta >= 0 ? '+' : '') + delta;
+        });
+        
+        heightSlider.addEventListener('change', function () {
+            var delta = parseInt(this.value, 10);
+            roarmSendHeight(delta);
+        });
+    }
+    
+    // Show/hide sliders based on module_type (set after config loads)
+    setTimeout(updateRoarmSlidersVisibility, 500);
+})();
