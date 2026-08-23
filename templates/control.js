@@ -507,9 +507,14 @@ function applyHudPtz(panX, tiltY) {
 function joyStickCtrl(inputX, inputY) {
     if (module_type == 1) {
         var x_cmd = Math.max(-180, Math.min(inputX/7, 180));
-        // Stick X controls base yaw (armR), stick Y ignored (height slider owns armZ).
+        // Stick X controls base yaw (armR), Stick Y controls height (armZ)
         armR = -inputX/7;
-        // Re-send current E/Z/R without overwriting height slider's Z.
+        armZ = armZ + inputY/20;  // Apply incremental vertical adjustment
+        // Clamp armZ to safe working range around default
+        var minZ = arm_default_z - 150;
+        var maxZ = arm_default_z + 150;
+        armZ = Math.max(minZ, Math.min(maxZ, armZ));
+        // Send updated E/Z/R
         cmdJsonCmd({"T":cmd_arm_ctrl_ui,"E":armE,"Z":armZ,"R":armR});
 
         RotateAngle = document.getElementById("Pan").innerHTML = x_cmd.toFixed(2);
@@ -2259,21 +2264,25 @@ function roarmSendGrip(percent) {
         });
 }
 
-function roarmSendHeight(heightDelta) {
-    // Height slider adjusts armZ from default (arm_default_z typically 24)
-    var newZ = arm_default_z + heightDelta;
-    armZ = newZ;
-    // Re-send T:144 with updated Z (this will call e_z_r_to_joints and update shoulder)
+function roarmSendReach(reachDelta) {
+    // Distance-ahead slider adjusts armE (reach) from default (arm_default_e typically 60)
+    var newE = arm_default_e + reachDelta;
+    armE = newE;
+    // Apply circular limit constraint (same as mousewheel handler)
+    var armLimit = pointInCircle(510, armE, armZ);
+    armE = armLimit.x;
+    armZ = armLimit.y;
+    // Re-send T:144 with updated E (this will call e_z_r_to_joints)
     cmdJsonCmd({'T': cmd_arm_ctrl_ui, 'E': armE, 'Z': armZ, 'R': armR});
-    console.log('[roarm] height delta=' + heightDelta + ' → Z=' + newZ);
+    console.log('[roarm] reach delta=' + reachDelta + ' → E=' + newE);
 }
 
 // Wire up sliders
 (function initRoarmSliders() {
     var gripSlider = document.getElementById('roarm-grip-slider');
     var gripValue = document.getElementById('roarm-grip-value');
-    var heightSlider = document.getElementById('roarm-height-slider');
-    var heightValue = document.getElementById('roarm-height-value');
+    var reachSlider = document.getElementById('roarm-reach-slider');
+    var reachValue = document.getElementById('roarm-reach-value');
     
     if (gripSlider && gripValue) {
         gripSlider.addEventListener('input', function () {
@@ -2293,15 +2302,15 @@ function roarmSendHeight(heightDelta) {
         });
     }
     
-    if (heightSlider && heightValue) {
-        heightSlider.addEventListener('input', function () {
+    if (reachSlider && reachValue) {
+        reachSlider.addEventListener('input', function () {
             var delta = parseInt(this.value, 10);
-            heightValue.textContent = (delta >= 0 ? '+' : '') + delta;
+            reachValue.textContent = (delta >= 0 ? '+' : '') + delta;
         });
         
-        heightSlider.addEventListener('change', function () {
+        reachSlider.addEventListener('change', function () {
             var delta = parseInt(this.value, 10);
-            roarmSendHeight(delta);
+            roarmSendReach(delta);
         });
     }
     
