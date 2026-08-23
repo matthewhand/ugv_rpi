@@ -48,7 +48,7 @@
         display: none !important;
       }
       .seek-pano-img-wrap::after {
-        content: "No scan yet — starts after first triple-view capture";
+        content: "No scan yet — starts after the first capture";
         position: absolute;
         inset: 0;
         display: flex;
@@ -715,7 +715,7 @@
                   </div>
                 </div>
                 <div class="ugv-seek-scenenav">
-                  <label class="ugv-seek-scenenav-label" title="When checked, triple-view LLM/heuristic nav picks the next drive. Uncheck for detector-only scan cycles without scene nav (modes b/c). Mode a always keeps this off.">
+                  <label class="ugv-seek-scenenav-label" title="When checked (modes b/c), each step analyzes a front still and hops; sides only when blocked. Uncheck to scan/find without driving. Mode a always keeps this off.">
                     <input type="checkbox" id="seek-llm-scene-nav" checked />
                     <span>LLM Scene Navigation</span>
                   </label>

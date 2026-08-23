@@ -1768,7 +1768,7 @@
         referee +
         ') for: ' +
         goal +
-        ' · scene nav: ' + (llmSceneNav ? 'every ' + llmNavInterval + ' steps' : 'disabled') +
+        ' · scene nav: ' + (llmSceneNav ? 'on' : 'disabled') +
         ' · limits: ' + (maxSteps === 0 ? '∞ steps' : maxSteps + ' steps') +
         ' / ' + (timeoutS === 0 ? 'no timeout' : timeoutS + 's') +
         ' · ' + (dryRun ? 'DRY-RUN no drive' : 'LIVE DRIVE') +

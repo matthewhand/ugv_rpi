@@ -1,4 +1,10 @@
 /* pc */
+
+/* hidden attribute must always win over class display rules (e.g. .ugv-seek-scenenav-interval) */
+[hidden] {
+    display: none !important;
+}
+
 @font-face {
     font-family: 'SourceCodePro-Regular';
     src: url('./font/woff2/SourceCodePro-Regular.otf.woff2') format('woff2'),

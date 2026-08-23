@@ -28,7 +28,7 @@ The original Waveshare README (install, hotspot, robot type) is unchanged **belo
 |-----|----------------|
 | **Raw** | Stock teleop: sticks, PTZ, OpenCV. **AUTODRIVE** is line-follow only, not Seek. |
 | **Chat** | Thin vision chat against `/api/ai/chat`. Enable motion tools on `/ai` first. |
-| **Seek** | Finite scan-and-hop loop: L/C/R stills, a referee, then a timed hop / turn / reverse. Optional TTS if the referee says found. |
+| **Seek** | Finite scan-and-hop loop: mode `a` L/C/R stills + heuristic nav; modes `b`/`c` front-first forced-JSON LLM hops with side scans only when blocked. Referee says found → optional TTS. |
 | **Track** | Experimental. Camera hunts only — **wheels do not move**. Closed-list VOC labels use MobileNet-SSD and try to centre the bbox. Any other goal string uses the vision LLM and locks the current PTZ pose. |
 | **Loadout** | Chassis + attachment profile (rover/beast × none/ptz/roarm2). Runtime `.loadout.json` via `/api/loadout`. Examples: [docs/CONFIG_PROFILES.md](docs/CONFIG_PROFILES.md). USB RoArm starts **only** when hangar attachment=`roarm2`; rover+PTZ keeps `roarm_started=false`. |
 
@@ -67,7 +67,7 @@ Navbar chips. **Direct** (default for Seek / PTZ): Flask owns UART. **ROS 2**: F
 - **Idle heartbeat (HB):** every 2s the UI re-sends the last wheel cmd (idle → stop). ON for sticks; OFF for timed AI drives.
 - Drive polarity: `base_config.drive_linear_sign` (this tree **`-1`**). After a yaml change, **restart the app** and check `GET /api/status`.
 - **Loadout** tab / `GET|POST /api/loadout`: chassis + attachment; live `camera_prefer` re-init; RoArm gated on `roarm2`. Examples `config.rover.yaml` / `config.beast.yaml` — live file stays `config.yaml`. [docs/CONFIG_PROFILES.md](docs/CONFIG_PROFILES.md).
-- Ops log drawer, 3D Twin (box + CDN Three.js — not a digital twin), session-only ESP32 WiFi stop.
+- Ops log drawer, 3D Twin (box robot, Three.js/roslib **vendored locally** — works offline; still not a digital twin), session-only ESP32 WiFi stop.
 - Unit tests: `tests/test_seek_nav.py`, `tests/test_ai_track.py`, `tests/test_loadout.py`, `tests/test_dual_hw_gating.py` (planner / referee / hangar gates — not a live find-rate).
 
 ---
@@ -91,7 +91,7 @@ Navbar chips. **Direct** (default for Seek / PTZ): Flask owns UART. **ROS 2**: F
 - [ ] Always boot rosbridge + bringup with the ROS container
 - [ ] Seek look-map UI; richer cancel mid-drive
 - [ ] Security defaults (hotspot / Jupyter token)
-- [ ] CI for control_mode / autostart; Chat ↔ `/ai` unification; Twin offline meshes
+- [ ] CI for control_mode / autostart; Chat ↔ `/ai` unification
 
 ---
 

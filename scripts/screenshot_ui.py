@@ -85,9 +85,23 @@ def record(results, out, vp_name, page, name, guide_id, note="") -> None:
         print(f"  FAIL {name}: {e}")
 
 
-def go(page, base: str, path: str, wait_ms: int = 700) -> None:
-    page.goto(base.rstrip("/") + path, wait_until="domcontentloaded")
-    page.wait_for_timeout(wait_ms)
+def go(page, base: str, path: str, wait_ms: int = 700, timeout_ms: int = 45000) -> bool:
+    """Navigate and settle. Never raises: a slow/dead page must not kill the catalog."""
+    try:
+        page.goto(
+            base.rstrip("/") + path,
+            wait_until="domcontentloaded",
+            timeout=timeout_ms,
+        )
+        page.wait_for_timeout(wait_ms)
+        return True
+    except Exception as e:
+        print(f"  goto fail {path}: {e}")
+        try:
+            page.wait_for_timeout(wait_ms)
+        except Exception:
+            pass
+        return False
 
 
 def set_mode(page, mode: str) -> None:
@@ -316,6 +330,9 @@ def run_catalog(base: str, out: Path, viewports: list[str]) -> list[dict]:
             except Exception as e:
                 print(f"  scenenav toggle fail: {e}")
 
+            # dry-run default ON (guide row)
+            record(results, out, vp_name, page, "seek_dry_run", "seek.dry_run", "Dry run checkbox default ON")
+
             # Simulated running chrome (UI only — does not start Seek / motors)
             # Uses real lock path: config disabled + is-locked + pill + body class
             try:
@@ -358,6 +375,11 @@ def run_catalog(base: str, out: Path, viewports: list[str]) -> list[dict]:
             except Exception as e:
                 print(f"  seek.running_chrome fail: {e}")
 
+            # --- Loadout mode ---
+            set_mode(page, "loadout")
+            page.wait_for_timeout(600)
+            record(results, out, vp_name, page, "shell_loadout", "shell.loadout", "Loadout tab: hangar bays")
+
             # --- AI page ---
             go(page, base, "/ai", wait_ms=1200)
             record(results, out, vp_name, page, "ai_overview", "ai.overview")
@@ -367,8 +389,8 @@ def run_catalog(base: str, out: Path, viewports: list[str]) -> list[dict]:
             if "phone" in vp_name:
                 record(results, out, vp_name, page, "ai_landscape", "ai.landscape")
 
-            # --- Twin full page ---
-            go(page, base, "/3d", wait_ms=1800)
+            # --- Twin full page (CDN scripts can be slow — generous timeout) ---
+            go(page, base, "/3d", wait_ms=1800, timeout_ms=45000)
             record(results, out, vp_name, page, "twin_page", "twin.page")
 
             # --- Settings / media ---
