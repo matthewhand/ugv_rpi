@@ -283,51 +283,20 @@ $("#zoom_btn").click(function(){
 //joy stick function
 var largeCircle = $("#ctrl_base");
 var smallCircle = $("#ctrl_base div");
-var minifyTimeout;
-var isEnlarged = false;
-var isMouseUp = false;
-function enlargeJoyStick(){
-    setTimeout(() => {
-        isEnlarged = true;
-    }, 98);
+var isEnlarged = true; // Permanently large in Raw mode for stable geometry
+
+// Initialize joystick to large size once (no small↔large transitions in Raw)
+function initJoyStickLarge(){
     largeCircle.removeClass("ctrl_base_s");
     smallCircle.removeClass("ctrl_stick_s");
     largeCircle.addClass("ctrl_base_l");
     smallCircle.addClass("ctrl_stick_l");
+    isEnlarged = true;
 }
-function minifyJoyStick(){
-    isEnlarged = false;
-    isMouseUp = false;
-    largeCircle.removeClass("ctrl_base_l");
-    smallCircle.removeClass("ctrl_stick_l");
-    largeCircle.addClass("ctrl_base_s");
-    smallCircle.addClass("ctrl_stick_s");
-    
-}
-largeCircle.on("click", function(e){
-    clearTimeout(minifyTimeout);
-    enlargeJoyStick();
-});
 
-largeCircle.on("mousedown touchstart", function(){
-    isMouseUp = false;
-    clearTimeout(minifyTimeout);
-    enlargeJoyStick();
-});
-$(document).on("mouseup touchend", function(){
-    isMouseUp = true;
-    if (isEnlarged) {
-        minifyTimeout = setTimeout(minifyJoyStick, 2000);
-    }
-});
-largeCircle.on("mouseenter", function(){
-    clearTimeout(minifyTimeout);
-});
-largeCircle.on("mouseleave", function() {
-    if (isMouseUp && isEnlarged) {
-        minifyTimeout = setTimeout(minifyJoyStick, 2000);
-    }
-});
+// Initialize: keep stick permanently large in Raw mode for stable geometry
+// No minify-on-idle or mouseleave minify to avoid mid-gesture resize on next touch
+initJoyStickLarge();
 
 
 const base = document.getElementById('ctrl_base');
