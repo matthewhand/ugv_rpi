@@ -2308,3 +2308,14 @@ function roarmSendHeight(heightDelta) {
     // Show/hide sliders based on module_type (set after config loads)
     setTimeout(updateRoarmSlidersVisibility, 500);
 })();
+
+// Listen for loadout changes from hangar UI
+document.addEventListener('ugv:loadout-changed', function (ev) {
+    if (!ev || !ev.detail) return;
+    var newModuleType = ev.detail.module_type;
+    if (typeof newModuleType === 'number' && newModuleType !== module_type) {
+        console.log('[control] loadout changed: module_type ' + module_type + ' → ' + newModuleType);
+        module_type = newModuleType;
+        updateRoarmSlidersVisibility();
+    }
+});

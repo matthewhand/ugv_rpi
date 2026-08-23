@@ -404,6 +404,7 @@
         dirty = false;
         renderStage();
         setStatus('saved · ' + comboTitle().toLowerCase(), 'ok');
+        notifyLoadoutChanged();
       })
       .catch(function (e) {
         setStatus('save failed: ' + (e && e.message ? e.message : 'network'), 'err');
@@ -418,6 +419,7 @@
     renderStage();
     var prefix = serverOk ? 'draft' : 'local draft';
     setStatus(prefix + ' · unsaved · ' + comboTitle().toLowerCase(), 'draft');
+    notifyLoadoutChanged();
   }
 
   function wireUi() {
@@ -471,6 +473,22 @@
       saveBtn.addEventListener('click', function () {
         save();
       });
+    }
+  }
+
+  function notifyLoadoutChanged() {
+    var att = ATTACH_META[selection.attachment] || ATTACH_META.none;
+    var moduleType = att.module_type;
+    try {
+      var event = new CustomEvent('ugv:loadout-changed', {
+        detail: {
+          attachment: selection.attachment,
+          module_type: moduleType,
+        },
+      });
+      document.dispatchEvent(event);
+    } catch (e) {
+      console.warn('[loadout] failed to dispatch ugv:loadout-changed', e);
     }
   }
 
