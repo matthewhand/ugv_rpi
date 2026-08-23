@@ -1,0 +1,35 @@
+# Beast ROS 2 stack — pullable / updatable (no image scp).
+# Same Waveshare Humble base that rover's ugv_ws Dockerfile FROMs.
+#
+#   cd ~/ugv_rpi/ros2
+#   docker compose pull
+#   docker compose up -d
+#   docker compose logs -f
+#
+# RoArm stays on host Flask (ROARM_ENABLE_DRIVER=0). ESP32 via /dev/ttyAMA0.
+
+services:
+  ugv_ros2:
+    image: dudulrx0601/ugv_rpi_ros_humble:ugv_rpi_ros_humble
+    container_name: ugv_ros2
+    privileged: true
+    network_mode: host
+    restart: unless-stopped
+    group_add:
+      - dialout
+    devices:
+      - /dev/ttyAMA0:/dev/ttyAMA0
+    volumes:
+      - ./entrypoint.sh:/entrypoint.sh:ro
+      - ./ugv_driver_min.py:/opt/ugv_ros2/ugv_driver_min.py:ro
+      - ./roarm_driver_min.py:/opt/ugv_ros2/roarm_driver_min.py:ro
+    environment:
+      DISPLAY: ""
+      UGV_MODEL: ugv_beast
+      ROS_DOMAIN_ID: "0"
+      UGV_SERIAL_DEV: /dev/ttyAMA0
+      UGV_DRIVER_SCRIPT: /opt/ugv_ros2/ugv_driver_min.py
+      ROARM_ENABLE_DRIVER: "0"
+      PULSE_SERVER: unix:/run/user/1000/pulse/native
+    working_dir: /opt/ugv_ros2
+    entrypoint: ["/bin/bash", "/entrypoint.sh"]
