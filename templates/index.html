@@ -181,6 +181,338 @@
   </head>
 <body>
 
+    <!-- Boot Splash Overlay -->
+    <div id="ugv-boot-splash" class="ugv-boot-splash" aria-busy="true" role="alert" aria-label="System boot status">
+      <div class="ugv-boot-panel">
+        <div class="ugv-boot-header">
+          <div class="ugv-boot-mark">
+            <svg viewBox="0 0 40 40" aria-hidden="true">
+              <rect x="1.5" y="1.5" width="37" height="37" fill="none" stroke="currentColor" stroke-width="1"/>
+              <path d="M8 20 H32 M20 8 V32" fill="none" stroke="currentColor" stroke-width="0.8" opacity="0.45"/>
+              <path d="M14 26 L26 20 L14 14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="miter"/>
+            </svg>
+          </div>
+          <h1>UGV BOOT</h1>
+          <p class="ugv-boot-kicker">SYSTEM INITIALIZATION</p>
+        </div>
+        <div class="ugv-boot-body" id="ugv-boot-checks">
+          <div class="ugv-boot-row" data-check="flask"><span class="ugv-boot-label">Flask server</span><span class="ugv-boot-status">pending</span></div>
+          <div class="ugv-boot-row" data-check="config"><span class="ugv-boot-label">Config load</span><span class="ugv-boot-status">pending</span></div>
+          <div class="ugv-boot-row" data-check="serial"><span class="ugv-boot-label">Serial UART</span><span class="ugv-boot-status">pending</span></div>
+          <div class="ugv-boot-row" data-check="heartbeat"><span class="ugv-boot-label">Chassis heartbeat</span><span class="ugv-boot-status">pending</span></div>
+          <div class="ugv-boot-row" data-check="control"><span class="ugv-boot-label">Control mode</span><span class="ugv-boot-status">pending</span></div>
+          <div class="ugv-boot-row" data-check="loadout"><span class="ugv-boot-label">Loadout profile</span><span class="ugv-boot-status">pending</span></div>
+          <div class="ugv-boot-row" data-check="rtsp"><span class="ugv-boot-label">RTSP stream</span><span class="ugv-boot-status">pending</span></div>
+          <div class="ugv-boot-row" data-check="wifi"><span class="ugv-boot-label">ESP32 WiFi</span><span class="ugv-boot-status">pending</span></div>
+        </div>
+        <div class="ugv-boot-footer">
+          <button type="button" id="ugv-boot-dismiss" class="ugv-boot-btn" disabled>STANDBY</button>
+          <p class="ugv-boot-hint">Checking systems…</p>
+        </div>
+      </div>
+    </div>
+    <style>
+      .ugv-boot-splash {
+        position: fixed; inset: 0; z-index: 99999;
+        background: rgba(8, 10, 15, 0.96);
+        backdrop-filter: blur(6px);
+        display: flex; align-items: center; justify-content: center;
+        font-family: system-ui, -apple-system, sans-serif;
+        color: #e0e0e0;
+        animation: ugvBootFadeIn 0.3s ease;
+      }
+      .ugv-boot-splash.ugv-boot-ready .ugv-boot-panel {
+        border-color: #3dd68c;
+        box-shadow: 0 0 32px rgba(61, 214, 140, 0.3);
+      }
+      @keyframes ugvBootFadeIn {
+        from { opacity: 0; }
+        to { opacity: 1; }
+      }
+      @keyframes ugvBootFadeOut {
+        from { opacity: 1; }
+        to { opacity: 0; }
+      }
+      .ugv-boot-splash.ugv-boot-dismissed {
+        animation: ugvBootFadeOut 0.3s ease forwards;
+      }
+      .ugv-boot-panel {
+        background: #0f1117;
+        border: 2px solid #2a2f3d;
+        border-radius: 10px;
+        padding: 24px;
+        max-width: 420px;
+        width: calc(100vw - 32px);
+        box-shadow: 0 16px 64px rgba(0,0,0,0.7);
+        transition: border-color 0.3s, box-shadow 0.3s;
+      }
+      .ugv-boot-header {
+        text-align: center;
+        margin-bottom: 24px;
+        border-bottom: 1px solid #2a2f3d;
+        padding-bottom: 16px;
+      }
+      .ugv-boot-mark {
+        width: 48px;
+        height: 48px;
+        margin: 0 auto 12px;
+        color: #5b8cff;
+      }
+      .ugv-boot-mark svg {
+        width: 100%;
+        height: 100%;
+      }
+      .ugv-boot-header h1 {
+        margin: 0;
+        font-size: 24px;
+        font-weight: 800;
+        letter-spacing: 2px;
+        color: #e8eaef;
+      }
+      .ugv-boot-kicker {
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: 1px;
+        color: #6b7280;
+        margin: 4px 0 0;
+      }
+      .ugv-boot-body {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        margin-bottom: 20px;
+      }
+      .ugv-boot-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 6px 10px;
+        background: #141720;
+        border: 1px solid #1a1d27;
+        border-radius: 5px;
+        font-size: 13px;
+        transition: all 0.2s;
+      }
+      .ugv-boot-row[data-state="ok"] {
+        border-color: #3dd68c;
+        background: rgba(61, 214, 140, 0.08);
+      }
+      .ugv-boot-row[data-state="off"] {
+        border-color: #6b7280;
+        background: rgba(107, 114, 128, 0.08);
+      }
+      .ugv-boot-row[data-state="warn"] {
+        border-color: #fbbf24;
+        background: rgba(251, 191, 36, 0.08);
+      }
+      .ugv-boot-row[data-state="error"] {
+        border-color: #f87171;
+        background: rgba(248, 113, 113, 0.08);
+      }
+      .ugv-boot-label {
+        font-weight: 500;
+        color: #c4d0e0;
+      }
+      .ugv-boot-status {
+        font-size: 11px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        color: #9aa3b2;
+        padding: 2px 8px;
+        border-radius: 3px;
+        background: #1a1d27;
+        min-width: 72px;
+        text-align: center;
+      }
+      .ugv-boot-row[data-state="ok"] .ugv-boot-status {
+        color: #3dd68c;
+        background: rgba(61, 214, 140, 0.15);
+      }
+      .ugv-boot-row[data-state="off"] .ugv-boot-status {
+        color: #6b7280;
+      }
+      .ugv-boot-row[data-state="warn"] .ugv-boot-status {
+        color: #fbbf24;
+        background: rgba(251, 191, 36, 0.15);
+      }
+      .ugv-boot-row[data-state="error"] .ugv-boot-status {
+        color: #f87171;
+        background: rgba(248, 113, 113, 0.15);
+      }
+      .ugv-boot-footer {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 8px;
+        border-top: 1px solid #2a2f3d;
+        padding-top: 16px;
+      }
+      .ugv-boot-btn {
+        padding: 10px 24px;
+        font-size: 13px;
+        font-weight: 700;
+        letter-spacing: 1px;
+        background: #1a1d27;
+        color: #9aa3b2;
+        border: 1px solid #3a3f4d;
+        border-radius: 6px;
+        cursor: not-allowed;
+        transition: all 0.2s;
+      }
+      .ugv-boot-btn:not(:disabled) {
+        background: #3dd68c;
+        color: #0f1117;
+        border-color: #3dd68c;
+        cursor: pointer;
+      }
+      .ugv-boot-btn:not(:disabled):hover {
+        background: #2fc575;
+        transform: translateY(-1px);
+      }
+      .ugv-boot-hint {
+        font-size: 11px;
+        color: #6b7280;
+        margin: 0;
+      }
+    </style>
+    <script>
+      (function initBootSplash() {
+        'use strict';
+        var splash = document.getElementById('ugv-boot-splash');
+        var btn = document.getElementById('ugv-boot-dismiss');
+        var checks = {
+          flask: false,
+          config: false,
+          serial: false,
+          heartbeat: false,
+          control: false,
+          loadout: false,
+          rtsp: false,
+          wifi: false
+        };
+        var ready = false;
+        var dismissed = false;
+        var startTime = Date.now();
+        var minDisplayMs = 800;
+
+        function setCheck(name, state, label) {
+          checks[name] = true;
+          var row = document.querySelector('[data-check="' + name + '"]');
+          if (!row) return;
+          row.setAttribute('data-state', state);
+          var statusEl = row.querySelector('.ugv-boot-status');
+          if (statusEl) statusEl.textContent = label;
+        }
+
+        function allChecksComplete() {
+          return Object.keys(checks).every(function (k) { return checks[k]; });
+        }
+
+        function maybeReady() {
+          if (ready || !allChecksComplete()) return;
+          ready = true;
+          if (splash) splash.classList.add('ugv-boot-ready');
+          if (btn) {
+            btn.disabled = false;
+            btn.textContent = 'ENTER';
+            btn.style.cursor = 'pointer';
+          }
+          var hint = document.querySelector('.ugv-boot-hint');
+          if (hint) hint.textContent = 'All systems nominal · Click to continue';
+        }
+
+        function dismiss() {
+          if (dismissed) return;
+          var elapsed = Date.now() - startTime;
+          var delay = elapsed < minDisplayMs ? minDisplayMs - elapsed : 0;
+          setTimeout(function () {
+            dismissed = true;
+            if (splash) {
+              splash.classList.add('ugv-boot-dismissed');
+              setTimeout(function () { splash.remove(); }, 300);
+            }
+          }, delay);
+        }
+
+        if (btn) {
+          btn.addEventListener('click', function () {
+            if (!btn.disabled) dismiss();
+          });
+        }
+
+        // Immediate: Flask is serving this page
+        setCheck('flask', 'ok', 'online');
+        setCheck('config', 'ok', 'loaded');
+
+        // Check localStorage for heartbeat
+        try {
+          var hbEnabled = localStorage.getItem('ugv_chassis_heartbeat') !== '0';
+          setCheck('heartbeat', hbEnabled ? 'ok' : 'off', hbEnabled ? 'enabled' : 'disabled');
+        } catch (e) {
+          setCheck('heartbeat', 'ok', 'enabled');
+        }
+
+        // Fetch /api/status
+        fetch('/api/status', {
+          method: 'GET',
+          headers: { 'Accept': 'application/json' }
+        })
+          .then(function (r) { return r.json(); })
+          .then(function (d) {
+            // Serial UART
+            var serialOk = d.serial_open === true || d.serial_open === 'true';
+            setCheck('serial', serialOk ? 'ok' : 'warn', serialOk ? 'open' : 'closed');
+
+            // Control mode
+            var mode = d.control_mode || 'direct';
+            setCheck('control', 'ok', mode.toUpperCase());
+
+            // Loadout
+            var lo = d.loadout || {};
+            var loAttach = (lo.loadout || {}).attachment || 'unknown';
+            var loState = 'ok';
+            var loLabel = loAttach.toUpperCase();
+            if (lo.roarm_started) {
+              loLabel = 'RoArm ON';
+            } else if (loAttach === 'roarm2') {
+              loLabel = 'RoArm wanted';
+              loState = 'warn';
+            }
+            setCheck('loadout', loState, loLabel);
+
+            // RTSP
+            var rtspOn = d.enable_rtsp_stream === true || d.enable_rtsp_stream === 'true';
+            setCheck('rtsp', rtspOn ? 'ok' : 'off', rtspOn ? 'enabled' : 'disabled');
+
+            // ESP32 WiFi
+            var wifiStopped = d.esp32_wifi_stopped === true || d.esp32_wifi_stopped === 'true';
+            setCheck('wifi', wifiStopped ? 'off' : 'ok', wifiStopped ? 'stopped' : 'active');
+
+            maybeReady();
+          })
+          .catch(function (e) {
+            console.warn('[boot splash] /api/status failed:', e);
+            setCheck('serial', 'error', 'unknown');
+            setCheck('control', 'error', 'unknown');
+            setCheck('loadout', 'error', 'unknown');
+            setCheck('rtsp', 'error', 'unknown');
+            setCheck('wifi', 'error', 'unknown');
+            maybeReady();
+          });
+
+        // Auto-dismiss after timeout even if checks incomplete
+        setTimeout(function () {
+          if (!ready && !dismissed) {
+            Object.keys(checks).forEach(function (k) {
+              if (!checks[k]) setCheck(k, 'warn', 'timeout');
+            });
+            maybeReady();
+          }
+        }, 5000);
+      })();
+    </script>
+
     <nav class="ugv-navbar" id="ugv-navbar" aria-label="Global controls">
       <span class="nav-brand">UGV Control</span>
       <div class="ugv-mode-tabs" role="tablist" aria-label="App mode">
