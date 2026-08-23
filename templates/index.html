@@ -427,6 +427,24 @@
         color: #6b7280;
         margin: 0;
       }
+      .ugv-boot-row.toggleable {
+        cursor: pointer;
+        user-select: none;
+      }
+      .ugv-boot-row.toggleable:hover {
+        border-color: #5b8cff;
+        background: rgba(91, 140, 255, 0.08);
+      }
+      .ugv-boot-row.toggleable .ugv-boot-label::after {
+        content: ' ⇄';
+        font-size: 10px;
+        color: #6b7280;
+        opacity: 0;
+        transition: opacity 0.2s;
+      }
+      .ugv-boot-row.toggleable:hover .ugv-boot-label::after {
+        opacity: 1;
+      }
     </style>
     <script>
       (function initBootSplash() {
@@ -471,7 +489,7 @@
             btn.style.cursor = 'pointer';
           }
           var hint = document.querySelector('.ugv-boot-hint');
-          if (hint) hint.textContent = 'All systems nominal · Click to continue';
+          if (hint) hint.textContent = 'All systems nominal · Click HB / RTSP / WiFi to toggle · Click ENTER to continue';
         }
 
         function dismiss() {
@@ -562,6 +580,83 @@
             maybeReady();
           }
         }, 5000);
+
+        // Make heartbeat / rtsp / wifi rows toggleable
+        function makeToggleable(name, title, toggleFnName) {
+          var row = document.querySelector('[data-check="' + name + '"]');
+          if (!row) return;
+          row.classList.add('toggleable');
+          row.setAttribute('role', 'button');
+          row.setAttribute('tabindex', '0');
+          row.setAttribute('title', title);
+          
+          var handleToggle = function () {
+            // Resolve function by name at call time (not wire time)
+            var fn = window[toggleFnName];
+            if (typeof fn === 'function') {
+              try {
+                fn();
+                setTimeout(function () { refreshRow(name); }, 300);
+              } catch (e) {
+                console.warn('[boot splash] toggle ' + name + ' failed:', e);
+              }
+            } else {
+              console.warn('[boot splash] ' + toggleFnName + ' not available');
+            }
+          };
+          
+          row.addEventListener('click', handleToggle);
+          row.addEventListener('keydown', function (e) {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              handleToggle();
+            }
+          });
+        }
+
+        function refreshRow(name) {
+          if (name === 'heartbeat') {
+            try {
+              var hbEnabled = localStorage.getItem('ugv_chassis_heartbeat') !== '0';
+              setCheck('heartbeat', hbEnabled ? 'ok' : 'off', hbEnabled ? 'enabled' : 'disabled');
+            } catch (e) {
+              setCheck('heartbeat', 'ok', 'enabled');
+            }
+          } else if (name === 'rtsp' || name === 'wifi') {
+            fetch('/api/status', {
+              method: 'GET',
+              headers: { 'Accept': 'application/json' }
+            })
+              .then(function (r) { return r.json(); })
+              .then(function (d) {
+                if (name === 'rtsp') {
+                  var rtspOn = d.enable_rtsp_stream === true || d.enable_rtsp_stream === 'true';
+                  setCheck('rtsp', rtspOn ? 'ok' : 'off', rtspOn ? 'enabled' : 'disabled');
+                } else if (name === 'wifi') {
+                  var wifiStopped = d.esp32_wifi_stopped === true || d.esp32_wifi_stopped === 'true';
+                  setCheck('wifi', wifiStopped ? 'off' : 'ok', wifiStopped ? 'stopped' : 'active');
+                }
+              })
+              .catch(function (e) {
+                console.warn('[boot splash] refresh ' + name + ' failed:', e);
+              });
+          }
+        }
+
+        // Wire toggles on window load (control.js functions available)
+        // Fallback: poll briefly if load already fired
+        function wireToggles() {
+          makeToggleable('heartbeat', 'Click to toggle chassis heartbeat', 'toggleChassisHeartbeat');
+          makeToggleable('rtsp', 'Click to toggle RTSP stream', 'toggleRTSP');
+          makeToggleable('wifi', 'Click to toggle ESP32 WiFi', 'toggleEsp32Wifi');
+        }
+        
+        if (document.readyState === 'complete') {
+          // Page already loaded, wire immediately
+          wireToggles();
+        } else {
+          window.addEventListener('load', wireToggles);
+        }
       })();
     </script>
 
