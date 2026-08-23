@@ -5,6 +5,7 @@ Extracted so unit tests can prove safety overrides without booting app.py.
 from __future__ import annotations
 
 import re
+import threading
 from typing import Any, Dict, Optional
 
 # Chassis-calibrated 2026-08-13 (this Waveshare rover, carpet + floor cable runner).
@@ -611,3 +612,285 @@ def seek_battery_block_reason(
             'Charge or set UGV_SEEK_BATTERY_GATE=0 to override.'
         )
     return None
+
+
+# --- Dry-run (no chassis). Process-wide latch so every motor path can refuse. ---
+_DRY_RUN_LOCK = threading.Lock()
+_dry_run_active = False
+_dry_run_gen = 0
+_DRIVE_TLS = threading.local()
+_autonomy_hooks = []
+SEEK_SWEEP_MIN_JPEG_BYTES = 800
+
+
+def begin_seek_dry_run() -> int:
+    """Turn dry-run on and return a generation token. Only that token can clear it."""
+    global _dry_run_active, _dry_run_gen
+    with _DRY_RUN_LOCK:
+        _dry_run_gen += 1
+        _dry_run_active = True
+        return int(_dry_run_gen)
+
+
+def end_seek_dry_run(generation) -> bool:
+    """Clear dry-run only if `generation` is still the current latch."""
+    global _dry_run_active
+    try:
+        gen = int(generation or 0)
+    except (TypeError, ValueError):
+        gen = 0
+    with _DRY_RUN_LOCK:
+        if gen and gen == _dry_run_gen:
+            _dry_run_active = False
+            return True
+        return False
+
+
+def set_seek_dry_run(active: bool) -> bool:
+    """Latch Seek dry-run. True = chassis commands must no-op.
+
+    Tests / simple callers: True starts a new generation; False force-clears.
+    Production Seek uses begin/end with a generation token.
+    """
+    global _dry_run_active
+    if active:
+        begin_seek_dry_run()
+        return True
+    with _DRY_RUN_LOCK:
+        _dry_run_active = False
+        return False
+
+
+def seek_dry_run_active() -> bool:
+    with _DRY_RUN_LOCK:
+        return bool(_dry_run_active)
+
+
+def seek_drive_scope(active: bool = True) -> bool:
+    """Mark this thread as the Seek executor. Returns previous flag."""
+    prev = bool(getattr(_DRIVE_TLS, 'ok', False))
+    _DRIVE_TLS.ok = bool(active)
+    return prev
+
+
+def seek_thread_may_drive() -> bool:
+    return bool(getattr(_DRIVE_TLS, 'ok', False))
+
+
+def register_autonomy_running(fn) -> None:
+    """fn() -> bool. Seek/Track register so UART can refuse foreign hops."""
+    if callable(fn):
+        _autonomy_hooks.append(fn)
+
+
+def autonomy_owns_chassis() -> bool:
+    for fn in list(_autonomy_hooks):
+        try:
+            if fn():
+                return True
+        except Exception:
+            continue
+    return False
+
+
+def chassis_cmd_is_zero(cmd) -> bool:
+    if not isinstance(cmd, dict):
+        return False
+    try:
+        t = int(cmd.get('T'))
+    except (TypeError, ValueError):
+        return False
+    try:
+        if t == 1:
+            return abs(float(cmd.get('L') or 0)) < 1e-6 and abs(float(cmd.get('R') or 0)) < 1e-6
+        if t == 13:
+            return abs(float(cmd.get('X') or 0)) < 1e-6 and abs(float(cmd.get('Z') or 0)) < 1e-6
+    except (TypeError, ValueError):
+        return False
+    return False
+
+
+def chassis_serial_allowed(cmd) -> bool:
+    """May this T:1/T:13 payload hit the UART? Zeros always yes."""
+    if not isinstance(cmd, dict):
+        return True
+    try:
+        t = int(cmd.get('T'))
+    except (TypeError, ValueError):
+        return True
+    if t not in (1, 13):
+        return True
+    if chassis_cmd_is_zero(cmd):
+        return True
+    if not seek_chassis_allowed():
+        return False
+    if autonomy_owns_chassis() and not seek_thread_may_drive():
+        return False
+    return True
+
+
+def seek_chassis_allowed(*, dry_run=None) -> bool:
+    """False when Seek dry-run is on (explicit flag or process latch)."""
+    if dry_run is None:
+        dry_run = seek_dry_run_active()
+    return not bool(dry_run)
+
+
+def seek_drive_log_verb(dry_run=None) -> str:
+    if dry_run is None:
+        dry_run = seek_dry_run_active()
+    return 'WOULD drive' if dry_run else 'driving'
+
+
+def seek_live_start_error(*, dry_run: bool, confirm_live: bool) -> Optional[str]:
+    """Live chassis Seek must be explicitly confirmed. Dry-run never needs this."""
+    if dry_run:
+        return None
+    if not confirm_live:
+        return (
+            'Live drive refused: set dry_run=true (default) or pass confirm_live=true. '
+            'Uncheck Dry run in the UI only when you mean to move the chassis.'
+        )
+    return None
+
+
+def seek_views_are_rear_cruise(views) -> bool:
+    """True when LEFT/RIGHT panels are rear ±135° (not look-down ±55°)."""
+    pans = []
+    for v in views or []:
+        if not isinstance(v, dict):
+            continue
+        if v.get('name') not in ('left', 'right'):
+            continue
+        try:
+            pans.append(abs(float(v.get('pan_deg'))))
+        except (TypeError, ValueError):
+            continue
+    if not pans:
+        return False
+    return all(p >= 90.0 for p in pans)
+
+
+def seek_found_confident(
+    check,
+    *,
+    min_conf: float = 0.45,
+    view_hits: int = 1,
+    scan_conf: float = 0.22,
+) -> Dict[str, Any]:
+    """Whether to HALT Seek as found. Weak single-view hits stay candidates.
+
+    Scan threshold (0.22) is for logging. Halt needs >= min_conf on one view
+    or >=2 views at the scan threshold (look-up / second panel confirmed).
+    """
+    if not isinstance(check, dict) or not check.get('found'):
+        return {'ok': False, 'reason': 'not found'}
+    best = check.get('best') if isinstance(check.get('best'), dict) else {}
+    raw_c = (
+        best.get('confidence')
+        if best.get('confidence') is not None
+        else check.get('confidence')
+    )
+    try:
+        conf = float(raw_c or 0.0)
+    except (TypeError, ValueError):
+        conf = 0.0
+    try:
+        hits = int(view_hits or check.get('view_hits') or 1)
+    except (TypeError, ValueError):
+        hits = 1
+    if hits >= 2 and conf >= float(scan_conf):
+        return {
+            'ok': True,
+            'reason': f'{hits} views conf={conf:.2f}',
+            'confidence': conf,
+            'view_hits': hits,
+        }
+    if conf >= float(min_conf):
+        return {
+            'ok': True,
+            'reason': f'conf={conf:.2f}',
+            'confidence': conf,
+            'view_hits': hits,
+        }
+    return {
+        'ok': False,
+        'reason': (
+            f'weak hit conf={conf:.2f} views={hits} '
+            f'(need ≥{float(min_conf):.2f} or 2 views)'
+        ),
+        'confidence': conf,
+        'view_hits': hits,
+    }
+
+
+def seek_sweep_scorecard(views, *, min_bytes: int = SEEK_SWEEP_MIN_JPEG_BYTES) -> Dict[str, Any]:
+    """Per-view sweep QA: bytes, settle, labels. No OpenCV.
+
+    A view is ok when it has a real JPEG (not a missing-camera tile).
+    """
+    cards = []
+    missing = 0
+    for v in views or []:
+        if not isinstance(v, dict):
+            continue
+        jpeg = v.get('jpeg') or b''
+        try:
+            nbytes = int(v.get('bytes') or (len(jpeg) if jpeg else 0))
+        except (TypeError, ValueError):
+            nbytes = len(jpeg) if jpeg else 0
+        ok = nbytes >= int(min_bytes)
+        if not ok:
+            missing += 1
+        labels = v.get('detected_labels') or []
+        if not isinstance(labels, list):
+            labels = [str(labels)]
+        cards.append({
+            'name': v.get('name'),
+            'pan_deg': v.get('pan_deg'),
+            'bytes': nbytes,
+            'settled': bool(v.get('pan_settled')),
+            'labels': [str(x) for x in labels[:8]],
+            'ok': ok,
+            'wait_reason': v.get('pan_wait_reason'),
+        })
+    n = len(cards)
+    all_ok = missing == 0 and n >= 3
+    names = ', '.join(
+        f"{c.get('name') or '?'}={'ok' if c.get('ok') else 'MISS'} {c.get('bytes') or 0}B"
+        for c in cards
+    ) or 'no views'
+    return {
+        'views': cards,
+        'n': n,
+        'missing': missing,
+        'ok': all_ok,
+        'summary': (
+            f'sweep {"OK" if all_ok else "WEAK"} {n} views, {missing} missing — {names}'
+        ),
+    }
+
+
+def seek_sweep_actionable(card) -> Dict[str, Any]:
+    """Whether a sweep is good enough to LLM-nav or drive forward.
+
+    Centre missing or 2+ tiles missing → do not drive forward.
+    One wing missing → still may turn, but treat as weak.
+    """
+    card = card if isinstance(card, dict) else {}
+    views = card.get('views') or []
+    missing = int(card.get('missing') or 0)
+    centre = next((v for v in views if isinstance(v, dict) and v.get('name') == 'straight'), None)
+    centre_ok = bool(centre and centre.get('ok'))
+    if missing >= 2 or not centre_ok:
+        return {
+            'ok': False,
+            'drive': False,
+            'reason': (
+                f'centre missing' if not centre_ok
+                else f'{missing} views missing'
+            ),
+        }
+    if missing == 1:
+        return {'ok': False, 'drive': True, 'reason': 'one wing missing'}
+    return {'ok': True, 'drive': True, 'reason': 'sweep ok'}

@@ -51,8 +51,12 @@ VALID_REFEREES = frozenset({REFEREE_DETECTOR, REFEREE_LLM})
 
 # Finite pilot defaults (0 still means unlimited when explicitly requested)
 DEFAULT_SEEK_MAX_STEPS = 30
+# Wheels stay still unless the operator explicitly turns dry-run off.
+DEFAULT_SEEK_DRY_RUN = True
 DEFAULT_SEEK_TIMEOUT_S = 300.0  # 5 minutes
-DEFAULT_SEEK_CONF = 0.22
+DEFAULT_SEEK_CONF = 0.85  # Flat min for every class (HUD + found)
+# Halt-as-found bar. Same as scan now that the baseline is 0.85.
+DEFAULT_SEEK_FOUND_CONF = 0.85
 DEFAULT_SEEK_STEP_PAUSE_S = 0.35
 # Caps applied when a positive limit is requested
 SEEK_MAX_STEPS_CAP = 500
@@ -114,6 +118,16 @@ def normalize_seek_timeout_s(raw, default: float = DEFAULT_SEEK_TIMEOUT_S) -> fl
     if ts > 0:
         return max(float(SEEK_TIMEOUT_S_MIN), min(float(SEEK_TIMEOUT_S_CAP), ts))
     return 0.0  # explicit 0 = no time limit
+
+
+def parse_forced_yesno(raw, default: str = 'no') -> str:
+    """Normalize forced-JSON yes/no fields from a vision LLM."""
+    s = str(raw if raw is not None else '').strip().lower()
+    if s in ('yes', 'y', 'true', '1'):
+        return 'yes'
+    if s in ('no', 'n', 'false', '0'):
+        return 'no'
+    return 'yes' if str(default).strip().lower() in ('yes', 'y', 'true', '1') else 'no'
 
 
 def motion_lock_should_ignore_zero(
@@ -311,7 +325,7 @@ def evaluate_goal_detections(
     """Detector-side goal judgment. LLM free-text is never consulted here.
 
     found is True only when at least one detection has matching label and
-    confidence >= conf_threshold.
+    confidence >= conf_threshold (flat 0.85 for every class by default).
     """
     goal = (goal_label or '').strip().lower()
     thr = max(0.05, min(0.95, float(conf_threshold)))
@@ -324,6 +338,7 @@ def evaluate_goal_detections(
             c = 0.0
         if c >= thr:
             matches.append(d)
+    
     labels = sorted({(d.get('label') or '') for d in (dets or []) if isinstance(d, dict) and d.get('label')})
     best = matches[0] if matches else None
     return {
@@ -380,7 +395,10 @@ class SeekController:
             'on_found_error': None,
             'llm_scene_nav': DEFAULT_LLM_SCENE_NAV,
             'llm_nav_interval': DEFAULT_LLM_NAV_INTERVAL,
+            'dry_run': DEFAULT_SEEK_DRY_RUN,
+            'dry_run_gen': 0,
             'last_views': [],
+            'last_sweep': None,
             'panorama_data_url': None,
             # Single SoT for live pan overlay (written only by app._seek_publish_cam_aim)
             'cam_aim': None,
@@ -462,6 +480,8 @@ class SeekController:
         on_found_tts: str = DEFAULT_ON_FOUND_TTS,
         llm_scene_nav: bool = DEFAULT_LLM_SCENE_NAV,
         llm_nav_interval: int = DEFAULT_LLM_NAV_INTERVAL,
+        seek_multi_image: bool = False,
+        dry_run: bool = DEFAULT_SEEK_DRY_RUN,
     ) -> Dict[str, Any]:
         """Start seek. loop_fn(controller, goal_key, conf, max_steps, timeout_s) runs in a thread."""
         referee = parse_seek_referee(referee)
@@ -503,16 +523,33 @@ class SeekController:
                 'on_found_done': False,
                 'llm_scene_nav': bool(llm_scene_nav),
                 'llm_nav_interval': interval_val,
+                'seek_multi_image': bool(seek_multi_image),
+                'dry_run': bool(dry_run),
+                'dry_run_gen': 0,
                 'started_at': time.time(),
-                'message': f'Seeking {label} ({referee})…',
+                'message': (
+                    f'Seeking {label} ({referee})'
+                    + (' · DRY-RUN no drive' if dry_run else ' · LIVE DRIVE')
+                    + '…'
+                ),
                 'event_log': [],
                 'log_seq': 0,
             })
             start_ms, start_ts, start_conf = ms, ts, float(conf_threshold)
+        # Latch BEFORE the thread exists so sticks/CLI cannot sneak a hop.
+        if dry_run:
+            try:
+                from seek_nav import begin_seek_dry_run
+                gen = begin_seek_dry_run()
+                with self._lock:
+                    self._state['dry_run_gen'] = int(gen)
+            except Exception:
+                pass
         self.append_log(
             'start',
             f'Seek started · goal={label} · referee={referee} · on_found={on_found}'
-            f' · scene_nav={bool(llm_scene_nav)} · nav_interval={interval_val}',
+            f' · scene_nav={bool(llm_scene_nav)} · nav_interval={interval_val}'
+            f' · {"DRY-RUN no drive" if dry_run else "LIVE DRIVE"}',
             goal=label, referee=referee, on_found=on_found,
         )
         t = threading.Thread(

@@ -293,6 +293,14 @@ class BaseController:
 
 
 	def send_command(self, data):
+		# Last-line chassis guard: line-follow / timelapse / CLI `base -c`
+		# bypass Flask routing. Zeros and gimbal still pass.
+		try:
+			from seek_nav import chassis_serial_allowed
+			if isinstance(data, dict) and not chassis_serial_allowed(data):
+				return
+		except Exception:
+			pass
 		if self.serial_released_for_ros or not self.ser:
 			now = time.time()
 			if now - getattr(self, '_release_log_last', 0) > 8.0:

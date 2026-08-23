@@ -1,0 +1,542 @@
+/* Hangar / loadout bay — stencil schematic, not photos. */
+.mode-panel-loadout {
+  max-width: 1320px;
+  margin: 0 auto;
+  padding: 12px;
+  box-sizing: border-box;
+}
+
+.loadout-hangar {
+  background:
+    linear-gradient(180deg, rgba(91, 140, 255, 0.04), transparent 28%),
+    #0b0d12;
+  border: 1px solid #2a2f3d;
+  border-radius: 10px;
+  color: #c4d0e0;
+  font-family: 'SourceCodePro-Regular', ui-monospace, monospace;
+  overflow: hidden;
+}
+
+.loadout-mast {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 16px;
+  background: #12151d;
+  border-bottom: 1px solid #2a2f3d;
+}
+
+.loadout-mast-mark {
+  width: 40px;
+  height: 40px;
+  color: #4FF5C0;
+  flex-shrink: 0;
+}
+
+.loadout-mast-mark svg {
+  display: block;
+  width: 40px;
+  height: 40px;
+}
+
+.loadout-kicker {
+  margin: 0 0 2px;
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  color: #5b8cff;
+  font-weight: 700;
+}
+
+.loadout-mast-copy h2 {
+  margin: 0;
+  font-size: 18px;
+  letter-spacing: 0.12em;
+  color: #e8eaef;
+  font-family: 'SourceCodePro-Bold', 'SourceCodePro-Regular', monospace;
+}
+
+.loadout-mast-note {
+  margin: 0 0 0 auto;
+  max-width: 420px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: #9aa3b2;
+}
+
+.loadout-bay {
+  display: grid;
+  grid-template-columns: minmax(168px, 0.82fr) minmax(280px, 1.7fr) minmax(168px, 0.82fr);
+  gap: 12px;
+  padding: 12px;
+  background: #0b0d12;
+}
+
+.loadout-rail h3,
+.loadout-stage-hud-kicker {
+  margin: 0 0 8px;
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  color: #5b8cff;
+  font-weight: 700;
+}
+
+.loadout-rail {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.loadout-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  text-align: left;
+  padding: 8px;
+  background: #12151d;
+  border: 1px solid #2a2f3d;
+  border-radius: 8px;
+  color: #c4d0e0;
+  cursor: pointer;
+  font: inherit;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+}
+
+.loadout-card:hover {
+  border-color: #3a5a9a;
+}
+
+.loadout-card:focus-visible {
+  outline: 1px solid #4FF5C0;
+  outline-offset: 2px;
+}
+
+.loadout-rail-base .loadout-card.is-selected {
+  border-color: #4FF5C0;
+  background: linear-gradient(180deg, rgba(79, 245, 192, 0.1), rgba(91, 140, 255, 0.06));
+  box-shadow:
+    0 0 0 1px rgba(79, 245, 192, 0.45),
+    0 0 16px rgba(79, 245, 192, 0.22);
+}
+
+.loadout-rail-attach .loadout-card.is-selected {
+  border-color: #e0b35a;
+  background: linear-gradient(180deg, rgba(251, 191, 36, 0.1), rgba(196, 181, 253, 0.05));
+  box-shadow:
+    0 0 0 1px rgba(224, 179, 90, 0.45),
+    0 0 16px rgba(224, 179, 90, 0.2);
+}
+
+.loadout-rail-base .loadout-card.is-selected .lo-hull,
+.loadout-rail-base .loadout-card.is-selected .lo-hull-top,
+.loadout-rail-base .loadout-card.is-selected .lo-deck,
+.loadout-rail-base .loadout-card.is-selected .lo-track {
+  fill: rgba(79, 245, 192, 0.2);
+}
+.loadout-rail-attach .loadout-card.is-selected .lo-dome,
+.loadout-rail-attach .loadout-card.is-selected .lo-yaw,
+.loadout-rail-attach .loadout-card.is-selected .lo-barrel {
+  fill: rgba(224, 179, 90, 0.22);
+}
+
+.loadout-card-thumb {
+  display: block;
+  height: 72px;
+  background: #0b0d12;
+  border: 1px solid #1c2230;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.loadout-thumb-svg,
+.loadout-stage {
+  display: block;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+.loadout-thumb-svg .lo-caption {
+  display: none;
+}
+
+.loadout-card-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.loadout-card-copy strong {
+  font-size: 12px;
+  color: #e8eaef;
+  letter-spacing: 0.02em;
+}
+
+.loadout-card-copy span {
+  font-size: 10px;
+  color: #9aa3b2;
+}
+
+.loadout-stage-col {
+  min-width: 0;
+}
+
+.loadout-stage-frame {
+  position: relative;
+  background: #0b0d12;
+  border: 1px solid #2a2f3d;
+  border-radius: 8px;
+  overflow: hidden;
+  min-height: 280px;
+}
+
+.loadout-stage-frame::after {
+  content: '';
+  pointer-events: none;
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(
+    to bottom,
+    transparent 0,
+    transparent 3px,
+    rgba(91, 140, 255, 0.035) 3px,
+    rgba(91, 140, 255, 0.035) 4px
+  );
+}
+
+.loadout-stage-hud {
+  position: absolute;
+  top: 10px;
+  left: 14px;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  pointer-events: none;
+}
+
+.loadout-stage-hud-kicker {
+  margin: 0;
+}
+
+#loadout-stage-title {
+  font-size: 13px;
+  letter-spacing: 0.1em;
+  color: #4FF5C0;
+  font-family: 'SourceCodePro-Bold', 'SourceCodePro-Regular', monospace;
+}
+
+#loadout-stage-meta {
+  font-size: 10px;
+  color: #9aa3b2;
+}
+
+.loadout-stage {
+  height: auto;
+  min-height: 280px;
+  background: #0b0d12;
+}
+
+.loadout-arm-banner {
+  position: absolute;
+  left: 50%;
+  bottom: 14px;
+  transform: translateX(-50%);
+  z-index: 3;
+  background: #2a2210;
+  border: 1px solid #e0b35a;
+  color: #fbbf24;
+  font-size: 11px;
+  letter-spacing: 0.03em;
+  padding: 6px 12px;
+  border-radius: 4px;
+  white-space: nowrap;
+  box-shadow: 0 0 14px rgba(224, 179, 90, 0.25);
+}
+
+.loadout-arm-banner[hidden] {
+  display: none !important;
+}
+
+.loadout-dock {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 18px;
+  padding: 10px 16px 14px;
+  background: #12151d;
+  border-top: 1px solid #2a2f3d;
+}
+
+.loadout-cam {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.85rem;
+  color: var(--lo-ink, #d7e0ea);
+}
+
+.loadout-cam select {
+  background: #0f1720;
+  color: inherit;
+  border: 1px solid #3a4a5c;
+  border-radius: 4px;
+  padding: 0.15rem 0.35rem;
+}
+
+.loadout-lidar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: #c4d0e0;
+  cursor: pointer;
+  user-select: none;
+}
+
+.loadout-lidar input {
+  accent-color: #5b8cff;
+}
+
+.loadout-signs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  font-size: 11px;
+  color: #9aa3b2;
+}
+
+.loadout-signs code {
+  color: #c4b5fd;
+  background: #0b0d12;
+  border: 1px solid #2a2f3d;
+  border-radius: 4px;
+  padding: 1px 6px;
+  font-family: inherit;
+}
+
+.loadout-save {
+  margin-left: auto;
+  border: 1px solid #4FF5C0;
+  background: linear-gradient(180deg, #16352c, #0f241e);
+  color: #4FF5C0;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  padding: 8px 22px;
+  min-height: 38px;
+  border-radius: 8px;
+  cursor: pointer;
+  box-shadow: 0 0 12px rgba(79, 245, 192, 0.18);
+}
+
+.loadout-save:hover:not(:disabled) {
+  background: linear-gradient(180deg, #1c463a, #123028);
+  color: #b8ffea;
+}
+
+.loadout-save:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+
+.loadout-status {
+  flex: 1 1 100%;
+  margin: 0;
+  font-size: 11px;
+  color: #9aa3b2;
+  min-height: 1.2em;
+}
+
+.loadout-status.is-ok { color: #4FF5C0; }
+.loadout-status.is-warn { color: #fbbf24; }
+.loadout-status.is-err { color: #ff8a80; }
+.loadout-status.is-draft { color: #c4b5fd; }
+.loadout-status.is-busy { color: #5b8cff; }
+
+/* Stage stencil language */
+.loadout-stage .lo-stage-bg { fill: #0b0d12; }
+.loadout-stage .lo-centerline {
+  fill: none;
+  stroke: #5b8cff;
+  stroke-width: 0.4;
+  stroke-dasharray: 4 4;
+  opacity: 0.35;
+}
+.loadout-stage .lo-corner {
+  fill: none;
+  stroke: #4FF5C0;
+  stroke-width: 1.2;
+}
+
+.lo-ground {
+  fill: rgba(91, 140, 255, 0.08);
+  stroke: none;
+}
+
+.lo-hull,
+.lo-hull-top,
+.lo-deck,
+.lo-hatch,
+.lo-cam,
+.lo-track,
+.lo-track-inner,
+.lo-track-far,
+.lo-yaw,
+.lo-dome,
+.lo-dome-cap,
+.lo-barrel,
+.lo-barrel-tip,
+.lo-mount,
+.lo-empty-pad {
+  fill: rgba(91, 140, 255, 0.08);
+  stroke: #5b8cff;
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+}
+
+.lo-hull-wide { fill: rgba(91, 140, 255, 0.1); }
+
+.lo-wheel,
+.lo-hub,
+.lo-sprocket,
+.lo-idler,
+.lo-ring,
+.lo-ring-inner,
+.lo-joint,
+.lo-lens {
+  fill: rgba(11, 13, 18, 0.85);
+  stroke: #5b8cff;
+  stroke-width: 1.4;
+}
+
+.lo-wheel-far,
+.lo-track-far {
+  opacity: 0.55;
+}
+
+.lo-axle,
+.lo-stroke-thin,
+.lo-empty-x {
+  fill: none;
+  stroke: #5b8cff;
+  stroke-width: 1;
+  stroke-linecap: round;
+}
+
+.lo-chevron {
+  fill: rgba(79, 245, 192, 0.16);
+  stroke: #4FF5C0;
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+}
+
+.lo-chevron-void {
+  fill: #0b0d12;
+  stroke: #4FF5C0;
+  stroke-width: 1.1;
+}
+
+.lo-lens-core {
+  fill: #4FF5C0;
+  stroke: none;
+}
+
+.lo-caption {
+  fill: #5b8cff;
+  font-size: 9px;
+  letter-spacing: 1.4px;
+  text-anchor: middle;
+  font-family: 'SourceCodePro-Regular', monospace;
+}
+
+/* Composite HUD already names the combo; keep stencil captions off the stage. */
+.loadout-stage .lo-caption {
+  display: none;
+}
+
+.lo-track-chev {
+  fill: none;
+  stroke: #4FF5C0;
+  stroke-width: 1.2;
+  stroke-linejoin: miter;
+  opacity: 0.85;
+}
+
+.lo-layer.lo-ptz .lo-dome,
+.lo-layer.lo-ptz .lo-dome-cap,
+.lo-layer.lo-ptz .lo-barrel,
+.lo-layer.lo-ptz .lo-barrel-tip,
+.lo-layer.lo-ptz .lo-mount,
+.lo-layer.lo-ptz .lo-ring,
+.lo-layer.lo-ptz .lo-ring-inner {
+  stroke: #4FF5C0;
+  fill: rgba(79, 245, 192, 0.1);
+}
+
+.lo-layer.lo-roarm .lo-ring,
+.lo-layer.lo-roarm .lo-yaw,
+.lo-layer.lo-roarm .lo-joint {
+  stroke: #c4b5fd;
+  fill: rgba(196, 181, 253, 0.12);
+}
+
+.lo-arm-seg {
+  fill: none;
+  stroke: #c4b5fd;
+  stroke-width: 8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.lo-arm-fore { stroke-width: 6; }
+
+.lo-grip,
+.lo-grip-pad {
+  fill: none;
+  stroke: #c4b5fd;
+  stroke-width: 3.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.lo-grip-pad { fill: rgba(196, 181, 253, 0.2); }
+
+.lo-empty-pad,
+.lo-empty-x {
+  stroke: #3a4155;
+  stroke-dasharray: 3 3;
+}
+
+@media (max-width: 900px) {
+  .loadout-bay {
+    grid-template-columns: 1fr;
+  }
+  .loadout-mast {
+    flex-wrap: wrap;
+  }
+  .loadout-mast-note {
+    margin-left: 0;
+    max-width: none;
+  }
+  .loadout-rail-base,
+  .loadout-rail-attach {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+  .loadout-rail h3 {
+    grid-column: 1 / -1;
+  }
+  .loadout-rail-attach {
+    grid-template-columns: 1fr 1fr 1fr;
+  }
+  .loadout-save {
+    margin-left: 0;
+  }
+}
+
+@media (max-width: 560px) {
+  .loadout-rail-attach {
+    grid-template-columns: 1fr;
+  }
+}

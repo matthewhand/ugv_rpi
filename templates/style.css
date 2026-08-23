@@ -1,4 +1,10 @@
 /* pc */
+
+/* hidden attribute must always win over class display rules (e.g. .ugv-seek-scenenav-interval) */
+[hidden] {
+    display: none !important;
+}
+
 @font-face {
     font-family: 'SourceCodePro-Regular';
     src: url('./font/woff2/SourceCodePro-Regular.otf.woff2') format('woff2'),
@@ -1205,6 +1211,24 @@ body {
   background: #123522;
   color: #7dffb3;
 }
+/* Chat still slot: do not share/steal height from the live camera */
+.ugv-still-slot {
+  flex: 0 0 auto;
+  min-height: 72px;
+}
+.ugv-still-slot .ugv-still-img,
+.ugv-still-slot .ugv-preview-img,
+#chat-snap-preview {
+  width: 100%;
+  height: auto;
+  max-height: 240px;
+  object-fit: contain;
+  object-position: center;
+  border-radius: 8px;
+  background: #000;
+  border: 1px solid #2a2f3d;
+  display: block;
+}
 /* Empty still slots (Chat / AI) — hide broken black boxes */
 .ugv-still-slot.is-empty::after {
   content: "No still yet — Grab still";
@@ -1219,7 +1243,9 @@ body {
   background: #12151d;
 }
 .ugv-still-slot.is-empty img[hidden],
-.ugv-preview-img[hidden] {
+.ugv-preview-img[hidden],
+.ugv-still-img[hidden],
+#chat-snap-preview[hidden] {
   display: none !important;
 }
 /* Phone / short landscape: single compact sticky row, chips scroll, STOP stays */
@@ -1278,6 +1304,10 @@ body {
   grid-template-columns: minmax(280px, 1.1fr) minmax(320px, 1fr);
   gap: 14px;
   min-height: 420px;
+  /* Content-size the cards. Stretch gives the camera card a definite
+     height; overflow:hidden on the live wrap then lets flex shrink both
+     images when the attached still appears. */
+  align-items: start;
 }
 /* Seek: top row = previews | log; bottom = config full width */
 .ugv-seek-layout {
@@ -1691,6 +1721,10 @@ body.seek-running .ugv-seek-config-card {
   border: 1px solid #2a2f3d;
   background: #000;
   min-height: 160px;
+  /* overflow:hidden makes min-height:auto compute to 0 in a flex card.
+     Lock the box so an attached still cannot squash the live pane. */
+  flex: 0 0 auto;
+  aspect-ratio: 16 / 10;
 }
 .ugv-live-preview-wrap .ugv-preview-img,
 .ugv-seek-preview-wrap .ugv-preview-img {
@@ -1698,6 +1732,26 @@ body.seek-running .ugv-seek-config-card {
   border-radius: 0;
   min-height: 160px;
   aspect-ratio: 16 / 10;
+}
+.mode-panel-chat .ugv-chat-camera-card {
+  min-height: 0;
+  height: auto;
+  overflow: visible;
+}
+.mode-panel-chat .ugv-chat-camera-card .ugv-live-preview-wrap {
+  flex: 0 0 auto;
+  width: 100%;
+  aspect-ratio: 16 / 10;
+  min-height: 200px;
+  max-height: none;
+}
+.mode-panel-chat .ugv-chat-camera-card .ugv-live-preview-wrap .ugv-preview-img {
+  width: 100%;
+  height: 100%;
+  max-height: none;
+  min-height: 0;
+  aspect-ratio: auto;
+  object-fit: cover;
 }
 .ugv-live-fail {
   display: flex;

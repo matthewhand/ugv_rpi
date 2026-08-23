@@ -26,6 +26,18 @@ from seek_nav import (  # noqa: E402
     seek_may_reverse,
     seek_hop_from_forward_cm,
     seek_action_from_schema,
+    set_seek_dry_run,
+    seek_dry_run_active,
+    seek_chassis_allowed,
+    seek_drive_log_verb,
+    seek_sweep_scorecard,
+    seek_live_start_error,
+    seek_views_are_rear_cruise,
+    seek_found_confident,
+    begin_seek_dry_run,
+    end_seek_dry_run,
+    chassis_serial_allowed,
+    seek_sweep_actionable,
 )
 
 
@@ -287,6 +299,95 @@ class TestNoDuplicateNavPlan(unittest.TestCase):
         self.assertNotIn('def _seek_nav_plan(', text)
         self.assertIn('seek_nav_plan as _seek_nav_plan', text)
         self.assertIn('def _stop_ugv_bringup(', text)
+
+
+class TestDryRunAndSweep(unittest.TestCase):
+    def tearDown(self):
+        set_seek_dry_run(False)
+
+    def test_latch_blocks_chassis(self):
+        self.assertTrue(seek_chassis_allowed())
+        set_seek_dry_run(True)
+        self.assertTrue(seek_dry_run_active())
+        self.assertFalse(seek_chassis_allowed())
+        self.assertEqual(seek_drive_log_verb(), 'WOULD drive')
+        set_seek_dry_run(False)
+        self.assertTrue(seek_chassis_allowed())
+        self.assertEqual(seek_drive_log_verb(), 'driving')
+
+    def test_explicit_flag_overrides_latch(self):
+        set_seek_dry_run(False)
+        self.assertFalse(seek_chassis_allowed(dry_run=True))
+        set_seek_dry_run(True)
+        self.assertTrue(seek_chassis_allowed(dry_run=False))
+
+    def test_scorecard_ok_and_missing(self):
+        jpeg = b'\xff\xd8' + (b'x' * 1200)
+        views = [
+            {'name': 'left', 'jpeg': jpeg, 'bytes': len(jpeg), 'pan_settled': True, 'detected_labels': ['person']},
+            {'name': 'straight', 'jpeg': jpeg, 'bytes': len(jpeg), 'pan_settled': True},
+            {'name': 'right', 'jpeg': jpeg, 'bytes': len(jpeg), 'pan_settled': False},
+        ]
+        ok = seek_sweep_scorecard(views)
+        self.assertTrue(ok['ok'])
+        self.assertEqual(ok['n'], 3)
+        self.assertEqual(ok['missing'], 0)
+        weak = seek_sweep_scorecard([
+            {'name': 'left', 'jpeg': b'', 'bytes': 0},
+            {'name': 'straight', 'jpeg': jpeg, 'bytes': len(jpeg)},
+            {'name': 'right', 'jpeg': None, 'bytes': 12},
+        ])
+        self.assertFalse(weak['ok'])
+        self.assertEqual(weak['missing'], 2)
+        self.assertIn('WEAK', weak['summary'])
+        self.assertTrue(seek_sweep_actionable(ok)['drive'])
+        self.assertFalse(seek_sweep_actionable(weak)['drive'])
+
+    def test_live_start_requires_confirm(self):
+        self.assertIsNone(seek_live_start_error(dry_run=True, confirm_live=False))
+        self.assertIsNotNone(seek_live_start_error(dry_run=False, confirm_live=False))
+        self.assertIsNone(seek_live_start_error(dry_run=False, confirm_live=True))
+
+    def test_rear_cruise_vs_lookdown(self):
+        cruise = [
+            {'name': 'left', 'pan_deg': -135},
+            {'name': 'straight', 'pan_deg': 0},
+            {'name': 'right', 'pan_deg': 135},
+        ]
+        lookdown = [
+            {'name': 'left', 'pan_deg': -55},
+            {'name': 'straight', 'pan_deg': 0},
+            {'name': 'right', 'pan_deg': 55},
+        ]
+        self.assertTrue(seek_views_are_rear_cruise(cruise))
+        self.assertFalse(seek_views_are_rear_cruise(lookdown))
+
+    def test_found_confident_thresholds(self):
+        weak = {'found': True, 'best': {'confidence': 0.30}}
+        self.assertFalse(seek_found_confident(weak, view_hits=1)['ok'])
+        self.assertTrue(seek_found_confident(weak, view_hits=2, scan_conf=0.22)['ok'])
+        strong = {'found': True, 'best': {'confidence': 0.70}}
+        self.assertTrue(seek_found_confident(strong, view_hits=1)['ok'])
+        self.assertFalse(seek_found_confident({'found': False}, view_hits=2)['ok'])
+
+    def test_dry_run_generation_does_not_unlatch_newer(self):
+        g1 = begin_seek_dry_run()
+        g2 = begin_seek_dry_run()
+        self.assertTrue(seek_dry_run_active())
+        self.assertFalse(end_seek_dry_run(g1))
+        self.assertTrue(seek_dry_run_active())
+        self.assertTrue(end_seek_dry_run(g2))
+        self.assertFalse(seek_dry_run_active())
+
+    def test_uart_guard_blocks_nonzero_in_dry_run(self):
+        set_seek_dry_run(True)
+        try:
+            self.assertFalse(chassis_serial_allowed({'T': 1, 'L': 1.0, 'R': -1.0}))
+            self.assertFalse(chassis_serial_allowed({'T': 13, 'X': 0.2, 'Z': 0}))
+            self.assertTrue(chassis_serial_allowed({'T': 1, 'L': 0, 'R': 0}))
+            self.assertTrue(chassis_serial_allowed({'T': 133, 'X': 20, 'Y': 0}))
+        finally:
+            set_seek_dry_run(False)
 
 
 if __name__ == '__main__':

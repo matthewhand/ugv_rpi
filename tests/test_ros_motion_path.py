@@ -9,7 +9,12 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from ros_motion import parse_ugv_bringup_pids, preferred_motion_path  # noqa: E402
+from ros_motion import (  # noqa: E402
+    parse_chassis_driver_pids,
+    parse_ugv_bringup_pids,
+    prefer_ugv_driver_min,
+    preferred_motion_path,
+)
 
 
 class TestPreferredMotionPath(unittest.TestCase):
@@ -54,6 +59,24 @@ class TestParseBringupPids(unittest.TestCase):
     def test_dedupes(self):
         ps = "7 ros2 run ugv_bringup ugv_bringup\n7 ros2 run ugv_bringup ugv_bringup\n"
         self.assertEqual(parse_ugv_bringup_pids(ps), [7])
+
+
+class TestDriverMinPrefer(unittest.TestCase):
+    def test_prefer_driver_min_when_available(self):
+        self.assertEqual(
+            prefer_ugv_driver_min('auto', driver_min_available=True, bringup_available=True),
+            'ugv_driver_min',
+        )
+
+    def test_fallback_bringup(self):
+        self.assertEqual(
+            prefer_ugv_driver_min('auto', driver_min_available=False, bringup_available=True),
+            'ugv_bringup',
+        )
+
+    def test_parse_includes_both(self):
+        ps = "9 python3 /opt/ugv_ros2/ugv_driver_min.py\n12 ugv_bringup ugv_bringup\n"
+        self.assertEqual(parse_chassis_driver_pids(ps), [12, 9])
 
 
 if __name__ == '__main__':

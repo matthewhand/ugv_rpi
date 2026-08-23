@@ -31,6 +31,36 @@ thisPath = os.path.dirname(curpath)
 with open(thisPath + '/config.yaml', 'r') as yaml_file:
     f = yaml.safe_load(yaml_file)
 
+# Camera order is independent of app.py. Rover/auto → CSI first so a leftover
+# UVC gadget cannot steal Picamera2. Beast / camera_prefer=usb → UVC first.
+# Mutable so /api/loadout can re-apply without process restart.
+try:
+    import loadout as _loadout_mod
+    _lo = _loadout_mod.load_effective(thisPath, f)
+    _cam_first = _loadout_mod.camera_strategy(_lo)
+except Exception:
+    _loadout_mod = None
+    _cam_first = 'csi'
+    try:
+        if int((f.get('base_config') or {}).get('main_type') or 2) == 3:
+            _cam_first = 'usb'
+    except Exception:
+        _cam_first = 'csi'
+
+
+def get_camera_first() -> str:
+    return _cam_first
+
+
+def set_camera_first(strategy: str) -> str:
+    """Update module-level camera preference (`csi`|`usb`)."""
+    global _cam_first
+    s = (strategy or '').strip().lower()
+    if s not in ('csi', 'usb'):
+        s = 'csi'
+    _cam_first = s
+    return _cam_first
+
 
 class OpencvFuncs():
     """docstring for OpencvFuncs"""
@@ -154,19 +184,44 @@ class OpencvFuncs():
         # osd settings
         self.add_osd = f['base_config']['add_osd']
 
+        # last good frame for freeze on camera failure
+        self.last_good_frame = None
+        self.last_camera_attempt_time = 0
+        self.camera_reconnect_interval = 2.0  # floor; grows after failed USB reopens
+        self._usb_reopen_backoff = 2.0
+        self._usb_reopen_backoff_max = 16.0
+
         # camera type detection
-        self.usb_camera_connected = self.usb_camera_detection()
+        self.usb_camera_connected = False
         self.csi_camera_connected = False
         self.oak_camera_connected = False
+        self.usb_camera_index = None
+        self.camera = None
+        print(f"[cv_ctrl] camera first={_cam_first}")
 
-        # usb camera init
-        if self.usb_camera_connected:
-            self.camera = cv2.VideoCapture(0)
-            self.camera.set(cv2.CAP_PROP_FRAME_WIDTH, f['video']['default_res_w'])
-            self.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, f['video']['default_res_h'])
+        # rover / auto: Picamera2 first. usb-first (beast) skips this block.
+        if _cam_first == 'csi':
+            print("init csi camera.")
+            try:
+                self.encoder = H264Encoder(1000000)
+                self.picam2 = Picamera2()
+                self.picam2.configure(self.picam2.create_video_configuration(main={"format": 'XRGB8888', "size": (f['video']['default_res_w'], f['video']['default_res_h'])}))
+                self.picam2.start()
+                self.csi_camera_connected = True
+            except:
+                self.csi_camera_connected = False
 
-        # csi camera init
-        if not self.usb_camera_connected:
+        # usb camera init — index can jump after USB re-enumerate (video0 ↔ video1)
+        if _cam_first == 'usb' or not self.csi_camera_connected:
+            self.usb_camera_connected = self.usb_camera_detection()
+            if self.usb_camera_connected:
+                self.camera = self._open_usb_camera()
+                if self.camera is None:
+                    print("[cv_ctrl] USB Camera listed by lsusb but no V4L2 node opened")
+                    self.usb_camera_connected = False
+
+        # CSI fallback after USB-first miss (rover CSI already tried above)
+        if _cam_first != 'csi' and not self.usb_camera_connected and not self.csi_camera_connected:
             print("init csi camera.")
             try:
                 self.encoder = H264Encoder(1000000)
@@ -200,38 +255,191 @@ class OpencvFuncs():
                 print(f"[cv_ctrl.frame_process] error: {e}")
                 self.oak_camera_connected = False
 
+        self._cam_lock = threading.Lock()
+
+    def _close_cameras(self):
+        """Release USB / CSI / OAK handles so a prefer switch can reopen."""
+        try:
+            if self.camera is not None:
+                self.camera.release()
+        except Exception:
+            pass
+        self.camera = None
+        self.usb_camera_connected = False
+        self.usb_camera_index = None
+
+        try:
+            if getattr(self, 'picam2', None) is not None and self.csi_camera_connected:
+                self.picam2.stop()
+                self.picam2.close()
+        except Exception:
+            pass
+        self.csi_camera_connected = False
+
+        try:
+            if getattr(self, 'device', None) is not None and self.oak_camera_connected:
+                self.device.close()
+        except Exception:
+            pass
+        self.oak_camera_connected = False
+
+    def _open_csi_camera(self) -> bool:
+        if Picamera2 is None:
+            return False
+        try:
+            self.encoder = H264Encoder(1000000)
+            self.picam2 = Picamera2()
+            self.picam2.configure(
+                self.picam2.create_video_configuration(
+                    main={
+                        "format": 'XRGB8888',
+                        "size": (f['video']['default_res_w'], f['video']['default_res_h']),
+                    }
+                )
+            )
+            self.picam2.start()
+            self.csi_camera_connected = True
+            return True
+        except Exception as e:
+            print(f"[cv_ctrl] CSI reopen failed: {e}")
+            self.csi_camera_connected = False
+            return False
+
+    def apply_camera_prefer(self, loadout_or_strategy=None) -> dict:
+        """Re-init camera pipeline for a new hangar camera_prefer / strategy.
+
+        Accepts a loadout dict, a strategy string (`csi`|`usb`), or None (reload
+        from `.loadout.json`). Returns a small status dict for /api/loadout.
+        """
+        global _cam_first
+        strategy = None
+        if isinstance(loadout_or_strategy, dict):
+            if _loadout_mod is not None:
+                strategy = _loadout_mod.camera_strategy(loadout_or_strategy)
+        elif isinstance(loadout_or_strategy, str):
+            strategy = loadout_or_strategy.strip().lower()
+        if strategy not in ('csi', 'usb'):
+            try:
+                if _loadout_mod is not None:
+                    lo = _loadout_mod.load_effective(thisPath, f)
+                    strategy = _loadout_mod.camera_strategy(lo)
+                else:
+                    strategy = _cam_first
+            except Exception:
+                strategy = _cam_first or 'csi'
+        strategy = set_camera_first(strategy)
+
+        lock = getattr(self, '_cam_lock', None)
+        if lock is None:
+            self._cam_lock = threading.Lock()
+            lock = self._cam_lock
+        with lock:
+            prev = {
+                'usb': bool(self.usb_camera_connected),
+                'csi': bool(self.csi_camera_connected),
+                'oak': bool(self.oak_camera_connected),
+            }
+            self._close_cameras()
+            opened = {'strategy': strategy, 'usb': False, 'csi': False, 'oak': False, 'ok': False}
+            if strategy == 'csi':
+                if self._open_csi_camera():
+                    opened['csi'] = True
+                if not self.csi_camera_connected:
+                    self.usb_camera_connected = self.usb_camera_detection()
+                    if self.usb_camera_connected:
+                        self.camera = self._open_usb_camera()
+                        opened['usb'] = self.camera is not None
+                        if not opened['usb']:
+                            self.usb_camera_connected = False
+            else:
+                self.usb_camera_connected = self.usb_camera_detection()
+                if self.usb_camera_connected:
+                    self.camera = self._open_usb_camera()
+                    opened['usb'] = self.camera is not None
+                    if not opened['usb']:
+                        self.usb_camera_connected = False
+                if not self.usb_camera_connected:
+                    if self._open_csi_camera():
+                        opened['csi'] = True
+            opened['ok'] = bool(opened['usb'] or opened['csi'] or opened['oak'])
+            opened['prev'] = prev
+            print(
+                f"[cv_ctrl] apply_camera_prefer strategy={strategy} "
+                f"usb={opened['usb']} csi={opened['csi']} ok={opened['ok']}"
+            )
+            return opened
 
     def frame_process(self):
+        camera_failed = False
         try:
             if self.usb_camera_connected:
-                success, input_frame = self.camera.read()
+                if self.camera is None:
+                    self.camera = self._open_usb_camera()
+                success, input_frame = (False, None)
+                if self.camera is not None:
+                    success, input_frame = self.camera.read()
                 if not success:
-                    self.camera.release()
-                    time.sleep(1)
-                    self.camera = cv2.VideoCapture(0)
+                    # USB cameras on this Beast re-enumerate under vibration;
+                    # rediscover index instead of hardcoding 0.
+                    # Immediate reopen-every-frame on a dying UVC (0bda:5842)
+                    # kicks the device off usb 3-2; back off after a miss.
+                    now = time.time()
+                    backoff = float(getattr(self, '_usb_reopen_backoff', self.camera_reconnect_interval) or 2.0)
+                    if now - self.last_camera_attempt_time < backoff:
+                        self.usb_camera_connected = False
+                        camera_failed = True
+                        raise RuntimeError("usb camera read failed (reopen backoff)")
+                    self.last_camera_attempt_time = now
+                    try:
+                        if self.camera is not None:
+                            self.camera.release()
+                    except Exception:
+                        pass
+                    self.camera = None
+                    time.sleep(0.2)
+                    self.camera = self._open_usb_camera()
+                    if self.camera is not None:
+                        success, input_frame = self.camera.read()
+                    if success and input_frame is not None:
+                        self._usb_reopen_backoff = 2.0
+                    else:
+                        self.usb_camera_connected = False
+                        self.usb_camera_index = None
+                        self._usb_reopen_backoff = min(
+                            backoff * 2.0,
+                            float(getattr(self, '_usb_reopen_backoff_max', 16.0)),
+                        )
+                        camera_failed = True
+                        raise RuntimeError("usb camera read failed after reopen")
             elif self.csi_camera_connected:
                 input_frame = self.picam2.capture_array()
             elif self.oak_camera_connected:
                 input_frame = self.output_queue.get().getCvFrame()
                 input_frame = cv2.resize(input_frame, (640, 480))
             else:
-                input_frame = 255 * np.ones((480, 640, 3), dtype=np.uint8)
-                cv2.putText(input_frame, f"camera read failed... \nusb - csi - oak", 
-                            (round(0.05*640), round(0.1*640 + 5 * 13)), 
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.369, (0, 0, 0), 1)
-                ret, buffer = cv2.imencode('.jpg', input_frame, [int(cv2.IMWRITE_JPEG_QUALITY), self.video_quality])
-                input_frame = buffer.tobytes()
-                time.sleep(1)
-                return input_frame
+                camera_failed = True
+                raise RuntimeError("no camera connected (usb - csi - oak)")
         except Exception as e:
             print(f"[cv_ctrl.frame_process] error: {e}")
-            input_frame = 255 * np.ones((480, 640, 3), dtype=np.uint8)
-            cv2.putText(input_frame, f"camera read failed... \n{e}", 
-                        (round(0.05*640), round(0.1*640 + 5 * 13)), 
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.369, (0, 0, 0), 1)
+            camera_failed = True
+            # Try to reconnect in background
+            self._try_camera_reconnect()
+            # Return frozen last good frame with glitch overlay, or dark placeholder
+            if self.last_good_frame is not None:
+                input_frame = self.last_good_frame.copy()
+                input_frame = self._create_glitch_overlay(input_frame)
+                input_frame = self._add_pause_badge(input_frame)
+            else:
+                input_frame = self._create_dark_placeholder()
             ret, buffer = cv2.imencode('.jpg', input_frame, [int(cv2.IMWRITE_JPEG_QUALITY), self.video_quality])
             input_frame = buffer.tobytes()
+            time.sleep(0.3)  # Brief sleep to avoid tight loop
             return input_frame
+        
+        # Store last good frame if we got one successfully
+        if not camera_failed and input_frame is not None and hasattr(input_frame, 'shape'):
+            self.last_good_frame = input_frame.copy()
+            self._usb_reopen_backoff = 2.0
 
         # opencv funcs
         if self.cv_mode != f['code']['cv_none']:
@@ -359,6 +567,148 @@ class OpencvFuncs():
         else:
             print("USB Camera not connected")
             return False
+
+    def _open_usb_camera(self):
+        """Open first working UVC node (index or /dev/videoN).
+
+        After USB disconnect/reconnect the capture node often moves (e.g. video0→video1).
+        """
+        w = f['video']['default_res_w']
+        h = f['video']['default_res_h']
+        # Prefer current index if still good, then 0..4 and common paths
+        candidates = []
+        if self.usb_camera_index is not None:
+            candidates.append(self.usb_camera_index)
+        candidates.extend([0, 1, 2, 3, 4])
+        # de-dupe preserving order
+        seen = set()
+        ordered = []
+        for c in candidates:
+            if c not in seen:
+                seen.add(c)
+                ordered.append(c)
+
+        for idx in ordered:
+            try:
+                cap = cv2.VideoCapture(idx)
+                if not cap.isOpened():
+                    cap.release()
+                    continue
+                cap.set(cv2.CAP_PROP_FRAME_WIDTH, w)
+                cap.set(cv2.CAP_PROP_FRAME_HEIGHT, h)
+                ok, frame = cap.read()
+                if ok and frame is not None:
+                    self.usb_camera_index = idx
+                    print(f"[cv_ctrl] USB camera opened index={idx} shape={frame.shape}")
+                    return cap
+                cap.release()
+            except Exception as e:
+                print(f"[cv_ctrl] open index {idx} failed: {e}")
+        return None
+
+    def _create_glitch_overlay(self, frame):
+        """Create a subtle glitch overlay on a frozen frame: blur + noise + scan lines."""
+        if frame is None or not hasattr(frame, 'shape'):
+            return frame
+        h, w = frame.shape[:2]
+        # Subtle blur to indicate frozen state
+        glitched = cv2.GaussianBlur(frame.copy(), (5, 5), 0)
+        # Add slight noise
+        noise = np.random.randint(-15, 15, (h, w, 3), dtype=np.int16)
+        glitched = np.clip(glitched.astype(np.int16) + noise, 0, 255).astype(np.uint8)
+        # Add scan line effect (every 4th row slightly darker)
+        for i in range(0, h, 4):
+            if i < h:
+                glitched[i, :] = np.clip(glitched[i, :].astype(np.int16) - 20, 0, 255).astype(np.uint8)
+        return glitched
+
+    def _add_pause_badge(self, frame):
+        """Add a small pause badge to indicate frozen feed."""
+        if frame is None or not hasattr(frame, 'shape'):
+            return frame
+        h, w = frame.shape[:2]
+        # Badge in bottom-right corner
+        badge_x = w - 90
+        badge_y = h - 35
+        badge_w = 80
+        badge_h = 25
+        # Semi-transparent dark background
+        overlay = frame.copy()
+        cv2.rectangle(overlay, (badge_x, badge_y), (badge_x + badge_w, badge_y + badge_h), (30, 30, 30), -1)
+        cv2.addWeighted(overlay, 0.7, frame, 0.3, 0, frame)
+        # Pause icon (two vertical bars)
+        bar_x1 = badge_x + 10
+        bar_x2 = badge_x + 20
+        bar_y1 = badge_y + 6
+        bar_y2 = badge_y + 19
+        cv2.rectangle(frame, (bar_x1, bar_y1), (bar_x1 + 6, bar_y2), (200, 200, 200), -1)
+        cv2.rectangle(frame, (bar_x2, bar_y1), (bar_x2 + 6, bar_y2), (200, 200, 200), -1)
+        # Text "PAUSED"
+        cv2.putText(frame, "PAUSED", (badge_x + 32, badge_y + 17), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.35, (200, 200, 200), 1)
+        return frame
+
+    def _create_dark_placeholder(self):
+        """Create a dark placeholder frame with pause badge when no good frame exists."""
+        w = f['video']['default_res_w']
+        h = f['video']['default_res_h']
+        # Dark muted placeholder (not pure black, not white)
+        placeholder = np.full((h, w, 3), 40, dtype=np.uint8)
+        # Add a muted message in the center
+        msg = "Camera initializing..."
+        text_size = cv2.getTextSize(msg, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 1)[0]
+        text_x = (w - text_size[0]) // 2
+        text_y = (h + text_size[1]) // 2
+        cv2.putText(placeholder, msg, (text_x, text_y), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (100, 100, 100), 1)
+        # Add pause badge
+        placeholder = self._add_pause_badge(placeholder)
+        return placeholder
+
+    def _try_camera_reconnect(self):
+        """Attempt to reconnect/rediscover camera in the background."""
+        now = time.time()
+        backoff = float(getattr(self, '_usb_reopen_backoff', self.camera_reconnect_interval) or 2.0)
+        if now - self.last_camera_attempt_time < backoff:
+            return False
+        self.last_camera_attempt_time = now
+        
+        # Try to reconnect based on current camera_first strategy
+        strategy = get_camera_first()
+        if strategy == 'csi':
+            if not self.csi_camera_connected:
+                if self._open_csi_camera():
+                    self._usb_reopen_backoff = 2.0
+                    return True
+            if not self.csi_camera_connected and not self.usb_camera_connected:
+                self.usb_camera_connected = self.usb_camera_detection()
+                if self.usb_camera_connected:
+                    self.camera = self._open_usb_camera()
+                    if self.camera is not None:
+                        self._usb_reopen_backoff = 2.0
+                        return True
+                    self.usb_camera_connected = False
+        else:  # usb first (beast / camera_prefer=usb)
+            if not self.usb_camera_connected:
+                self.usb_camera_connected = self.usb_camera_detection()
+                if self.usb_camera_connected:
+                    self.camera = self._open_usb_camera()
+                    if self.camera is not None:
+                        self._usb_reopen_backoff = 2.0
+                        return True
+                    self.usb_camera_connected = False
+            # Skip Picamera2 on usb-first: Beast has no CSI, and the failed
+            # constructor loop coincided with UVC drop on usb 3-2.
+            self._usb_reopen_backoff = min(
+                backoff * 2.0,
+                float(getattr(self, '_usb_reopen_backoff_max', 16.0)),
+            )
+            return False
+        self._usb_reopen_backoff = min(
+            backoff * 2.0,
+            float(getattr(self, '_usb_reopen_backoff_max', 16.0)),
+        )
+        return False
 
 
     def osd_render(self, osd_frame):

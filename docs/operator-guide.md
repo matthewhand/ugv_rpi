@@ -25,11 +25,12 @@ Visual QA source of truth for Playwright feature catalog.
 | `shell.ops_log` | App log open | Purple ops drawer bottom-right; level filter, follow, clear |
 | `shell.twin_drawer` | 3D Twin open | Blue twin drawer; iframe of `/3d`; larger default size |
 | `shell.navbar_phone` | Phone landscape chrome | Single sticky row; brand may hide; **STOP** visible |
+| `shell.loadout` | Mode Loadout | Tab **Loadout** active; hangar bay with rover/beast stencils and attachment overlay |
 
 **Operator notes**
 - Prefer **Direct** for simple Seek demos and reliable PTZ.
 - Leave **HB ON** for stick driving; turn **HB off** only when using AI timed drives.
-- **STOP** zeros wheels, cancels Seek, clears AI motion lock.
+- **STOP** zeros wheels, cancels Seek **and** Track, clears AI motion lock.
 - **ROS 2:** needs rosbridge; if it dies, firmware autoheal retries and serial fallback keeps motion alive (see README). Do not expect silent perfection if Docker/`ugv_ros2` is broken.
 - **Drive polarity:** after changing `drive_linear_sign`, **restart the Flask app** and check `GET /api/status` → `drive_linear_sign` (browser refresh alone does not reload yaml).
 - `shell.path_direct` / `shell.path_ros2` catalog shots depend on server path at capture time; flip the chip yourself if you need the other PNG (catalog never thrash-flips UART).
@@ -73,6 +74,8 @@ Visual QA source of truth for Playwright feature catalog.
 **Operator notes**
 - Chat is a thin client of `/api/ai/chat`. Tool capability toggles live on **`/ai`** only.
 - Motion tools default off server-side; enable on `/ai` first.
+- **Grab still** freezes the JPEG that **Send** attaches when the checkbox is on. If no still has been grabbed, Send captures a live frame.
+- Voice Off / Browser / Robot needs `UGV_STT_URL` and `UGV_TTS_URL` in `.env`.
 
 ---
 
@@ -87,20 +90,23 @@ Visual QA source of truth for Playwright feature catalog.
 | `seek.goal_select` | Detector goal class | Select shows VOC labels (e.g. person, chair) |
 | `seek.onfound_none` | Upon found = none | Do nothing selected; TTS field hidden |
 | `seek.onfound_tts` | Upon found = TTS | TTS phrase field visible |
-| `seek.scenenav_off` | Scene nav unchecked (b/c) | Checkbox off; interval may disable |
+| `seek.scenenav_off` | Scene nav unchecked (b/c) | Checkbox off (mode c: scan/found only, no drive) |
 | `seek.limits` | Finite limits | Max steps + timeout inputs visible |
+| `seek.dry_run` | Dry run default ON | Checkbox **Dry run (no drive)** checked |
 | `seek.pano_empty` | Panorama empty | Hint “No scan yet…”; no broken image |
 | `seek.actions` | Action bar | Seek / Stop / Check once (sticky on phone) |
 | `seek.running_chrome` | Simulated running chrome | Catalog-only (no motors): pill **Seek running · 3/30**; `body.seek-running`; config card `is-locked` + disabled mode/goal/on-found/scene-nav/limits; Start/Check disabled. Live run also updates phase via poll. |
 
 **Operator notes**
 - Defaults are **finite** (30 steps / 300s). Set 0 only for unlimited.
-- **Battery gate:** Seek will not start (and will halt if already running) when pack voltage is known and ≤ `UGV_BATTERY_LOW_V` (default 9.5 V). If `v` is missing or looks like raw ADC, Seek does **not** block. Override: `UGV_SEEK_BATTERY_GATE=0`.
+- **Dry run (default ON):** camera sweep + decide only. No chassis. Uncheck and confirm to allow live drive. Battery gate does **not** apply in dry-run.
+- **Battery gate (live only):** Seek will not start (and will halt if already running) when pack voltage is known and ≤ `UGV_BATTERY_LOW_V` (default 9.5 V). If `v` is missing or looks like raw ADC, Seek does **not** block. Override: `UGV_SEEK_BATTERY_GATE=0`.
 - **Config is locked while Seek is running** (mode radios, goal, upon-found, scene nav, max steps, timeout). Card tooltip: “Config locked while Seek is running — Stop to edit”. Use **Stop** or navbar **STOP** to unlock and edit.
 - Leaving Seek while running prompts stop confirm.
 - Prefer mode **a** or **b** with a VOC class (`person`, `chair`, …) for detector demos; mode **c** for a free-text goal.
+- **Mode a** is detector + L/C/R heuristic nav (no LLM). **Mode b** is detector found + front-first LLM hops. **Mode c** is LLM found + the same hops. Uncheck **LLM Scene Navigation** on b/c to scan without driving.
 - **This chassis:** Seek turns are **UI-Fast T:1** spins (soft twist yaw does nothing). Soft linear stalls on thick floor transitions; hops are punchy (~0.22–0.28). short/medium/long ≈ 0.85s / 1.1s / 1.6s. Restart the Flask app after changing hop tables.
-- **Indoor helpers:** drive *away* from walls when the planner is heuristic; after a doorway-like chute take another hop so the body is past the jambs. Cruise tilt ≈ −12°. Look-down L/front/R (≈ −22°) only when cruise stills look close, and at most every 3 steps. A **person** in the cruise scan can trigger look-up L/front/R (≈ +18°). **Reverse** only if forward and turn are both impossible **and** both rear quarters look clear. PTZ from `/api/ptz` or Seek updates the Raw HUD needles (last command, not HW encoder).
+- **Indoor helpers (mode a):** drive *away* from walls when the planner is heuristic; after a doorway-like chute take another hop so the body is past the jambs. Cruise tilt ≈ −12°. PTZ from `/api/ptz` or Seek updates the Raw HUD needles (last command, not HW encoder).
 
 ---
 

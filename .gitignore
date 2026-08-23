@@ -6,8 +6,12 @@ tutorial_cn/.ipynb_checkpoints/
 templates/pictures/photo*
 templates/videos/video*
 .env
+.env.*
+!.env.example
+*.bak*
 .ai_capabilities.json
 .control_mode.json
+.loadout.json
 .kilo/
 *.log
 hailort.log
@@ -16,3 +20,4 @@ ai_proof/
 # Playwright UI screenshots & local tooling
 ui_shots/
 .tools/
+.ui_aim_mode.json

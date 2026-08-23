@@ -45,6 +45,17 @@ thisPath = os.path.dirname(curpath)
 with open(thisPath + '/config.yaml', 'r') as yaml_file:
     f = yaml.safe_load(yaml_file)
 
+import loadout as loadout_mod
+_LOADOUT_PATH = os.path.join(thisPath, loadout_mod.LOADOUT_FILENAME)
+_loadout_store = loadout_mod.LoadoutStore(thisPath, _LOADOUT_PATH)
+_loadout_store.load(fallback_from_config=f)
+loadout_mod.apply_loadout_to_config(f, _loadout_store.get())
+# Honor persisted use_lidar without forcing lidar hardware at install time.
+try:
+    base.use_lidar = bool(f['base_config'].get('use_lidar'))
+except Exception:
+    pass
+
 base.base_oled(0, f["base_config"]["robot_name"])
 base.base_oled(1, f"sbc_version: {f['base_config']['sbc_version']}")
 base.base_oled(2, f"{f['base_config']['main_type']}{f['base_config']['module_type']}")
@@ -67,6 +78,358 @@ import audio_ctrl
 import os_info
 import app_log
 from app_log import app_log as olog
+
+# ---------------------------------------------------------------------------
+# USB RoArm (hangar-gated). Start ONLY when attachment=roarm2.
+# Rover + ptz/none keep roarm_started=false and never open CP2102.
+# Live handle lives in roarm_ctrl (current_roarm / get_roarm / shutdown_roarm).
+# ---------------------------------------------------------------------------
+_AIM_MODE_PATH = os.path.join(thisPath, '.ui_aim_mode.json')
+_aim_mode_lock = threading.Lock()
+_ui_aim_mode = 'pt'
+
+
+def _arm_cfg():
+    return f.get('arm_config') or {}
+
+
+def arm_usb_enabled():
+    """True when hangar wants USB RoArm (attachment=roarm2)."""
+    try:
+        return loadout_mod.wants_roarm(_loadout_store.get())
+    except Exception:
+        return False
+
+
+def arm_transport():
+    return 'usb_serial' if arm_usb_enabled() else 'base_uart'
+
+
+def _roarm_usb_owner() -> str:
+    try:
+        import ros_motion
+        return ros_motion.roarm_usb_owner()
+    except Exception:
+        raw = (os.environ.get('UGV_ROARM_USB_OWNER') or 'flask').strip().lower()
+        if raw in ('driver', 'ros', 'ros2', 'bridge', 'exclusive'):
+            return 'driver'
+        return 'flask'
+
+
+def _default_ui_aim_mode():
+    raw = (_arm_cfg().get('ui_aim_default') or 'auto').strip().lower()
+    if raw in ('roarm', 'arm', 'usb'):
+        return 'roarm'
+    if raw in ('pt', 'gimbal', 'pan_tilt'):
+        return 'pt'
+    if arm_usb_enabled() or int(f.get('base_config', {}).get('module_type') or 0) == 1:
+        return 'roarm'
+    return 'pt'
+
+
+def _load_ui_aim_mode():
+    global _ui_aim_mode
+    try:
+        if os.path.isfile(_AIM_MODE_PATH):
+            with open(_AIM_MODE_PATH, 'r', encoding='utf-8') as fh:
+                data = json.load(fh)
+            m = (data.get('mode') or '').strip().lower()
+            if m in ('roarm', 'pt'):
+                _ui_aim_mode = m
+                return
+    except Exception as e:
+        print(f'[app.py] load ui_aim_mode: {e}')
+    _ui_aim_mode = _default_ui_aim_mode()
+
+
+def _save_ui_aim_mode():
+    try:
+        with open(_AIM_MODE_PATH, 'w', encoding='utf-8') as fh:
+            json.dump({'mode': _ui_aim_mode}, fh)
+    except Exception as e:
+        print(f'[app.py] save ui_aim_mode: {e}')
+
+
+def get_ui_aim_mode():
+    with _aim_mode_lock:
+        return _ui_aim_mode
+
+
+def set_ui_aim_mode(mode, *, source='api'):
+    global _ui_aim_mode
+    mode = (mode or '').strip().lower()
+    if mode in ('arm', 'usb', 'roarm_usb'):
+        mode = 'roarm'
+    if mode in ('gimbal', 'pan_tilt', 'pan-tilt'):
+        mode = 'pt'
+    if mode not in ('roarm', 'pt'):
+        raise ValueError("mode must be 'roarm' or 'pt'")
+    if mode == 'roarm' and not arm_usb_enabled():
+        raise ValueError('Aim:RoArm requires hangar attachment=roarm2')
+    with _aim_mode_lock:
+        prev = _ui_aim_mode
+        _ui_aim_mode = mode
+    _save_ui_aim_mode()
+    olog.info(
+        'ui_aim',
+        f'UI aim mode → {mode} (was {prev})',
+        mode=mode, prev_mode=prev, source=source,
+        arm_transport=arm_transport(),
+    )
+    return mode
+
+
+_load_ui_aim_mode()
+
+
+def get_roarm():
+    """Live USB RoArm controller, or None. Single owner: roarm_ctrl."""
+    import roarm_ctrl
+    return roarm_ctrl.current_roarm()
+
+
+def roarm_started() -> bool:
+    return get_roarm() is not None
+
+
+def _stop_roarm(*, reason='loadout'):
+    """Close USB RoArm if open. Safe when already stopped."""
+    import roarm_ctrl
+    arm = roarm_ctrl.current_roarm()
+    if arm is None:
+        return {'stopped': False, 'already_down': True, 'ok': True}
+    try:
+        roarm_ctrl.shutdown_roarm()
+    except Exception as e:
+        olog.warn('roarm', f'RoArm close failed ({reason}): {e}', error=str(e)[:160])
+    olog.info('roarm', f'RoArm stopped ({reason})', reason=reason, roarm_started=False)
+    return {'stopped': True, 'ok': True, 'reason': reason}
+
+
+def _start_roarm(*, reason='loadout'):
+    """Open USB RoArm only when hangar attachment=roarm2."""
+    import roarm_ctrl
+    if not arm_usb_enabled():
+        return {'started': False, 'ok': False, 'detail': 'attachment is not roarm2', 'roarm_started': False}
+    if _roarm_usb_owner() == 'driver':
+        olog.info(
+            'roarm',
+            'RoArm USB owner=driver; Flask skips CP2102 open',
+            usb_owner='driver', reason=reason,
+        )
+        return {'started': False, 'ok': True, 'detail': 'usb_owner=driver', 'roarm_started': False, 'usb_owner': 'driver'}
+    existing = roarm_ctrl.current_roarm()
+    if existing is not None:
+        st = {}
+        try:
+            st = existing.status() or {}
+        except Exception:
+            pass
+        return {
+            'started': False,
+            'already_up': True,
+            'ok': True,
+            'roarm_started': True,
+            'status': st,
+        }
+    try:
+        port = (_arm_cfg().get('serial_port') or '').strip() or None
+        baud = int(_arm_cfg().get('baud') or roarm_ctrl.DEFAULT_BAUD)
+        arm = roarm_ctrl.get_roarm(port=port, baud=baud, enabled=True)
+        st = arm.status() if arm else {}
+        olog.info(
+            'roarm',
+            f"RoArm USB init connected={st.get('connected')} port={st.get('port')}",
+            connected=st.get('connected'),
+            port=st.get('port'),
+            reason=reason,
+            roarm_started=True,
+        )
+        return {
+            'started': True,
+            'ok': True,
+            'roarm_started': True,
+            'status': st,
+            'reason': reason,
+        }
+    except Exception as e:
+        try:
+            roarm_ctrl.shutdown_roarm()
+        except Exception:
+            pass
+        olog.error('roarm', f'RoArm USB init failed: {e}', error=str(e), reason=reason)
+        return {
+            'started': False,
+            'ok': False,
+            'roarm_started': False,
+            'error': str(e),
+            'reason': reason,
+        }
+
+
+def _sync_roarm_to_loadout(*, reason='loadout'):
+    """Start RoArm iff hangar attachment=roarm2; otherwise ensure stopped."""
+    if arm_usb_enabled():
+        return _start_roarm(reason=reason)
+    return _stop_roarm(reason=reason)
+
+
+def _route_arm_ui_cmd(cmd):
+    """Handle stock UI T:144 E/Z/R — USB RoArm when hangar says roarm2, else base UART."""
+    e = float(cmd.get('E', cmd.get('e', f['args_config'].get('arm_default_e', 60))) or 0)
+    z = float(cmd.get('Z', cmd.get('z', f['args_config'].get('arm_default_z', 24))) or 0)
+    r = float(cmd.get('R', cmd.get('r', f['args_config'].get('arm_default_r', 0))) or 0)
+    try:
+        cvf.pan_angle = r
+        cvf.tilt_angle = z
+    except Exception:
+        pass
+
+    chassis_mode = get_control_mode()
+    default_e = float(f['args_config'].get('arm_default_e', 60))
+    default_z = float(f['args_config'].get('arm_default_z', 24))
+    default_r = float(f['args_config'].get('arm_default_r', 0))
+
+    if not arm_usb_enabled():
+        base.base_json_ctrl(cmd)
+        return {'path': 'base_uart', 'ok': True, 'roarm_started': False}
+
+    import roarm_ctrl
+    # Preserve current hand position to avoid closing grip on stick/height moves
+    arm = get_roarm()
+    current_hand = None
+    if arm is not None:
+        current_hand = getattr(arm, '_last_joints', {}).get("hand")
+    joints = roarm_ctrl.e_z_r_to_joints(
+        e, z, r, default_e=default_e, default_z=default_z, default_r=default_r,
+        hand=current_hand
+    )
+    usb_owner = _roarm_usb_owner()
+    ros_cmd = None
+    ros_mirror = None
+    ok = False
+    text = ''
+    path = 'roarm_usb'
+
+    if chassis_mode == 'ros2':
+        try:
+            import ros_motion
+            ros_cmd = ros_motion.publish_roarm_joint_command(
+                joints.get('base', 0),
+                joints.get('shoulder', 0),
+                joints.get('elbow', 0),
+                joints.get('hand', 0),
+                throttle=True,
+                also_states=(usb_owner == 'driver'),
+            )
+        except Exception as ex:
+            ros_cmd = {'ok': False, 'error': str(ex)}
+
+    use_usb = True
+    if usb_owner == 'driver' and chassis_mode == 'ros2' and ros_cmd and ros_cmd.get('ok'):
+        use_usb = False
+        ok = True
+        path = 'roarm_ros_command'
+        text = 'published joint_command (USB owned by driver)'
+
+    if use_usb:
+        arm = get_roarm()
+        if arm is None:
+            _start_roarm(reason='t144')
+            arm = get_roarm()
+        if arm is not None:
+            ok, text, joints = arm.set_from_e_z_r(
+                e, z, r,
+                default_e=default_e,
+                default_z=default_z,
+                default_r=default_r,
+            )
+            path = 'roarm_usb'
+            if chassis_mode == 'ros2' and ros_cmd and ros_cmd.get('ok'):
+                path = 'roarm_hybrid'
+        else:
+            ok = bool(ros_cmd and ros_cmd.get('ok'))
+            if not ok:
+                text = text or 'no RoArm USB and ROS command failed'
+                path = 'roarm_unavailable'
+
+    if ok and joints and path in ('roarm_usb', 'roarm_hybrid', 'roarm_usb_fallback'):
+        try:
+            import ros_motion
+            if chassis_mode == 'ros2' or ros_motion.rosbridge_status().get('ok'):
+                ros_mirror = ros_motion.publish_roarm_joints(
+                    joints.get('base', 0),
+                    joints.get('shoulder', 0),
+                    joints.get('elbow', 0),
+                    joints.get('hand', 0),
+                    throttle=True,
+                )
+        except Exception:
+            ros_mirror = None
+
+    return {
+        'path': path,
+        'ok': bool(ok),
+        'text': text,
+        'joints': joints,
+        'ros_cmd': ros_cmd,
+        'ros_mirror': ros_mirror,
+        'roarm_started': roarm_started(),
+        'status': (arm.status() if arm else None),
+    }
+
+
+def _route_roarm_raw(cmd):
+    """Forward USB-native RoArm T-codes when hangar attachment=roarm2.
+    
+    T:102 (set_joints) is routed through set_joints() to update _last_joints
+    so the feedback API returns accurate joint state.
+    """
+    arm = get_roarm()
+    if not arm_usb_enabled() or arm is None:
+        base.base_json_ctrl(cmd)
+        return {'path': 'base_uart', 'ok': True, 'roarm_started': False}
+    
+    # Special handling for T:102 to ensure _last_joints is updated
+    t = cmd.get('T')
+    if t in (102, '102'):
+        try:
+            base_rad = float(cmd.get('base', 0))
+            shoulder_rad = float(cmd.get('shoulder', 0))
+            elbow_rad = float(cmd.get('elbow', 1.5708))
+            hand_rad = float(cmd.get('hand', 3.1416))
+            spd = float(cmd.get('spd', 0))
+            acc = float(cmd.get('acc', 12))
+            ok, text = arm.set_joints(
+                base_rad, shoulder_rad, elbow_rad, hand_rad,
+                spd=spd, acc=acc
+            )
+            return {
+                'path': 'roarm_usb_set_joints',
+                'ok': bool(ok),
+                'text': text,
+                'status': arm.status(),
+                'roarm_started': True,
+            }
+        except (ValueError, TypeError) as e:
+            return {
+                'path': 'roarm_usb',
+                'ok': False,
+                'error': f'T:102 param error: {e}',
+                'status': arm.status(),
+                'roarm_started': True,
+            }
+    
+    # All other T-codes go through send_json (no _last_joints update needed)
+    ok, text = arm.send_json(cmd, read_s=0.2)
+    return {
+        'path': 'roarm_usb',
+        'ok': bool(ok),
+        'text': text,
+        'status': arm.status(),
+        'roarm_started': True,
+    }
+
 
 # Get system info
 UPLOAD_FOLDER = thisPath + '/sounds/others'
@@ -465,6 +828,7 @@ def api_status():
         'drive_linear_sign': _drive_sign('linear'),
         'drive_angular_sign': _drive_sign('angular'),
         'ptz': _ptz_aim_public(),
+        'loadout': _status_loadout(),
     })
 
 @app.route('/api/toggle_rtsp', methods=['POST'])
@@ -474,6 +838,117 @@ def api_toggle_rtsp():
     olog.info('rtsp_toggle', f'RTSP stream {"ON" if enable_rtsp_stream else "OFF"}',
               enable_rtsp_stream=enable_rtsp_stream)
     return jsonify({'success': True, 'enable_rtsp_stream': enable_rtsp_stream})
+
+
+def _status_loadout():
+    """Compact loadout slice for /api/status (no yaml write)."""
+    pub = _loadout_store.public(f, roarm_started=roarm_started())
+    return {
+        'loadout': pub.get('loadout'),
+        'effective': pub.get('effective'),
+        'arm_status': pub.get('arm_status'),
+        'arm_message': pub.get('arm_message'),
+        'roarm_started': bool(pub.get('roarm_started')),
+    }
+
+
+_LOADOUT_PATCH_KEYS = ('base', 'attachment', 'use_lidar', 'camera_prefer')
+
+
+@app.route('/api/loadout', methods=['GET', 'POST'])
+def api_loadout():
+    """Get or merge chassis/attachment loadout.
+
+    Side effects (still never write config.yaml / drive signs):
+      - overlay in-memory base_config
+      - apply camera_prefer live via cv_ctrl re-init
+      - start/stop USB RoArm only when attachment is/ was roarm2
+    """
+    if request.method == 'GET':
+        payload = _loadout_store.public(f, roarm_started=roarm_started())
+        return jsonify(payload)
+    data = request.get_json(silent=True)
+    if data is None:
+        if request.get_data():
+            return jsonify({'ok': False, 'error': 'invalid JSON'}), 400
+        data = {}
+    elif not isinstance(data, dict):
+        return jsonify({'ok': False, 'error': 'invalid JSON'}), 400
+    prev = _loadout_store.get()
+    patch = {k: data[k] for k in _LOADOUT_PATCH_KEYS if k in data}
+    _loadout_store.set(patch)
+    lo = _loadout_store.get()
+    loadout_mod.apply_loadout_to_config(f, lo)
+    base.use_lidar = bool(f['base_config'].get('use_lidar'))
+
+    camera_apply = None
+    if patch.get('camera_prefer') is not None or patch.get('base') is not None:
+        try:
+            camera_apply = cvf.apply_camera_prefer(lo)
+        except Exception as e:
+            camera_apply = {'ok': False, 'error': str(e)}
+            olog.warn('loadout', f'camera_prefer apply failed: {e}', error=str(e)[:160])
+
+    roarm_sync = _sync_roarm_to_loadout(reason='api_loadout')
+    if arm_usb_enabled():
+        try:
+            set_ui_aim_mode('roarm', source='loadout')
+        except Exception:
+            pass
+    elif prev.get('attachment') == 'roarm2':
+        try:
+            set_ui_aim_mode('pt', source='loadout')
+        except Exception:
+            pass
+
+    payload = _loadout_store.public(f, roarm_started=roarm_started())
+    payload['camera_apply'] = camera_apply
+    payload['roarm_sync'] = {
+        k: roarm_sync.get(k)
+        for k in ('started', 'stopped', 'ok', 'already_up', 'already_down', 'detail', 'error', 'usb_owner')
+        if k in roarm_sync
+    }
+    olog.info(
+        'loadout',
+        f'Loadout → {lo.get("base")}/{lo.get("attachment")} '
+        f'lidar={lo.get("use_lidar")} cam={lo.get("camera_prefer")}',
+        base=lo.get('base'),
+        attachment=lo.get('attachment'),
+        use_lidar=lo.get('use_lidar'),
+        camera_prefer=lo.get('camera_prefer'),
+        roarm_started=roarm_started(),
+        arm_status=payload.get('arm_status'),
+        camera_ok=(camera_apply or {}).get('ok'),
+    )
+    return jsonify(payload)
+
+
+@app.route('/api/ui_aim_mode', methods=['GET', 'POST'])
+def api_ui_aim_mode():
+    """Toggle UI overlay target: pan/tilt (pt) vs RoArm (roarm)."""
+    if request.method == 'GET':
+        return jsonify({
+            'ok': True,
+            'mode': get_ui_aim_mode(),
+            'arm_transport': arm_transport(),
+            'roarm_started': roarm_started(),
+            'roarm': (get_roarm().status() if get_roarm() else None),
+        })
+    data = request.get_json(silent=True) or {}
+    mode = data.get('mode')
+    if not mode:
+        mode = 'pt' if get_ui_aim_mode() == 'roarm' else 'roarm'
+    try:
+        mode = set_ui_aim_mode(mode, source='api')
+    except ValueError as e:
+        return jsonify({'ok': False, 'error': str(e), 'mode': get_ui_aim_mode()}), 400
+    return jsonify({
+        'ok': True,
+        'mode': mode,
+        'arm_transport': arm_transport(),
+        'roarm_started': roarm_started(),
+        'roarm': (get_roarm().status() if get_roarm() else None),
+    })
 
 def _control_mode_payload(mode=None, *, mode_changed=False, prev_mode=None):
     """Shared status + restart guidance after control_mode changes."""
@@ -708,8 +1183,102 @@ exec ros2 launch rosbridge_server rosbridge_websocket_launch.xml port:=9090 \
     return out
 
 
+def _chassis_driver_ps():
+    """ps lines for chassis ROS nodes (not rosbridge, not RoArm)."""
+    _ok, so, se, _ = _docker_exec(
+        "ps -eo pid,args 2>/dev/null | grep -E 'ugv_bringup|ugv_driver_min' || true",
+        detach=False, timeout=15,
+    )
+    return so, se
+
+
+def _parse_chassis_driver_pids(ps_text):
+    try:
+        from ros_motion import parse_chassis_driver_pids
+        return parse_chassis_driver_pids(ps_text)
+    except Exception:
+        from ros_motion import parse_ugv_bringup_pids
+        return parse_ugv_bringup_pids(ps_text)
+
+
+def _host_ugv_driver_min_path():
+    return os.path.join(thisPath, 'ros2', 'ugv_driver_min.py')
+
+
+def _stage_ugv_driver_min_in_container():
+    """Return container path to ugv_driver_min.py, docker-cp from host if needed."""
+    _ok, so, _se, _ = _docker_exec(
+        'if [ -f /opt/ugv_ros2/ugv_driver_min.py ]; then echo /opt/ugv_ros2/ugv_driver_min.py; '
+        'elif [ -f /tmp/ugv_driver_min.py ]; then echo /tmp/ugv_driver_min.py; fi',
+        detach=False, timeout=15,
+    )
+    path = ''
+    if so:
+        for line in so.splitlines():
+            line = line.strip()
+            if line.endswith('ugv_driver_min.py'):
+                path = line
+                break
+    if path:
+        return path
+    host = _host_ugv_driver_min_path()
+    if not os.path.isfile(host):
+        return ''
+    import subprocess
+    dest = f'{_ros_container_name()}:/tmp/ugv_driver_min.py'
+    try:
+        cp = subprocess.run(
+            ['docker', 'cp', host, dest],
+            capture_output=True, text=True, timeout=20,
+        )
+    except Exception:
+        return ''
+    if cp.returncode == 0:
+        return '/tmp/ugv_driver_min.py'
+    return ''
+
+
+def _probe_chassis_driver_kind():
+    """What this ROS image can run. Prefer beast ugv_driver_min; never require ugv_ws.
+
+    Env: UGV_CHASSIS_DRIVER=auto|ugv_driver_min|ugv_bringup
+    Positive detections are cached; 'none' is not.
+    """
+    cached = getattr(_probe_chassis_driver_kind, '_kind', None)
+    if cached:
+        return cached
+    env = (os.environ.get('UGV_CHASSIS_DRIVER') or 'auto').strip().lower()
+    if env in ('ugv_driver_min', 'driver_min', 'min'):
+        _probe_chassis_driver_kind._kind = 'ugv_driver_min'  # type: ignore[attr-defined]
+        return 'ugv_driver_min'
+    if env in ('ugv_bringup', 'bringup'):
+        _probe_chassis_driver_kind._kind = 'ugv_bringup'  # type: ignore[attr-defined]
+        return 'ugv_bringup'
+
+    if _stage_ugv_driver_min_in_container():
+        _probe_chassis_driver_kind._kind = 'ugv_driver_min'  # type: ignore[attr-defined]
+        return 'ugv_driver_min'
+
+    _ok, so, _se, _ = _docker_exec(
+        'source /opt/ros/humble/setup.bash >/dev/null 2>&1; '
+        'if ros2 pkg prefix ugv_bringup >/dev/null 2>&1; then echo bringup; else echo none; fi',
+        detach=False, timeout=20,
+    )
+    kind = (so or '').strip().splitlines()[-1] if so else ''
+    if kind == 'bringup':
+        _probe_chassis_driver_kind._kind = 'ugv_bringup'  # type: ignore[attr-defined]
+        return 'ugv_bringup'
+    if os.path.isfile(_host_ugv_driver_min_path()):
+        return 'ugv_driver_min'
+    return 'none'
+
+
 def _ensure_ugv_bringup_running():
-    """Start ugv_bringup in container so /cmd_vel + /joint_states reach ESP32.
+    """Start the chassis ROS node so /cmd_vel + /joint_states reach ESP32.
+
+    Prefers this tree's ugv_driver_min (compose mount). Falls back to
+    ugv_bringup only if that package is actually in the image.
+    Does not start RoArm drivers. Does not require ugv_ws.
 
     Env: UGV_AUTOSTART_BRINGUP=1 (default on). Requires UART released (ros2 mode).
     """
@@ -719,40 +1288,82 @@ def _ensure_ugv_bringup_running():
         'started': False,
         'ok': False,
         'detail': '',
+        'kind': None,
     }
     if not _env_flag('UGV_AUTOSTART_BRINGUP', '1'):
         out['wanted'] = False
         out['detail'] = 'UGV_AUTOSTART_BRINGUP disabled'
         return out
 
-    ok_chk, so, se, _ = _docker_exec(
-        "pgrep -af '/lib/ugv_bringup/ugv_bringup|ugv_bringup ugv_bringup' || true",
-        detach=False, timeout=15,
-    )
-    # pgrep output may include the pgrep line itself in some shells — look for real binary
-    has_proc = bool(so and 'ugv_bringup' in so and 'pgrep' not in so.splitlines()[-1] if so else False)
-    if so:
-        for line in so.splitlines():
-            if 'ugv_bringup' in line and 'pgrep' not in line and 'bash -lc' not in line:
-                has_proc = True
-                break
-        else:
-            # any line with the installed executable path
-            has_proc = any(
-                '/ugv_bringup/ugv_bringup' in line or line.strip().endswith('ugv_bringup')
-                for line in so.splitlines()
-                if 'pgrep' not in line
-            )
-
-    if has_proc:
+    so, _se = _chassis_driver_ps()
+    pids = _parse_chassis_driver_pids(so)
+    if pids:
+        kind = 'ugv_driver_min' if so and 'ugv_driver_min' in so else 'ugv_bringup'
         out['already_up'] = True
         out['ok'] = True
-        out['detail'] = 'ugv_bringup already running'
+        out['kind'] = kind
+        out['detail'] = f'{kind} already running pids={pids}'
         return out
 
-    port = (os.environ.get('UGV_SERIAL_PORT') or '/dev/ttyAMA0').strip()
-    start_script = f'''
-set -e
+    kind = _probe_chassis_driver_kind()
+    out['kind'] = kind
+    port = (
+        os.environ.get('UGV_SERIAL_PORT')
+        or os.environ.get('UGV_SERIAL_DEV')
+        or '/dev/ttyAMA0'
+    ).strip()
+    if not port or not all(c.isalnum() or c in '/._-' for c in port):
+        port = '/dev/ttyAMA0'
+
+    if kind == 'ugv_driver_min':
+        script = _stage_ugv_driver_min_in_container()
+        if (
+            not script
+            or not script.endswith('ugv_driver_min.py')
+            or not all(c.isalnum() or c in '/._-' for c in script)
+        ):
+            out['detail'] = 'ugv_driver_min.py not in container and docker cp failed'
+            olog.warn('ros_autostart', out['detail'], component='chassis')
+            return out
+        start_script = f'''
+set +e
+source /opt/ros/humble/setup.bash
+mkdir -p /tmp/ugv_ros_logs
+export UGV_SERIAL_DEV={port}
+export UGV_SERIAL_PORT={port}
+nohup python3 {script} \
+  > /tmp/ugv_ros_logs/ugv_driver_min.log 2>&1 &
+sleep 0.5
+if pgrep -af ugv_driver_min | grep -v pgrep | grep -q ugv_driver_min; then
+  echo driver_ok
+  exit 0
+fi
+echo driver_start_uncertain
+tail -8 /tmp/ugv_ros_logs/ugv_driver_min.log 2>/dev/null || true
+exit 0
+'''
+        ok_st, so2, se2, code = _docker_exec(start_script, detach=False, timeout=40)
+        out['started'] = 'driver_ok' in (so2 or '')
+        out['ok'] = out['started']
+        out['detail'] = so2 or se2 or f'exit {code}'
+        if out['ok']:
+            olog.info(
+                'ros_autostart', 'ugv_driver_min started in container',
+                component='chassis', kind='ugv_driver_min', started=True,
+            )
+        else:
+            out['started'] = bool(ok_st)
+            out['ok'] = bool(ok_st) and 'driver_ok' in (so2 or '')
+            olog.info(
+                'ros_autostart',
+                f'ugv_driver_min start attempted: {out["detail"][:200]}',
+                component='chassis', kind='ugv_driver_min', ok=out['ok'],
+            )
+        return out
+
+    if kind == 'ugv_bringup':
+        start_script = f'''
+set +e
 source /opt/ros/humble/setup.bash
 source /home/ws/ugv_ws/install/setup.bash 2>/dev/null || true
 mkdir -p /tmp/ugv_ros_logs
@@ -760,12 +1371,10 @@ nohup ros2 run ugv_bringup ugv_bringup --ros-args \
   -p serial_port:={port} -p baud_rate:=115200 \
   > /tmp/ugv_ros_logs/bringup.log 2>&1 &
 sleep 0.4
-# confirm process
 if pgrep -f '/lib/ugv_bringup/ugv_bringup' >/dev/null 2>&1; then
   echo bringup_ok
   exit 0
 fi
-# looser match
 if pgrep -af ugv_bringup | grep -v pgrep | grep -q ugv_bringup; then
   echo bringup_ok_loose
   exit 0
@@ -774,29 +1383,35 @@ echo bringup_start_uncertain
 tail -5 /tmp/ugv_ros_logs/bringup.log 2>/dev/null || true
 exit 0
 '''
-    ok_st, so2, se2, code = _docker_exec(start_script, detach=False, timeout=40)
-    out['started'] = 'bringup_ok' in (so2 or '')
-    out['ok'] = out['started'] or ('bringup_ok' in (so2 or ''))
-    out['detail'] = so2 or se2 or f'exit {code}'
-    if out['ok']:
-        olog.info('ros_autostart', 'ugv_bringup started in container',
-                  component='bringup', started=True)
-    else:
-        # still mark started attempt — process may be up without our match
-        out['started'] = bool(ok_st)
-        out['ok'] = bool(ok_st)
-        olog.info(
-            'ros_autostart',
-            f'ugv_bringup start attempted: {out["detail"][:200]}',
-            component='bringup', ok=out['ok'],
-        )
+        ok_st, so2, se2, code = _docker_exec(start_script, detach=False, timeout=40)
+        out['started'] = 'bringup_ok' in (so2 or '')
+        out['ok'] = out['started']
+        out['detail'] = so2 or se2 or f'exit {code}'
+        if out['ok']:
+            olog.info('ros_autostart', 'ugv_bringup started in container',
+                      component='chassis', kind='ugv_bringup', started=True)
+        else:
+            out['started'] = bool(ok_st)
+            out['ok'] = bool(ok_st)
+            olog.info(
+                'ros_autostart',
+                f'ugv_bringup start attempted: {out["detail"][:200]}',
+                component='chassis', kind='ugv_bringup', ok=out['ok'],
+            )
+        return out
+
+    out['detail'] = (
+        'no chassis ROS node in this image '
+        '(need /opt/ugv_ros2/ugv_driver_min.py or ugv_bringup; full workspace image not required)'
+    )
+    olog.warn('ros_autostart', out['detail'], component='chassis')
     return out
 
 
 def _stop_ugv_bringup():
-    """Stop ugv_bringup in the ROS container so Flask can reclaim UART.
+    """Stop chassis ROS node in the ROS container so Flask can reclaim UART.
 
-    Called when leaving ROS 2 for Direct. Does not stop rosbridge.
+    Stops ugv_driver_min and/or ugv_bringup. Does not stop rosbridge or RoArm.
     Env: UGV_AUTOSTOP_BRINGUP=1 (default on). Kill is by PID inside the
     container (not host `pkill -f`) so the docker-exec wrapper is not matched.
     """
@@ -813,27 +1428,17 @@ def _stop_ugv_bringup():
         out['detail'] = 'UGV_AUTOSTOP_BRINGUP disabled'
         return out
 
-    try:
-        from ros_motion import parse_ugv_bringup_pids
-    except Exception as e:
-        out['detail'] = f'parse helper import failed: {e}'
-        olog.warn('ros_autostop', out['detail'], component='bringup')
-        return out
-
-    _ok_chk, so, se, _ = _docker_exec(
-        "ps -eo pid,args 2>/dev/null | grep -F ugv_bringup || true",
-        detach=False, timeout=15,
-    )
-    pids = parse_ugv_bringup_pids(so)
+    so, se = _chassis_driver_ps()
+    pids = _parse_chassis_driver_pids(so)
     out['pids'] = pids
     if not pids:
         out['already_down'] = True
         out['ok'] = True
         if se and ('docker CLI not found' in se or 'No such container' in se
                    or 'Cannot connect' in se):
-            out['detail'] = f'bringup stop skipped: {se[:160]}'
+            out['detail'] = f'chassis stop skipped: {se[:160]}'
         else:
-            out['detail'] = 'ugv_bringup not running'
+            out['detail'] = 'chassis driver not running'
         return out
 
     pid_list = ' '.join(str(p) for p in pids)
@@ -843,10 +1448,10 @@ def _stop_ugv_bringup():
         'sleep 0.4\n'
         f'kill -KILL {pid_list} 2>/dev/null || true\n'
         'sleep 0.15\n'
-        'ps -eo pid,args 2>/dev/null | grep -F ugv_bringup || true\n'
+        "ps -eo pid,args 2>/dev/null | grep -E 'ugv_bringup|ugv_driver_min' || true\n"
     )
     _ok_st, so2, se2, _code = _docker_exec(kill_script, detach=False, timeout=20)
-    leftover = parse_ugv_bringup_pids(so2)
+    leftover = _parse_chassis_driver_pids(so2)
     out['stopped'] = not leftover
     out['ok'] = not leftover
     if leftover:
@@ -854,14 +1459,14 @@ def _stop_ugv_bringup():
         olog.warn(
             'ros_autostop',
             out['detail'][:240],
-            component='bringup', leftover=leftover, pids=pids,
+            component='chassis', leftover=leftover, pids=pids,
         )
     else:
         out['detail'] = f'stopped pids {pids}'
         olog.info(
             'ros_autostop',
-            'ugv_bringup stopped in container',
-            component='bringup', stopped=True, pids=pids,
+            'chassis ROS node stopped in container (rosbridge left up)',
+            component='chassis', stopped=True, pids=pids,
         )
     return out
 
@@ -879,6 +1484,12 @@ def _ensure_ros2_sidecar_stack():
         result['bringup'] = {'wanted': True, 'ok': False, 'detail': str(e)}
     return result
 
+
+# Hangar-gated RoArm: start only when attachment=roarm2 (rover+ptz stays off).
+try:
+    _sync_roarm_to_loadout(reason='startup')
+except Exception as e:
+    olog.warn('roarm', f'startup RoArm sync failed: {e}', error=str(e)[:160])
 
 # Booted in Direct: drop leftover bringup so a Flask restart can reclaim UART.
 # (set_control_mode() at import time cannot call this — helpers are defined here.)
@@ -898,6 +1509,17 @@ if get_control_mode() == 'direct':
             f'startup Direct bringup stop failed: {e}',
             error=str(e)[:200],
         )
+    # Preload rosbridge only. Bringup stays down so Flask keeps ttyAMA0.
+    try:
+        _rb = _ensure_rosbridge_running()
+        olog.info(
+            'ros_preload',
+            'startup Direct: rosbridge preload (no bringup)',
+            ok=_rb.get('ok'), already_up=_rb.get('already_up'),
+            started=_rb.get('started'), detail=str(_rb.get('detail') or '')[:160],
+        )
+    except Exception as e:
+        olog.warn('ros_preload', f'startup Direct rosbridge preload failed: {e}', error=str(e)[:200])
 
 
 # Background ROS2 heal: keep rosbridge/bringup up while control_mode=ros2.
@@ -1832,16 +2454,37 @@ def _grab_jpeg_bytes(max_width=640, quality=70):
         raise RuntimeError('jpeg encode failed')
     return buf.tobytes()
 
+
+def _jpeg_from_client_payload(data):
+    """Decode a still the UI already grabbed (data URL or raw base64). None if absent."""
+    if not isinstance(data, dict):
+        return None
+    url = data.get('snapshot_data_url') or data.get('data_url')
+    if isinstance(url, str) and url.startswith('data:image') and ',' in url:
+        try:
+            raw = base64.b64decode(url.split(',', 1)[1])
+            if raw:
+                return raw
+        except Exception:
+            pass
+    b64 = data.get('image_base64')
+    if isinstance(b64, str) and b64.strip():
+        try:
+            raw = base64.b64decode(b64)
+            if raw:
+                return raw
+        except Exception:
+            pass
+    return None
+
+
 _AI_SYSTEM_PROMPT = (
     "You are a vision-capable scout on a Waveshare UGV rover with a forward camera. "
     "When an image is attached, describe what you see clearly and briefly. "
-    "Use tools when available: get_cv_detections for MobileNet-SSD labels (includes dog, person, cat, …), "
-    "send_motor_command for short timed drives, send_gimbal_command to look around, stop_motors for safety. "
-    "For search tasks: (1) inspect the current view / run detection, (2) if the target is missing drive "
-    "forward in punchy timed steps (duration_ms 800–1600, linear_x ~0.22–0.28) down open hallways, "
-    "(3) re-check with get_cv_detections after each move, (4) stop when the target is found or the path is blocked. "
-    "Do not claim you cannot see or move if the matching tools are listed as callable. "
-    "Prefer several short moves over one long continuous drive."
+    "Only use tools listed as callable this turn. Do not claim you can drive, pan, "
+    "or detect objects unless those tools are listed. "
+    "When motion tools are callable: prefer several short timed hops "
+    "(duration_ms 800–1600, linear_x ~0.22–0.28) over one long drive, and call stop_motors when done."
 )
 
 # Toggle tree: groups + leaf tools. Persisted under ugv_rpi/.ai_capabilities.json
@@ -1862,6 +2505,12 @@ _TOOL_TREE = [
                 'label': 'get_telemetry',
                 'kind': 'tool',
                 'description': 'CPU, RAM, temp, voltage, pan/tilt, RSSI, FPS.',
+            },
+            {
+                'name': 'get_robot_context',
+                'label': 'get_robot_context',
+                'kind': 'tool',
+                'description': 'Robot hardware config: hostname, loadout (base/attachment), camera type/status, lidar, UART, ROS, Hailo, arm status.',
             },
         ],
     },
@@ -1906,6 +2555,7 @@ _TOOL_TREE = [
                 'kind': 'tool',
                 'description': 'Pan/tilt (serial T:133 or ROS joints per control mode).',
                 'needs_motion': True,
+                'needs_loadout_attachment': 'ptz',
             },
             {
                 'name': 'stop_motors',
@@ -1916,9 +2566,26 @@ _TOOL_TREE = [
             },
         ],
     },
+    {
+        'name': 'group_roarm',
+        'label': 'RoArm-M2',
+        'kind': 'group',
+        'description': 'USB RoArm control (hangar attachment=roarm2 only).',
+        'needs_loadout_attachment': 'roarm2',
+        'children': [
+            {
+                'name': 'send_roarm_command',
+                'label': 'send_roarm_command',
+                'kind': 'tool',
+                'description': 'Control USB RoArm joints or named poses (travel_tuck/scan_ready/home).',
+                'needs_loadout_attachment': 'roarm2',
+            },
+        ],
+    },
 ]
 
 _MOTION_TOOLS = frozenset({'send_motor_command', 'send_gimbal_command', 'stop_motors'})
+_ROARM_TOOLS = frozenset({'send_roarm_command'})
 
 # AI timed-drive auto-stop (direct serial path). Cancelled on new drive/stop.
 _DEFAULT_AI_DRIVE_MS = 1000
@@ -2065,6 +2732,7 @@ def _required_names(name, seen=None):
 
 
 # Motion tools default off for safer first boot; telemetry stays on.
+# RoArm tools stay on (USB, independent of chassis motion infra).
 _DEFAULT_TOOL_CAPS = {n: True for n in _all_node_names()}
 _DEFAULT_TOOL_CAPS.update({
     'group_ros2_motion': False,
@@ -2082,6 +2750,7 @@ def _migrate_legacy_caps(data):
         v = bool(data.get('group_telemetry', data.get('telemetry', True)))
         out['group_telemetry'] = v
         out['get_telemetry'] = bool(data.get('get_telemetry', v))
+        out['get_robot_context'] = bool(data.get('get_robot_context', v))
     if 'computer_vision' in data or 'group_computer_vision' in data:
         v = bool(data.get('group_computer_vision', data.get('computer_vision', True)))
         out['group_computer_vision'] = v
@@ -2228,8 +2897,24 @@ def _resolve_node_status(meta, caps, infra_ok, backend, bridge):
     name = meta['name']
     user_on = bool(caps.get(name, True))
     needs_motion = bool(meta.get('needs_motion') or meta.get('needs_ros2'))
+    needs_attachment = meta.get('needs_loadout_attachment')
+    
     if not user_on:
         return 'off', 'Toggled off — not offered to the LLM.', user_on
+    
+    # Check loadout attachment requirement (e.g. ptz, roarm2)
+    if needs_attachment:
+        try:
+            current_attach = _loadout_store.get().get('attachment')
+            if current_attach != needs_attachment:
+                label = {'ptz': 'PTZ gimbal', 'roarm2': 'RoArm-M2', 'none': 'no attachment'}.get(needs_attachment, needs_attachment)
+                return 'unavailable', (
+                    f'Requires hangar attachment={needs_attachment} ({label}); '
+                    f'current attachment is {current_attach}. Toggle on Loadout tab.'
+                ), user_on
+        except Exception as e:
+            return 'unavailable', f'Loadout check failed: {e}', user_on
+    
     if needs_motion:
         if infra_ok:
             if backend == 'direct':
@@ -2545,10 +3230,103 @@ def _parse_tool_call_args(msg, name=None):
 
 
 def _message_text_content(msg):
-    content = (msg.get('content') or '').strip() if isinstance(msg, dict) else ''
-    if not content and isinstance(msg, dict):
-        content = (msg.get('reasoning') or msg.get('reasoning_content') or '').strip()
-    return content
+    if not isinstance(msg, dict):
+        return ''
+    content = msg.get('content')
+    if isinstance(content, str):
+        text = content.strip()
+    elif isinstance(content, list):
+        parts = []
+        for part in content:
+            if isinstance(part, str):
+                parts.append(part)
+            elif isinstance(part, dict) and part.get('type') == 'text':
+                parts.append(str(part.get('text') or ''))
+        text = '\n'.join(parts).strip()
+    elif isinstance(content, dict):
+        text = ''
+    else:
+        text = ''
+    if not text:
+        extra = msg.get('reasoning') or msg.get('reasoning_content') or ''
+        text = extra.strip() if isinstance(extra, str) else ''
+    return text
+
+
+def _get_robot_context_payload():
+    """Robot hardware config and settings for chat AI context."""
+    import socket
+    hostname = socket.gethostname()
+    lo = _loadout_store.get()
+    base_id = lo.get('base', 'rover')
+    attachment_id = lo.get('attachment', 'ptz')
+    use_lidar = bool(lo.get('use_lidar', False))
+    camera_prefer = lo.get('camera_prefer', 'auto')
+    
+    # Camera status
+    camera_status = 'unknown'
+    camera_type = 'none'
+    if cvf.usb_camera_connected:
+        camera_type = 'usb'
+        camera_status = 'connected'
+        if cvf.usb_camera_index is not None:
+            camera_status += f' (index {cvf.usb_camera_index})'
+    elif cvf.csi_camera_connected:
+        camera_type = 'csi'
+        camera_status = 'connected'
+    elif cvf.oak_camera_connected:
+        camera_type = 'oak'
+        camera_status = 'connected'
+    else:
+        camera_type = 'none'
+        camera_status = 'disconnected'
+    
+    # Control mode / UART owner
+    control_mode = get_control_mode()
+    uart_owner = 'flask' if control_mode == 'direct' else 'ros2'
+    
+    # ROS / rosbridge
+    rosbridge_ok = None
+    if control_mode == 'ros2':
+        rosbridge_ok = _rosbridge_reachable()
+    
+    # Hailo detection
+    hailo_present = bool(os.path.exists('/dev/hailo0'))
+    
+    # Arm status
+    arm_status = 'no_arm'
+    if attachment_id == 'roarm2':
+        if roarm_started():
+            arm_status = 'roarm_started'
+        else:
+            arm_status = 'roarm_not_started'
+    
+    # Battery voltage if available
+    voltage = None
+    try:
+        voltage = round(base.get_base_adc(), 2) if callable(getattr(base, 'get_base_adc', None)) else None
+    except Exception:
+        pass
+    
+    return {
+        'hostname': hostname,
+        'loadout': {
+            'base': base_id,
+            'attachment': attachment_id,
+            'use_lidar': use_lidar,
+            'camera_prefer': camera_prefer,
+        },
+        'camera': {
+            'type': camera_type,
+            'status': camera_status,
+        },
+        'control_mode': control_mode,
+        'uart_owner': uart_owner,
+        'rosbridge_ok': rosbridge_ok,
+        'hailo_present': hailo_present,
+        'arm_status': arm_status,
+        'battery_voltage': voltage,
+    }
 
 
 def _get_telemetry_payload():
@@ -2667,6 +3445,15 @@ def _openai_tools_for_agent():
                 'parameters': {'type': 'object', 'properties': {}},
             },
         })
+    if by_name.get('get_robot_context', {}).get('status') == 'active':
+        tools.append({
+            'type': 'function',
+            'function': {
+                'name': 'get_robot_context',
+                'description': 'Read robot hardware config and settings (hostname, loadout base/attachment, camera type/status, lidar, UART owner, ROS status, Hailo, arm status, battery voltage). Use this to understand the robot configuration.',
+                'parameters': {'type': 'object', 'properties': {}},
+            },
+        })
     if by_name.get('get_cv_detections', {}).get('status') == 'active':
         tools.append({
             'type': 'function',
@@ -2700,10 +3487,53 @@ def _openai_tools_for_agent():
             'function': {
                 'name': 'get_camera_snapshot',
                 'description': (
-                    'Capture a live camera JPEG. Returns size metadata. '
-                    'For full vision, enable Attach snapshot on the chat UI.'
+                    'Capture a live camera JPEG and attach it for vision analysis on the next turn. '
+                    'Use this when the user asks what you see and no still was attached.'
                 ),
                 'parameters': {'type': 'object', 'properties': {}},
+            },
+        })
+    # RoArm tool (USB, independent of rosbridge; gated on attachment=roarm2)
+    if by_name.get('send_roarm_command', {}).get('status') == 'active':
+        tools.append({
+            'type': 'function',
+            'function': {
+                'name': 'send_roarm_command',
+                'description': (
+                    'Control the USB RoArm-M2 by named pose or individual joint angles. '
+                    'Named poses: travel_tuck (default compact stance for mobile use), '
+                    'scan_ready (slightly open for looking ahead), home (workspace-ready inverted L). '
+                    'Joint angles are in radians. Use this to look around, adjust arm position, '
+                    'or transition to a safe posture before moving the chassis.'
+                ),
+                'parameters': {
+                    'type': 'object',
+                    'properties': {
+                        'pose': {
+                            'type': 'string',
+                            'description': (
+                                'Named pose: travel_tuck | scan_ready | home | elbow_in. '
+                                'Omit if providing joint angles directly.'
+                            ),
+                        },
+                        'base_rad': {
+                            'type': 'number',
+                            'description': 'Base yaw angle (radians, ±1.2). Omit to keep current.',
+                        },
+                        'shoulder_rad': {
+                            'type': 'number',
+                            'description': 'Shoulder angle (radians, ±0.9). Omit to keep current.',
+                        },
+                        'elbow_rad': {
+                            'type': 'number',
+                            'description': 'Elbow angle (radians, 0.85–2.2). Omit to keep current.',
+                        },
+                        'hand_rad': {
+                            'type': 'number',
+                            'description': 'Hand/wrist angle (radians, 1.8–3.2). Omit to keep current.',
+                        },
+                    },
+                },
             },
         })
     # Motion group — register each leaf independently by catalog status
@@ -2728,7 +3558,11 @@ def _execute_agent_tool(name, arguments):
     # Respect capability toggles at execution time too
     catalog = {t['name']: t for t in _ai_tools_catalog()}
     entry = catalog.get(name)
-    if entry and entry.get('status') != 'active':
+    seek_override = _seek_tools_overridden() and name in (
+        'send_motor_command', 'stop_motors', 'send_gimbal_command',
+        'get_cv_detections', 'get_camera_snapshot',
+    )
+    if entry and entry.get('status') != 'active' and not seek_override:
         reason = entry.get('reason') or entry.get('status')
         olog.warn(
             'ai_tool_blocked',
@@ -2744,6 +3578,9 @@ def _execute_agent_tool(name, arguments):
 
     if name == 'get_telemetry':
         return {'ok': True, 'telemetry': _get_telemetry_payload()}
+
+    if name == 'get_robot_context':
+        return {'ok': True, 'context': _get_robot_context_payload()}
 
     if name == 'get_cv_detections':
         try:
@@ -2785,7 +3622,10 @@ def _execute_agent_tool(name, arguments):
                 'detections': enriched,
                 'count': len(enriched),
                 'labels_found': labels,
-                'found_dog': any(l.lower() == 'dog' for l in labels),
+                'found_goal': bool(
+                    filter_label
+                    and any(l.lower() == str(filter_label).lower() for l in labels)
+                ),
             }
             if warning:
                 out['warning'] = warning
@@ -2796,11 +3636,83 @@ def _execute_agent_tool(name, arguments):
     if name == 'get_camera_snapshot':
         try:
             jpeg = _grab_jpeg_bytes()
+            b64 = base64.b64encode(jpeg).decode('ascii')
+            data_url = f'data:image/jpeg;base64,{b64}'
             return {
                 'ok': True,
                 'mime': 'image/jpeg',
                 'bytes': len(jpeg),
-                'note': 'Frame captured. For vision, enable Attach snapshot on the next user message.',
+                'note': 'Frame captured and attached for vision analysis.',
+                '_snapshot_data_url': data_url,  # Internal field for agent loop
+            }
+        except Exception as e:
+            return {'ok': False, 'error': str(e), 'tool': name}
+
+    if name == 'send_roarm_command':
+        try:
+            if not arm_usb_enabled():
+                return {
+                    'ok': False,
+                    'error': 'USB RoArm not available (hangar attachment is not roarm2)',
+                    'tool': name,
+                }
+            arm = get_roarm()
+            if arm is None:
+                return {
+                    'ok': False,
+                    'error': 'USB RoArm driver not started',
+                    'tool': name,
+                    'detail': 'RoArm USB path may be owned by ROS container or missing',
+                }
+            import roarm_ctrl
+            pose_name = args.get('pose')
+            if pose_name:
+                pose = roarm_ctrl.POSES.get(str(pose_name).strip().lower())
+                if not pose:
+                    return {
+                        'ok': False,
+                        'error': f'unknown pose: {pose_name}',
+                        'available_poses': list(roarm_ctrl.POSES.keys()),
+                    }
+                ok_set, text_set = arm.set_joints(
+                    float(pose['base']),
+                    float(pose['shoulder']),
+                    float(pose['elbow']),
+                    float(pose['hand']),
+                    spd=0, acc=10,
+                )
+                return {
+                    'ok': bool(ok_set),
+                    'text': text_set,
+                    'pose': pose_name,
+                    'joints': pose,
+                    'path': 'roarm_usb',
+                }
+            base = args.get('base_rad')
+            shoulder = args.get('shoulder_rad')
+            elbow = args.get('elbow_rad')
+            hand = args.get('hand_rad')
+            if base is None and shoulder is None and elbow is None and hand is None:
+                return {
+                    'ok': False,
+                    'error': 'must provide pose or at least one joint angle (base_rad/shoulder_rad/elbow_rad/hand_rad)',
+                }
+            current = arm.status().get('joints') or roarm_ctrl.POSES['travel_tuck']
+            target = {
+                'base': float(base) if base is not None else float(current.get('base', 0.0)),
+                'shoulder': float(shoulder) if shoulder is not None else float(current.get('shoulder', -0.62)),
+                'elbow': float(elbow) if elbow is not None else float(current.get('elbow', 0.88)),
+                'hand': float(hand) if hand is not None else float(current.get('hand', 3.05)),
+            }
+            ok_set, text_set = arm.set_joints(
+                target['base'], target['shoulder'], target['elbow'], target['hand'],
+                spd=0, acc=10,
+            )
+            return {
+                'ok': bool(ok_set),
+                'text': text_set,
+                'joints': target,
+                'path': 'roarm_usb',
             }
         except Exception as e:
             return {'ok': False, 'error': str(e), 'tool': name}
@@ -2814,11 +3726,63 @@ def _execute_agent_tool(name, arguments):
     return {'ok': False, 'error': f'unmapped tool: {name}'}
 
 
+def _seek_drive_scope(active=True):
+    """Mark this thread as the Seek executor so Chat/UI cannot sneak a hop."""
+    return _seek_nav_drive_scope(active)
+
+
+def _seek_thread_may_drive() -> bool:
+    from seek_nav import seek_thread_may_drive as _may
+    return _may()
+
+
+def _autonomy_owns_chassis() -> bool:
+    """Seek or Track is running — sticks / Chat must not fight it."""
+    try:
+        if seek_controller.is_running():
+            return True
+    except Exception:
+        pass
+    try:
+        if track_controller.is_running():
+            return True
+    except Exception:
+        pass
+    return False
+
+
 def _execute_motion_via_mode(name, args):
     """AI motion tools follow the same control_mode as UI sticks."""
     mode = get_control_mode()
     args = args or {}
     level = 'warn' if name == 'stop_motors' else 'info'
+    if name == 'send_motor_command' and _autonomy_owns_chassis() and not _seek_thread_may_drive():
+        olog.info(
+            'ai_motion',
+            'Chassis busy: Seek/Track owns the wheels (Chat hop ignored)',
+            tool=name, control_mode=mode,
+        )
+        return {
+            'ok': True,
+            'skipped': 'seek_or_track_running',
+            'backend': 'none',
+            'path': 'blocked',
+            'control_mode': mode,
+        }
+    if name == 'send_motor_command' and not _seek_chassis_allowed():
+        olog.info(
+            'ai_motion',
+            'Seek dry-run: send_motor_command skipped (no chassis)',
+            tool=name, dry_run=True, control_mode=mode,
+        )
+        return {
+            'ok': True,
+            'dry_run': True,
+            'skipped': 'seek_dry_run',
+            'backend': 'none',
+            'path': 'dry_run',
+            'control_mode': mode,
+        }
 
     if mode == 'ros2':
         import ros_motion
@@ -2891,6 +3855,19 @@ def _execute_motion_via_mode(name, args):
         }
 
     if name == 'send_motor_command':
+        if not _seek_chassis_allowed():
+            olog.info(
+                'ai_motion',
+                'Seek dry-run: send_motor_command skipped (no chassis)',
+                tool=name, dry_run=True,
+            )
+            return {
+                'ok': True,
+                'dry_run': True,
+                'skipped': 'seek_dry_run',
+                'backend': 'none',
+                'path': 'dry_run',
+            }
         # Body-frame (camera-forward +linear) before hardware mapping
         body_lin = _clamp(float(args.get('linear_x', 0.0)), -max_lin, max_lin)
         body_ang = _clamp(float(args.get('angular_z', 0.0)), -max_ang, max_ang)
@@ -3050,12 +4027,27 @@ def _run_agent_loop(messages, max_rounds=6):
                     })
                     continue
                 result = _execute_agent_tool(name, args)
-                tool_trace.append({'name': name, 'arguments': args, 'result': result})
+                snapshot_url = result.get('_snapshot_data_url') if isinstance(result, dict) else None
+                result_for_model = (
+                    {k: v for k, v in result.items() if not str(k).startswith('_')}
+                    if isinstance(result, dict) else result
+                )
+                tool_trace.append({'name': name, 'arguments': args, 'result': result_for_model})
+                # Check if tool returned a snapshot for vision injection
                 messages.append({
                     'role': 'tool',
                     'tool_call_id': tc.get('id') or name,
-                    'content': json.dumps(result),
+                    'content': json.dumps(result_for_model),
                 })
+                # Inject vision snapshot as a user message after tool result
+                if snapshot_url:
+                    messages.append({
+                        'role': 'user',
+                        'content': [
+                            {'type': 'text', 'text': 'Here is the camera snapshot you requested. Analyze what you see.'},
+                            {'type': 'image_url', 'image_url': {'url': snapshot_url}},
+                        ],
+                    })
             continue
         content = _message_text_content(msg)
         if not content and not tool_trace:
@@ -3201,7 +4193,9 @@ def api_ai_estimate():
     snap_bytes = 0
     if attach:
         try:
-            jpeg = _grab_jpeg_bytes()
+            jpeg = _jpeg_from_client_payload(data)
+            if jpeg is None:
+                jpeg = _grab_jpeg_bytes()
             snap_bytes = len(jpeg)
         except Exception as e:
             return jsonify({'success': False, 'error': f'snapshot for estimate failed: {e}'}), 500
@@ -3368,31 +4362,67 @@ def api_ai_chat():
         return jsonify({'success': False, 'error': 'message is required'}), 400
 
     history = data.get('history') or []
-    attach = data.get('attach_snapshot', True)
+    attach = bool(data['attach_snapshot']) if 'attach_snapshot' in data else False
 
-    # Enrich system prompt with control path status
+    # Enrich system prompt with control path status and robot hardware/settings context
     mode = get_control_mode()
     backend, bridge = _motion_backend_info()
     system = _AI_SYSTEM_PROMPT
+    
+    # Add robot hardware/settings context at conversation start
+    try:
+        robot_ctx = _get_robot_context_payload()
+        system += (
+            f"\n\nRobot configuration: hostname={robot_ctx['hostname']}, "
+            f"base={robot_ctx['loadout']['base']}, "
+            f"attachment={robot_ctx['loadout']['attachment']}, "
+            f"camera={robot_ctx['camera']['type']} ({robot_ctx['camera']['status']}), "
+            f"lidar={'enabled' if robot_ctx['loadout']['use_lidar'] else 'disabled'}, "
+            f"arm_status={robot_ctx['arm_status']}"
+        )
+        if robot_ctx.get('battery_voltage'):
+            system += f", battery={robot_ctx['battery_voltage']}V"
+        if robot_ctx.get('hailo_present'):
+            system += ", Hailo AI accelerator present"
+        system += ". "
+    except Exception as e:
+        print(f"[api_ai_chat] Failed to add robot context: {e}")
+    
     active = [t['name'] for t in _ai_tools_catalog() if t.get('status') == 'active']
     inactive = [t['name'] for t in _ai_tools_catalog() if t.get('status') != 'active']
     system += (
-        f"\n\nControl mode: {mode} ({'ESP32 serial' if mode == 'direct' else 'ROS 2 / rosbridge'}). "
-        f"Callable tools right now: {', '.join(active) if active else '(none)'}. "
-        "Use tools instead of claiming you lack ones that are listed. "
+        f"Control mode: {mode} ({'ESP32 serial' if mode == 'direct' else 'ROS 2 / rosbridge'}). "
     )
-    if inactive:
-        system += f"Unavailable (do not claim you have these): {', '.join(inactive)}. "
-    if any(n in active for n in ('send_motor_command', 'stop_motors')):
+    if active:
+        system += f"Callable tools: {', '.join(active)}. Use these tools when appropriate. "
+    else:
+        system += "No tools currently available. "
+    
+    # Specific guidance for active capabilities
+    has_chassis = any(n in active for n in ('send_motor_command', 'stop_motors'))
+    has_gimbal = 'send_gimbal_command' in active
+    has_roarm = 'send_roarm_command' in active
+    
+    if has_chassis:
         system += (
-            "Prefer punchy timed moves (duration_ms 800–1600, linear_x 0.22–0.28). "
+            "Chassis control available: prefer punchy timed moves (duration_ms 800–1600, linear_x 0.22–0.28). "
             "After each drive, re-check with get_cv_detections before moving again. "
-            "Call stop_motors if unsure or when done."
+            "Call stop_motors if unsure or when done. "
         )
-    elif any(n in inactive for n in ('send_motor_command', 'stop_motors')):
+    
+    if has_gimbal:
+        system += "PTZ gimbal available: use send_gimbal_command to look around. "
+    
+    if has_roarm:
         system += (
-            "Motion is unavailable; tell the user to toggle Control to Direct serial, "
-            "or enable ROS 2 mode with rosbridge + ugv_bringup."
+            "USB RoArm available: use send_roarm_command to adjust arm pose (travel_tuck for compact, "
+            "scan_ready for looking ahead) or move individual joints. "
+        )
+    
+    # Only mention unavailable tools if motion is blocked but user asked for it
+    if not has_chassis and any(n in inactive for n in ('send_motor_command', 'stop_motors')):
+        system += (
+            "Chassis motion tools are currently disabled. Enable them on /ai before asking to drive. "
         )
     if 'get_cv_detections' in active:
         system += (
@@ -3405,7 +4435,9 @@ def api_ai_chat():
     jpeg = None
     if attach:
         try:
-            jpeg = _grab_jpeg_bytes()
+            jpeg = _jpeg_from_client_payload(data)
+            if jpeg is None:
+                jpeg = _grab_jpeg_bytes()
             snapshot_bytes = len(jpeg)
         except Exception as e:
             messages = [{'role': 'system', 'content': system}]
@@ -3484,6 +4516,206 @@ def api_ai_chat():
     })
 
 
+# ---------- Chat voice: STT/TTS proxy to external LAN service (env-configured) ----------
+
+def _get_voice_config():
+    """Read STT/TTS URLs from .env only. Empty = voice disabled."""
+    return {
+        'stt_url': (os.environ.get('UGV_STT_URL') or '').strip(),
+        'tts_url': (os.environ.get('UGV_TTS_URL') or '').strip(),
+    }
+
+
+@app.route('/api/voice/config', methods=['GET'])
+def api_voice_config():
+    """Return voice configuration status (URLs present or not, no actual URLs exposed)."""
+    cfg = _get_voice_config()
+    return jsonify({
+        'success': True,
+        'stt_enabled': bool(cfg['stt_url']),
+        'tts_enabled': bool(cfg['tts_url']),
+    })
+
+
+@app.route('/api/voice/stt', methods=['POST'])
+def api_voice_stt():
+    """Proxy browser audio → external STT service (UGV_STT_URL from .env)."""
+    cfg = _get_voice_config()
+    if not cfg['stt_url']:
+        return jsonify({'success': False, 'error': 'STT not configured (set UGV_STT_URL in .env)'}), 503
+    
+    # Forward audio from browser to STT service
+    try:
+        audio_data = request.data or request.get_data()
+        if not audio_data:
+            return jsonify({'success': False, 'error': 'No audio data'}), 400
+        
+        # Forward to STT service
+        req = urllib.request.Request(
+            cfg['stt_url'],
+            data=audio_data,
+            headers={'Content-Type': request.content_type or 'audio/webm'},
+            method='POST',
+        )
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            result = json.loads(resp.read().decode('utf-8'))
+        
+        text = result.get('text', '').strip()
+        return jsonify({
+            'success': True,
+            'text': text,
+            'language': result.get('language'),
+        })
+    except urllib.error.HTTPError as e:
+        error_body = e.read().decode('utf-8', errors='ignore')[:200]
+        return jsonify({'success': False, 'error': f'STT service error: {e.code} {error_body}'}), 502
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)[:200]}), 500
+
+
+@app.route('/api/voice/tts', methods=['POST'])
+def api_voice_tts():
+    """Proxy text → external TTS service (UGV_TTS_URL from .env) → return audio."""
+    cfg = _get_voice_config()
+    if not cfg['tts_url']:
+        return jsonify({'success': False, 'error': 'TTS not configured (set UGV_TTS_URL in .env)'}), 503
+    
+    data = request.get_json(silent=True) or {}
+    text = (data.get('text') or '').strip()
+    if not text:
+        return jsonify({'success': False, 'error': 'No text provided'}), 400
+    
+    try:
+        # Forward to TTS service
+        req = urllib.request.Request(
+            cfg['tts_url'],
+            data=json.dumps({'text': text}).encode('utf-8'),
+            headers={'Content-Type': 'application/json'},
+            method='POST',
+        )
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            audio_data = resp.read()
+            content_type = resp.headers.get('Content-Type', 'audio/wav')
+        
+        return Response(audio_data, mimetype=content_type)
+    except urllib.error.HTTPError as e:
+        error_body = e.read().decode('utf-8', errors='ignore')[:200]
+        return jsonify({'success': False, 'error': f'TTS service error: {e.code} {error_body}'}), 502
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)[:200]}), 500
+
+
+@app.route('/api/voice/robot/record', methods=['POST'])
+def api_voice_robot_record():
+    """Capture audio from robot's mic, send to STT service, return transcript."""
+    cfg = _get_voice_config()
+    if not cfg['stt_url']:
+        return jsonify({'success': False, 'error': 'STT not configured (set UGV_STT_URL in .env)'}), 503
+    
+    data = request.get_json(silent=True) or {}
+    duration_s = float(data.get('duration', 5))
+    duration_s = max(1, min(30, duration_s))  # Clamp 1-30 seconds
+    
+    try:
+        # Record audio from robot's mic using arecord (ALSA)
+        import tempfile
+        with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp:
+            tmp_path = tmp.name
+        
+        # Record mono 16kHz WAV
+        proc = subprocess.run(
+            ['arecord', '-D', 'default', '-f', 'cd', '-d', str(int(duration_s)), tmp_path],
+            capture_output=True,
+            timeout=duration_s + 5,
+            check=False,
+        )
+        
+        if proc.returncode != 0 or not os.path.exists(tmp_path):
+            try:
+                os.unlink(tmp_path)
+            except Exception:
+                pass
+            stderr = (proc.stderr or b'').decode('utf-8', errors='ignore')[:200]
+            return jsonify({'success': False, 'error': f'arecord failed: {stderr}'}), 500
+        
+        # Read recorded audio
+        with open(tmp_path, 'rb') as f:
+            audio_data = f.read()
+        os.unlink(tmp_path)
+        
+        # Forward to STT service
+        req = urllib.request.Request(
+            cfg['stt_url'],
+            data=audio_data,
+            headers={'Content-Type': 'audio/wav'},
+            method='POST',
+        )
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            result = json.loads(resp.read().decode('utf-8'))
+        
+        text = result.get('text', '').strip()
+        return jsonify({
+            'success': True,
+            'text': text,
+            'language': result.get('language'),
+        })
+    except subprocess.TimeoutExpired:
+        return jsonify({'success': False, 'error': 'Recording timeout'}), 500
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)[:200]}), 500
+
+
+@app.route('/api/voice/robot/speak', methods=['POST'])
+def api_voice_robot_speak():
+    """Get TTS audio from service and play through robot's speakers."""
+    cfg = _get_voice_config()
+    if not cfg['tts_url']:
+        return jsonify({'success': False, 'error': 'TTS not configured (set UGV_TTS_URL in .env)'}), 503
+    
+    data = request.get_json(silent=True) or {}
+    text = (data.get('text') or '').strip()
+    if not text:
+        return jsonify({'success': False, 'error': 'No text provided'}), 400
+    
+    try:
+        # Get TTS audio from service
+        req = urllib.request.Request(
+            cfg['tts_url'],
+            data=json.dumps({'text': text}).encode('utf-8'),
+            headers={'Content-Type': 'application/json'},
+            method='POST',
+        )
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            audio_data = resp.read()
+        
+        # Save to temp file and play with aplay
+        import tempfile
+        with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp:
+            tmp.write(audio_data)
+            tmp_path = tmp.name
+        
+        # Play audio through robot's speakers (non-blocking)
+        subprocess.Popen(
+            ['aplay', '-D', 'default', tmp_path],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        
+        # Schedule cleanup after a delay (audio should finish playing)
+        def cleanup_audio():
+            time.sleep(max(2, len(text) // 10))  # Rough estimate: 10 chars per second
+            try:
+                os.unlink(tmp_path)
+            except Exception:
+                pass
+        
+        threading.Thread(target=cleanup_audio, daemon=True).start()
+        
+        return jsonify({'success': True, 'message': 'Playing audio on robot'})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)[:200]}), 500
+
+
 # ---------- Seek mode: pilot LLM steers; referee is detector OR vision LLM JSON ----------
 from ai_track import (
     track_controller,
@@ -3512,7 +4744,10 @@ from ai_seek import (
     DEFAULT_SEEK_MAX_STEPS,
     DEFAULT_SEEK_TIMEOUT_S,
     DEFAULT_SEEK_CONF,
+    DEFAULT_SEEK_DRY_RUN,
+    DEFAULT_SEEK_FOUND_CONF,
     DEFAULT_SEEK_STEP_PAUSE_S,
+    parse_forced_yesno,
     normalize_seek_max_steps,
     normalize_seek_timeout_s,
     motion_lock_should_ignore_zero,
@@ -3522,20 +4757,27 @@ from ai_seek import (
 from seek_nav import (  # noqa: E402
     seek_nav_plan as _seek_nav_plan,
     seek_normalize_action as _seek_normalize_action,
-    seek_normalize_distance as _seek_normalize_distance,
-    seek_normalize_obstacle_range as _seek_normalize_obstacle_range,
-    SEEK_TURN_MS_BY_DIST as _SEEK_TURN_MS_BY_DIST,
-    SEEK_TURN_DEG_BY_DIST as _SEEK_TURN_DEG_BY_DIST,
     interpret_base_voltage as _interpret_base_voltage,
     seek_battery_block_reason as _seek_battery_block_reason_pure,
-    reset_escape_cycle as _seek_reset_escape_cycle,
-    seek_commit_through_opening as _seek_commit_through_opening,
-    seek_prefer_away_from_wall as _seek_prefer_away_from_wall,
-    seek_may_reverse as _seek_may_reverse,
-    SEEK_NAV_TOOL as _SEEK_NAV_TOOL,
-    SEEK_NAV_TOOL_NAME as _SEEK_NAV_TOOL_NAME,
-    seek_action_from_schema as _seek_action_from_schema,
+    set_seek_dry_run as _set_seek_dry_run,
+    seek_dry_run_active as _seek_dry_run_active,
+    seek_chassis_allowed as _seek_chassis_allowed,
+    seek_drive_log_verb as _seek_drive_log_verb,
+    seek_sweep_scorecard as _seek_sweep_scorecard,
+    seek_live_start_error as _seek_live_start_error,
+    seek_views_are_rear_cruise as _seek_views_are_rear_cruise,
+    seek_found_confident as _seek_found_confident,
+    begin_seek_dry_run as _begin_seek_dry_run,
+    end_seek_dry_run as _end_seek_dry_run,
+    seek_drive_scope as _seek_nav_drive_scope,
+    register_autonomy_running as _register_autonomy_running,
 )
+
+try:
+    _register_autonomy_running(seek_controller.is_running)
+    _register_autonomy_running(track_controller.is_running)
+except Exception:
+    pass
 
 _SEEK_JUDGE_SYSTEM = (
     "You are a visual goal referee for a robot camera. "
@@ -3546,79 +4788,16 @@ _SEEK_JUDGE_SYSTEM = (
     "reason is one short sentence."
 )
 
-_SEEK_NAV_SYSTEM = (
-    "You are a navigation advisor for a small UGV with a pan-tilt camera. "
-    "You are given THREE stills from the same pose: LEFT, STRAIGHT (center), and RIGHT. "
-    "Decide the safest move AND how far to drive before the next scan. "
-    "PRIMARY GOAL when seeking: say HOW FAR to go forward, or if blocked which way to turn. "
-    "Prefer forward when the straight view is open (hallway/path clear enough for the robot). "
-    "If the empty space is off-center in STRAIGHT, a short turn toward that empty lane first, "
-    "then forward long on the next step. "
-    "Choose turn_left or turn_right if straight is blocked/cluttered/unsafe and that side looks more open "
-    "or more likely to reveal the goal. "
-    "Also set drive_distance for how long the next timed hop should be before re-scanning: "
-    "short = tight space / near obstacles / a small Fast aiming spin (~0.3s); "
-    "medium = punchy hop over floor cables / a solid Fast room turn (~0.7s); "
-    "long = clear hallway — USE THIS when the path looks free (go farther, not a 4s creep). "
-    "Turns should usually use short (or medium at most). Long is mainly for clear forward. "
-    "Do not pick short-forward when a corridor is open — this chassis stalls if it creeps. "
-    "INDOOR NAV (this chassis): "
-    "Drive AWAY from walls — if CENTRE is a wall/door slab, turn toward the emptier side; never inch into paint. "
-    "Doorways/halls: after you enter a frame, take another hop of similar length so the body is fully PAST the jambs "
-    "(stopping in the doorway wedges the wheels). "
-    "Low hazards (bowls, cables, thresholds, baseboards) sit at bumper height — treat floor clutter in CENTRE as near. "
-    "When approaching a wall, object, or door the robot will look DOWN at left/front/right (~±55°) "
-    "before the next hop; honour that bumper inspect (floor_blocked → do not go forward). "
-    "When a PERSON is nearby, look UP at left/front/right to keep the face in frame for identification — "
-    "do not tilt down onto their feet. "
-    "Reply with JSON only. action must be exactly one of: forward, turn_left, turn_right. "
-    "drive_distance must be exactly one of: short, medium, long. "
-    "Do not claim the goal is found — another system handles that."
-)
-
-_SEEK_NAV_JSON_SCHEMA = {
-    'type': 'json_schema',
-    'json_schema': {
-        'name': 'seek_nav',
-        'strict': True,
-        'schema': {
-            'type': 'object',
-            'properties': {
-                'action': {
-                    'type': 'string',
-                    'enum': ['forward', 'turn_left', 'turn_right'],
-                    'description': 'Drive choice after comparing the three views.',
-                },
-                'drive_distance': {
-                    'type': 'string',
-                    'enum': ['short', 'medium', 'long'],
-                    'description': (
-                        'How far/long to drive before the next L/straight/R scan. '
-                        'short≈near obstacles; medium≈open; long≈long clear hallway.'
-                    ),
-                },
-                'reason': {
-                    'type': 'string',
-                    'description': 'One short sentence covering direction and distance.',
-                },
-                'path_clear_forward': {
-                    'type': 'boolean',
-                    'description': 'True if straight view looks open enough to drive forward.',
-                },
-            },
-            'required': ['action', 'drive_distance', 'reason', 'path_clear_forward'],
-            'additionalProperties': False,
-        },
-    },
-}
-
 # Fraction of args_config max_speed*max_rate for seek spins (1.0 = UI Fast)
 _SEEK_TURN_SPEED_SCALE = 1.0
 # Nav-plan + hop tables live in seek_nav.py (unit-tested). Aliases imported above.
 
 
 def _seek_side_openness(views):
-    """Score LEFT vs RIGHT near-field openness (higher = more free space / less structure).
+    """Score cruise LEFT vs RIGHT panels.
+
+    Those panels are camera ±135° (rear-left / rear-right), not port/starboard.
+    Use them for reverse-quarter clearance, not as hallway walls.
 
     Returns dict: {left: float, right: float, prefer: 'left'|'right', scores_ok: bool}
     """
@@ -3676,8 +4855,16 @@ def _seek_side_openness(views):
 
 
 def _seek_prefer_open_turn(views):
-    """Return turn_left or turn_right toward the more open side view."""
+    """Return turn_left/turn_right toward a more open *side* view, or None.
+
+    Cruise LEFT/RIGHT are rear ±135° — not port/starboard. Do not use them
+    as a turn hint (that made indoor Seek oscillate L/R).
+    """
+    if _seek_views_are_rear_cruise(views):
+        return None
     info = _seek_side_openness(views)
+    if not info.get('scores_ok'):
+        return None
     return 'turn_right' if info.get('prefer') == 'right' else 'turn_left'
 
 
@@ -3701,28 +4888,6 @@ def _seek_half_open_score(jpeg, *, half):
         return _seek_roi_open_score(gray)
     except Exception:
         return None
-
-
-def _seek_rear_clearance(views, *, min_score=0.36):
-    """Can we reverse? Need BOTH rear quarters clear.
-
-    −135° photo → its LEFT half is behind-left.
-    +135° photo → its RIGHT half is behind-right.
-    """
-    left_v = next((v for v in (views or []) if isinstance(v, dict) and v.get('name') == 'left'), None)
-    right_v = next((v for v in (views or []) if isinstance(v, dict) and v.get('name') == 'right'), None)
-    left_half = _seek_half_open_score((left_v or {}).get('jpeg'), half='left')
-    right_half = _seek_half_open_score((right_v or {}).get('jpeg'), half='right')
-    left_ok = left_half is not None and float(left_half) >= float(min_score)
-    right_ok = right_half is not None and float(right_half) >= float(min_score)
-    return {
-        'left_half': left_half,
-        'right_half': right_half,
-        'left_clear': left_ok,
-        'right_clear': right_ok,
-        'all_clear': bool(left_ok and right_ok),
-        'min_score': min_score,
-    }
 
 
 _SEEK_FOUND_JSON_SCHEMA = {
@@ -3750,6 +4915,79 @@ _SEEK_FOUND_JSON_SCHEMA = {
 
 _SEEK_FOUND_JSON_OBJECT = {'type': 'json_object'}
 
+_SEEK_FRONT_NAV_SCHEMA = {
+    'type': 'json_schema',
+    'json_schema': {
+        'name': 'front_nav',
+        'strict': True,
+        'schema': {
+            'type': 'object',
+            'properties': {
+                'clear_forward_little': {
+                    'type': 'string',
+                    'enum': ['yes', 'no'],
+                    'description': 'Can drive forward a little (short hop ~0.8s)?',
+                },
+                'clear_forward_lot': {
+                    'type': 'string',
+                    'enum': ['yes', 'no'],
+                    'description': 'Can drive forward a lot (long hop ~1.6s)?',
+                },
+                'subject_in_scene': {
+                    'type': 'string',
+                    'enum': ['yes', 'no'],
+                    'description': 'Is the target subject clearly visible in this front view?',
+                },
+            },
+            'required': ['clear_forward_little', 'clear_forward_lot', 'subject_in_scene'],
+            'additionalProperties': False,
+        },
+    },
+}
+
+_SEEK_SIDE_NAV_SCHEMA = {
+    'type': 'json_schema',
+    'json_schema': {
+        'name': 'side_nav',
+        'strict': True,
+        'schema': {
+            'type': 'object',
+            'properties': {
+                'direction_clear': {
+                    'type': 'string',
+                    'enum': ['yes', 'no'],
+                    'description': 'Is this direction clear enough to rotate toward?',
+                },
+            },
+            'required': ['direction_clear'],
+            'additionalProperties': False,
+        },
+    },
+}
+
+_SEEK_MULTI_NAV_SCHEMA = {
+    'type': 'json_schema',
+    'json_schema': {
+        'name': 'multi_view_nav',
+        'strict': True,
+        'schema': {
+            'type': 'object',
+            'properties': {
+                'clear_forward_little': {'type': 'string', 'enum': ['yes', 'no']},
+                'clear_forward_lot': {'type': 'string', 'enum': ['yes', 'no']},
+                'subject_in_scene': {'type': 'string', 'enum': ['yes', 'no']},
+                'left_direction_clear': {'type': 'string', 'enum': ['yes', 'no']},
+                'right_direction_clear': {'type': 'string', 'enum': ['yes', 'no']},
+            },
+            'required': [
+                'clear_forward_little', 'clear_forward_lot', 'subject_in_scene',
+                'left_direction_clear', 'right_direction_clear',
+            ],
+            'additionalProperties': False,
+        },
+    },
+}
+
 
 def opencv_goal_check(goal_label, conf_threshold=DEFAULT_SEEK_CONF, frame=None):
     """On-device detector oracle (MobileNet-SSD). Closed class list only."""
@@ -3757,18 +4995,30 @@ def opencv_goal_check(goal_label, conf_threshold=DEFAULT_SEEK_CONF, frame=None):
         frame = cvf.grab_bgr_frame()
     dets = []
     if frame is not None:
-        dets = cvf.detect_objects_structured(frame, conf_threshold=0.12)
+        # Low floor for HUD/logs; found still uses conf_threshold (default 0.85).
+        dets = cvf.detect_objects_structured(frame, conf_threshold=min(0.12, float(conf_threshold)))
     else:
         dets = list(getattr(cvf, 'last_detections', []) or [])
-    
+
+    filtered_dets = []
+    for d in (dets or []):
+        if not isinstance(d, dict) or not d.get('label'):
+            continue
+        try:
+            c = float(d.get('confidence', 0) or 0)
+        except (TypeError, ValueError):
+            c = 0.0
+        if c >= float(conf_threshold):
+            filtered_dets.append(d)
+
     raw_labels = [
         f"{d.get('label')}: {round(float(d.get('confidence', 0))*100)}%"
-        for d in (dets or []) if isinstance(d, dict) and d.get('label')
+        for d in filtered_dets if isinstance(d, dict) and d.get('label')
     ]
     olog.info(
         'ai_seek',
-        f'CV scan for target "{goal_label}" (conf>={conf_threshold}) — saw {len(dets)} objects: {", ".join(raw_labels) or "none"}',
-        goal=goal_label, conf_threshold=conf_threshold, raw_count=len(dets), detected_objects=raw_labels,
+        f'CV scan for target "{goal_label}" (conf>={conf_threshold}) — saw {len(filtered_dets)} objects: {", ".join(raw_labels) or "none"}',
+        goal=goal_label, conf_threshold=conf_threshold, raw_count=len(filtered_dets), detected_objects=raw_labels,
     )
     result = evaluate_goal_detections(dets, goal_label, conf_threshold=conf_threshold)
     result['frame_ok'] = frame is not None
@@ -4433,20 +5683,22 @@ def _seek_run_on_found(ctrl, label):
     ctrl.append_log('warn', f'Unknown on_found action: {action}')
 
 
+# Seek loop may drive even when Chat motion tools are off. Thread-local so
+# we do not persist those caps into .ai_capabilities.json.
+_seek_tool_override = threading.local()
+
+
+def _seek_tools_overridden() -> bool:
+    return bool(getattr(_seek_tool_override, 'active', False))
+
+
 def _seek_force_tools_on():
-    """Ensure CV + motion + gimbal tools are offered during Seek pilot turns."""
-    try:
-        _set_capabilities({
-            'group_computer_vision': True,
-            'get_cv_detections': True,
-            'get_camera_snapshot': True,
-            'group_ros2_motion': True,
-            'send_motor_command': True,
-            'stop_motors': True,
-            'send_gimbal_command': True,
-        })
-    except Exception as e:
-        olog.warn('ai_seek', f'Could not enable seek tools: {e}', error=str(e)[:200])
+    """Allow chassis/CV tools for this Seek thread only (does not persist)."""
+    _seek_tool_override.active = True
+
+
+def _seek_clear_tool_override():
+    _seek_tool_override.active = False
 
 
 # Triple-view nav: left / straight / right pans (degrees on T:133 X)
@@ -4470,16 +5722,16 @@ _SEEK_VIEW_PANS = (
     ('right', _SEEK_VIEW_PAN_DEG),
 )
 # Wait for HW pan feedback after each aim (not a blind sleep-only “settle”)
-_SEEK_PAN_TOL_DEG = 14.0       # larger swings to ±135°
-_SEEK_PAN_WAIT_MAX_S = 4.0     # allow time for full left/right pan
+_SEEK_PAN_TOL_DEG = 22.0       # HW often undershoots ±135°; 14° was too tight
+_SEEK_PAN_WAIT_MAX_S = 3.5     # Allow time for full 135° slew + damp (was 2.5s, too tight)
 _SEEK_PAN_POLL_S = 0.08
 _SEEK_PAN_POST_ARRIVE_S = 0.12  # brief damp after arrival before shutter
-_SEEK_PAN_FALLBACK_SLEEP_S = 0.55  # if no HW pan feedback at all
+_SEEK_PAN_FALLBACK_SLEEP_S = 1.5  # if no HW pan feedback at all (135° @ 54°/s = 2.5s + margin)
 # Live cam_aim publish throttle (UI polls ~5Hz; wait loop is ~12Hz)
 _SEEK_CAM_AIM_MIN_INTERVAL_S = 0.12
 _SEEK_CAM_AIM_MIN_LIVE_DELTA_DEG = 3.0
 # ESP32 pan feedback is often stuck near 0 while T:133 is mid-swing — estimate
-# live angle so the UI needle moves (≈ 135° in ~2.5s on this gimbal).
+# live angle so the UI needle moves (≈ 135° in ~2.5s on this gimbal = 54°/s).
 _SEEK_PAN_EST_DPS = 54.0
 # Throttle + motion state for the single cam_aim publisher
 _cam_aim_pub = {
@@ -4512,72 +5764,144 @@ def _seek_read_hw_pan_tilt(request_feedback=True):
 
 
 def _seek_wait_pan_arrived(target_pan_deg, tol_deg=None, max_s=None, should_stop=None):
-    """Poll HW pan until near target_pan_deg (T:133 X convention) or timeout.
+    """Poll HW pan until near target_pan_deg OR estimated slew time elapsed.
 
     Returns dict: settled, hw_pan, err_deg, waited_s, samples, reason.
-    Live UI updates go only through cam_aim (throttled).
+    
+    Wait strategy (ESP32 often lies with ~0° during ±135° swing):
+    1. Calculate estimated slew time: |target - last_cmd| / 54°/s + 0.4s damp
+    2. Wait until EITHER:
+       - HW feedback is within tolerance of target (and not stuck at ~0), OR
+       - Estimated slew time has fully elapsed
+    3. Never grab before estimated time if HW is stuck near 0 while |target| > 40
     """
     tol = float(tol_deg if tol_deg is not None else _SEEK_PAN_TOL_DEG)
     max_s = float(max_s if max_s is not None else _SEEK_PAN_WAIT_MAX_S)
+    target = float(target_pan_deg)
+    
+    # Calculate estimated slew time based on commanded travel distance
+    last_cmd = float(_cam_aim_pub.get('cmd') or 0.0)
+    pan_travel = abs(target - last_cmd)
+    estimated_slew = (pan_travel / float(_SEEK_PAN_EST_DPS)) + 0.4  # travel + damp
+    min_wait = max(0.6, estimated_slew)  # At least 0.6s for any move
+    
+    # For large moves (rear angles), ensure minimum settle time
+    if abs(target) >= 90:
+        min_wait = max(1.0, min_wait)
+    
+    # Wait at least the estimated time, up to max_s
+    required_wait = min(min_wait, max_s)
+    
     t0 = time.time()
     samples = 0
     last_pan = None
     saw_feedback = False
-    target = float(target_pan_deg)
+    saw_useful_feedback = False
+    hw_within_tol = False
+    
     while (time.time() - t0) < max_s:
+        elapsed = time.time() - t0
+        
         if should_stop and should_stop():
             return {
                 'settled': False,
                 'hw_pan': last_pan,
                 'err_deg': None,
-                'waited_s': round(time.time() - t0, 3),
+                'waited_s': round(elapsed, 3),
                 'samples': samples,
                 'reason': 'stop_requested',
             }
+        
         pan, _tilt, _snap = _seek_read_hw_pan_tilt(request_feedback=True)
         samples += 1
+        
         if pan is not None:
             saw_feedback = True
             last_pan = float(pan)
-            try:
-                _seek_publish_cam_aim(
-                    target, float(_cam_aim_pub.get('tilt') or 0.0),
-                    hw_pan=last_pan,
-                    settled=False,
-                    live_pan=last_pan,
-                )
-            except Exception:
-                pass
-            err = abs(last_pan - target)
-            if err <= tol:
-                time.sleep(_SEEK_PAN_POST_ARRIVE_S)
-                return {
-                    'settled': True,
-                    'hw_pan': last_pan,
-                    'err_deg': round(err, 2),
-                    'waited_s': round(time.time() - t0, 3),
-                    'samples': samples,
-                    'reason': 'within_tol',
-                }
+            
+            # Detect stuck HW: reports ~0° while commanded far (±40+)
+            hw_stuck = (abs(last_pan) < 12.0 and abs(target) > 40.0)
+            
+            if not hw_stuck:
+                saw_useful_feedback = True
+                err = abs(last_pan - target)
+                if err <= tol:
+                    hw_within_tol = True
+                try:
+                    _seek_publish_cam_aim(
+                        target, float(_cam_aim_pub.get('tilt') or 0.0),
+                        hw_pan=last_pan, settled=False, live_pan=last_pan,
+                    )
+                except Exception:
+                    pass
+            else:
+                # HW stuck - publish estimated position instead
+                try:
+                    _seek_publish_cam_aim(
+                        target, float(_cam_aim_pub.get('tilt') or 0.0), settled=False,
+                    )
+                except Exception:
+                    pass
         else:
-            # No HW yet — keep cmd visible (publisher throttles)
+            # No HW feedback yet
             try:
                 _seek_publish_cam_aim(
                     target, float(_cam_aim_pub.get('tilt') or 0.0), settled=False,
                 )
             except Exception:
                 pass
+        
+        # Success criteria: HW within tolerance AND minimum time elapsed
+        if hw_within_tol and elapsed >= required_wait:
+            time.sleep(_SEEK_PAN_POST_ARRIVE_S)
+            return {
+                'settled': True,
+                'hw_pan': last_pan,
+                'err_deg': round(abs(last_pan - target), 2) if last_pan else None,
+                'waited_s': round(time.time() - t0, 3),
+                'samples': samples,
+                'reason': 'hw_arrived_and_time_elapsed',
+            }
+        
+        # If HW is useful and within tolerance, but min time not yet elapsed, keep waiting
+        if hw_within_tol and elapsed < required_wait:
+            time.sleep(_SEEK_PAN_POLL_S)
+            continue
+        
+        # If estimated time has elapsed, we're done (even if HW is lying)
+        if elapsed >= required_wait:
+            time.sleep(_SEEK_PAN_POST_ARRIVE_S)
+            reason = 'estimated_slew_elapsed'
+            if saw_useful_feedback and hw_within_tol:
+                reason = 'hw_arrived_and_time_elapsed'
+            elif saw_feedback and not saw_useful_feedback:
+                reason = 'time_elapsed_hw_stuck_at_zero'
+            return {
+                'settled': True,  # Gimbal had time to move
+                'hw_pan': last_pan,
+                'err_deg': round(abs(last_pan - target), 2) if last_pan else None,
+                'waited_s': round(time.time() - t0, 3),
+                'samples': samples,
+                'reason': reason,
+            }
+        
         time.sleep(_SEEK_PAN_POLL_S)
-    err = None
-    if last_pan is not None:
-        err = round(abs(last_pan - target), 2)
+    
+    # Max time exhausted before required_wait - shouldn't normally happen
+    err = round(abs(last_pan - target), 2) if last_pan else None
+    reason = 'timeout_before_min_wait'
+    if saw_feedback and not saw_useful_feedback:
+        reason = 'timeout_hw_stuck_at_zero'
+    elif saw_useful_feedback:
+        reason = 'timeout_not_within_tol'
+    
     return {
         'settled': False,
         'hw_pan': last_pan,
         'err_deg': err,
         'waited_s': round(time.time() - t0, 3),
         'samples': samples,
-        'reason': 'timeout_no_feedback' if not saw_feedback else 'timeout_not_within_tol',
+        'reason': reason,
     }
 
 
@@ -4813,17 +6137,66 @@ def _seek_publish_cam_aim(pan_deg, tilt_deg=0.0, hw_pan=None, settled=None, live
 
 
 def _seek_look_deg(pan_deg, tilt_deg=None, settle_s=None, wait_hw=True, should_stop=None):
-    """Point gimbal (degrees), optionally wait until HW pan confirms arrival, then return.
+    """Point camera for Seek look-around.
 
-    Sequence: command → (confirm pan completed | timeout) → ready for photo.
-    settle_s only used as blind fallback when wait_hw is False.
-    Overlay state is only published via cam_aim (not phase_meta / drive args).
-    Default tilt looks slightly down (bowls / cable / baseboards).
+    PTZ robot: gimbal T:133 (or ROS) with optional HW pan wait.
+    Hangar attachment=roarm2: skip PTZ pans; limited RoArm base peek, then settle.
     """
     if tilt_deg is None:
         tilt_deg = float(_SEEK_LOOK_TILT_DEG)
     look = _seek_pan_deg_to_rad(pan_deg, tilt_deg)
     _seek_publish_cam_aim(pan_deg, tilt_deg, settled=False, force=True)
+
+    if arm_usb_enabled():
+        res = {'path': 'roarm_look', 'ok': True, 'skipped_ptz': True, 'pan_deg': pan_deg}
+        try:
+            arm = get_roarm()
+            if arm is not None and abs(float(pan_deg)) > 1.0:
+                import math as _math
+                import roarm_ctrl as _rc
+                max_b = 0.35
+                base_r = max(-max_b, min(max_b, float(pan_deg) * _math.pi / 180.0 * 0.4))
+                tuck = _rc.POSES.get('travel_tuck') or _rc.POSES.get('tuck') or {}
+                arm.set_joints(
+                    base_r,
+                    float(tuck.get('shoulder', -0.62)),
+                    float(tuck.get('elbow', 0.88)),
+                    float(tuck.get('hand', 3.05)),
+                    spd=0,
+                    acc=10,
+                )
+                res['arm_base_rad'] = base_r
+                time.sleep(settle_s if settle_s is not None else 0.55)
+            else:
+                if arm is not None:
+                    try:
+                        arm.pose('travel_tuck')
+                    except Exception:
+                        pass
+                time.sleep(settle_s if settle_s is not None else 0.25)
+            olog.info(
+                'seek_look',
+                f'Seek look pan={pan_deg}° via RoArm/base-skip (no PTZ)',
+                pan_deg=pan_deg, path='roarm_look',
+                throttle_s=2.0, throttle_key='seek_roarm_look',
+            )
+        except Exception as e:
+            res = {'path': 'roarm_look', 'ok': False, 'error': str(e), 'skipped_ptz': True}
+            olog.warn('seek_look', f'RoArm seek look failed: {e}', error=str(e))
+            time.sleep(0.2)
+        arrival = {
+            'settled': True,
+            'reason': 'roarm_no_ptz',
+            'hw_pan': None,
+        }
+        _seek_publish_cam_aim(
+            pan_deg, tilt_deg,
+            hw_pan=None,
+            settled=True,
+            force=True,
+        )
+        return look, res, arrival
+
     res = _execute_agent_tool('send_gimbal_command', look)
     arrival = None
     if wait_hw:
@@ -4831,11 +6204,18 @@ def _seek_look_deg(pan_deg, tilt_deg=None, settle_s=None, wait_hw=True, should_s
             float(pan_deg),
             should_stop=should_stop,
         )
-        # If firmware never reports pan, still give a minimal settle so we don't snap mid-command
-        if arrival.get('reason') == 'timeout_no_feedback':
-            time.sleep(
-                settle_s if settle_s is not None else _SEEK_PAN_FALLBACK_SLEEP_S
-            )
+        # Log arrival for diagnostics
+        settled = bool(arrival and arrival.get('settled'))
+        reason = arrival.get('reason') if arrival else 'no_arrival'
+        hw = arrival.get('hw_pan') if arrival else None
+        waited = arrival.get('waited_s') if arrival else 0
+        olog.info(
+            'seek_pan',
+            f'Pan to {pan_deg}° complete: settled={settled} reason={reason} '
+            f'hw={hw}° waited={waited:.2f}s',
+            pan_deg=pan_deg, settled=settled, reason=reason,
+            hw_pan=hw, waited_s=waited,
+        )
     else:
         time.sleep(settle_s if settle_s is not None else _SEEK_PAN_FALLBACK_SLEEP_S)
         arrival = {'settled': False, 'reason': 'wait_hw_disabled', 'hw_pan': None}
@@ -4848,11 +6228,25 @@ def _seek_look_deg(pan_deg, tilt_deg=None, settle_s=None, wait_hw=True, should_s
     return look, res, arrival
 
 
-def _seek_grab_jpeg():
-    try:
-        return _grab_jpeg_bytes(max_width=480, quality=65)
-    except Exception:
-        return None
+def _seek_grab_jpeg(retries=3):
+    """Grab a real camera JPEG. Retry — first frames after a pan are often empty."""
+    last_err = None
+    for _i in range(max(1, int(retries))):
+        try:
+            jpeg = _grab_jpeg_bytes(max_width=640, quality=72)
+            if jpeg and len(jpeg) >= 800:
+                return jpeg
+            last_err = 'short_jpeg'
+        except Exception as e:
+            last_err = e
+        time.sleep(0.08)
+    if last_err:
+        olog.warn(
+            'ai_seek',
+            f'sweep grab failed after {retries} tries: {last_err}',
+            error=str(last_err)[:160],
+        )
+    return None
 
 
 def _seek_capture_triple_views(ctrl, step, steps_label, goal_label=None, conf_threshold=DEFAULT_SEEK_CONF, referee=REFEREE_DETECTOR):
@@ -4912,6 +6306,25 @@ def _seek_capture_triple_views(ctrl, step, steps_label, goal_label=None, conf_th
         except Exception:
             pass
         jpeg = _seek_grab_jpeg()
+        if not jpeg:
+            try:
+                time.sleep(0.15)
+                _seek_look_deg(pan_deg, wait_hw=True, should_stop=ctrl.should_stop)
+            except Exception:
+                pass
+            jpeg = _seek_grab_jpeg()
+        
+        # Diagnostic: log pan angles to verify rear captures are not front frames
+        hw_pan_diag = arrival.get('hw_pan') if arrival else None
+        settle_reason = arrival.get('reason') if arrival else 'no_arrival'
+        olog.info(
+            'seek_capture',
+            f'Captured {name} view: cmd={pan_deg}° hw={hw_pan_diag}° '
+            f'settled={settled} reason={settle_reason} bytes={len(jpeg) if jpeg else 0}',
+            view=name, commanded_pan=pan_deg, hw_pan=hw_pan_diag,
+            settled=settled, settle_reason=settle_reason,
+            jpeg_bytes=len(jpeg) if jpeg else 0,
+        )
         data_url = None
         has_target = False
         det_labels = []
@@ -5006,349 +6419,13 @@ def _seek_capture_triple_views(ctrl, step, steps_label, goal_label=None, conf_th
         _seek_look_deg(0.0, wait_hw=True, should_stop=ctrl.should_stop)
     except Exception:
         pass
-    return views, found_check
-
-
-def _seek_should_inspect_floor(views, last_action=None, *, step=None, last_lookdown_step=None):
-    """Look-down only when cruise scan says we are *close* to a wall/object/door.
-
-    Do not fire after every forward hop — that spent minutes panning instead of driving.
-    Throttle to at most once every 3 steps.
-    """
-    if step is not None and last_lookdown_step is not None:
-        if int(step) - int(last_lookdown_step) < 3:
-            return False
-    blocked = _seek_centre_obstacle_hint(views)
-    if blocked is True:
-        return True
-    cor = _seek_centre_corridor_hint(views)
-    if cor.get('blocked') is True:
-        return True
-    sides = _seek_side_openness(views)
-    lo, ro = sides.get('left'), sides.get('right')
-    if lo is not None and ro is not None and lo < 0.40 and ro < 0.40:
-        return True
-    return False
-
-
-def _seek_capture_band_views(
-    ctrl, step, steps_label, *, tilt, pans, band, goal_label=None,
-    conf_threshold=DEFAULT_SEEK_CONF,
-):
-    """L / front / R stills at a fixed tilt (look-down or look-up)."""
-    views = []
-    found_check = None
-    tilt = float(tilt)
-    n_pans = len(pans)
-    verb = 'look-down' if band == 'lookdown' else 'look-up'
-    for i, (name, pan_deg) in enumerate(pans, start=1):
-        if ctrl.should_stop():
-            break
-        ctrl.update(
-            seek_phase=band,
-            message=(
-                f'Step {step}/{steps_label}: {verb} {name} '
-                f'({i}/{n_pans}, pan≈{int(pan_deg)}° tilt={int(tilt)}°)…'
-            ),
-            phase_meta={'view': name, 'index': i, 'total': n_pans, 'sub': band},
-        )
-        try:
-            _seek_oled_set(
-                phase=band, step=step,
-                activity=f'{band[:4]} {name}',
-                detail=f'{int(pan_deg)}/{int(tilt)}',
-                message=f'{band[:4]} {i}/{n_pans}',
-                nav_summary=f'{band} {name}',
-            )
-        except Exception:
-            pass
-        _seek_look_deg(
-            pan_deg, tilt_deg=tilt, wait_hw=True, should_stop=ctrl.should_stop,
-        )
-        jpeg = _seek_grab_jpeg()
-        data_url = None
-        has_target = False
-        det_labels = []
-        raw_dets = []
-        chk = None
-        if jpeg:
-            b64 = base64.b64encode(jpeg).decode('ascii')
-            data_url = f'data:image/jpeg;base64,{b64}'
-            if goal_label:
-                chk = seek_goal_check(
-                    goal_label, referee=REFEREE_DETECTOR,
-                    conf_threshold=conf_threshold, jpeg=jpeg,
-                )
-                if chk.get('found'):
-                    has_target = True
-                    if not found_check:
-                        found_check = dict(chk)
-                        found_check['found_view'] = f'{band}_{name}'
-                det_labels = chk.get('labels_found') or []
-                raw_dets = list(chk.get('raw_detections') or [])
-            # Always also note person (even if goal is dog) for look-up ID
-            if band == 'lookup' and not det_labels:
-                try:
-                    pchk = seek_goal_check(
-                        'person', referee=REFEREE_DETECTOR,
-                        conf_threshold=conf_threshold, jpeg=jpeg,
-                    )
-                    det_labels = pchk.get('labels_found') or []
-                    raw_dets = list(pchk.get('raw_detections') or raw_dets)
-                except Exception:
-                    pass
-        views.append({
-            'name': name,
-            'pan_deg': pan_deg,
-            'tilt_deg': tilt,
-            'jpeg': jpeg,
-            'bytes': len(jpeg) if jpeg else 0,
-            'data_url': data_url,
-            'has_target': has_target,
-            'detected_labels': det_labels,
-            'raw_detections': raw_dets,
-            'check': chk,
-            band: True,
-        })
-        det_txt = ', '.join(raw_dets) if raw_dets else (
-            ', '.join(det_labels) if det_labels else 'none'
-        )
-        try:
-            ctrl.append_log(
-                'detect',
-                f'Step {step} · {verb} {name} (pan {int(pan_deg)}° tilt {int(tilt)}°): '
-                f'saw [{det_txt}]'
-                + (' · GOAL MATCH' if has_target else ''),
-                view=f'{band}_{name}', step=step,
-            )
-        except Exception:
-            pass
     try:
-        _seek_look_deg(0.0, wait_hw=True, should_stop=ctrl.should_stop)
+        card = _seek_sweep_scorecard(views)
+        ctrl.update(last_sweep=card)
+        ctrl.append_log('sweep', card.get('summary') or 'sweep', step=step)
     except Exception:
         pass
     return views, found_check
-
-
-def _seek_capture_lookdown_views(ctrl, step, steps_label, goal_label=None,
-                                 conf_threshold=DEFAULT_SEEK_CONF):
-    """Bumper-height L / front / R stills (not the rear ±135° cruise scan)."""
-    return _seek_capture_band_views(
-        ctrl, step, steps_label,
-        tilt=_SEEK_LOOKDOWN_TILT_DEG, pans=_SEEK_LOOKDOWN_PANS, band='lookdown',
-        goal_label=goal_label, conf_threshold=conf_threshold,
-    )
-
-
-def _seek_capture_lookup_views(ctrl, step, steps_label, goal_label=None,
-                               conf_threshold=DEFAULT_SEEK_CONF):
-    """Face-height L / front / R stills when a person is nearby."""
-    return _seek_capture_band_views(
-        ctrl, step, steps_label,
-        tilt=_SEEK_LOOKUP_TILT_DEG, pans=_SEEK_LOOKUP_PANS, band='lookup',
-        goal_label=goal_label, conf_threshold=conf_threshold,
-    )
-
-
-def _seek_lookdown_floor_hint(views):
-    """Openness at bumper height for look-down L/C/R (higher = more free floor)."""
-    scores = {}
-    for name in ('left', 'straight', 'right'):
-        scores[name] = None
-        try:
-            v = next((item for item in (views or []) if item.get('name') == name), None)
-            jpeg = v.get('jpeg') if isinstance(v, dict) else None
-            if not jpeg:
-                continue
-            arr = np.frombuffer(jpeg, np.uint8)
-            img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
-            if img is None:
-                continue
-            h, w = img.shape[:2]
-            roi = img[int(h * 0.40):int(h * 0.98), int(w * 0.12):int(w * 0.88)]
-            if roi.size == 0:
-                continue
-            gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
-            scores[name] = _seek_roi_open_score(gray)
-        except Exception:
-            scores[name] = None
-    left_s, mid_s, right_s = scores.get('left'), scores.get('straight'), scores.get('right')
-    prefer = 'left'
-    if left_s is None and right_s is None:
-        prefer = 'left'
-    elif left_s is None:
-        prefer = 'right'
-    elif right_s is None:
-        prefer = 'left'
-    elif right_s > left_s + 0.04:
-        prefer = 'right'
-    elif left_s > right_s + 0.04:
-        prefer = 'left'
-    # 0.38 marked almost every indoor floor as blocked and froze the chassis.
-    floor_blocked = mid_s is not None and mid_s < 0.18
-    return {
-        'left': left_s,
-        'straight': mid_s,
-        'right': right_s,
-        'prefer': prefer,
-        'floor_blocked': floor_blocked,
-        'prefer_turn': 'turn_right' if prefer == 'right' else 'turn_left',
-    }
-
-
-def _seek_maybe_lookdown(ctrl, step, steps_label, views, label, conf, last_action=None,
-                         last_lookdown_step=None):
-    """If approaching wall/object/door, sweep look-down L/C/R. Returns (found, hint)."""
-    if not _seek_should_inspect_floor(
-        views, last_action=last_action, step=step, last_lookdown_step=last_lookdown_step,
-    ):
-        return None, None
-    try:
-        ctrl.append_log(
-            'nav',
-            f'Step {step}: approaching wall/object/door — look-down L/front/R',
-            step=step,
-        )
-    except Exception:
-        pass
-    ld_views, ld_found = _seek_capture_lookdown_views(
-        ctrl, step, steps_label, goal_label=label, conf_threshold=conf,
-    )
-    hint = _seek_lookdown_floor_hint(ld_views)
-    try:
-        ctrl.append_log(
-            'nav',
-            f'Step {step}: look-down scores L={hint.get("left")} C={hint.get("straight")} '
-            f'R={hint.get("right")} blocked={hint.get("floor_blocked")} '
-            f'prefer={hint.get("prefer")}',
-            step=step,
-        )
-    except Exception:
-        pass
-    return ld_found, hint
-
-
-def _seek_views_mention_person(views):
-    """True if any cruise/inspect still reported a person."""
-    for v in views or []:
-        if not isinstance(v, dict):
-            continue
-        blob = ' '.join(
-            str(x).lower()
-            for x in list(v.get('detected_labels') or []) + list(v.get('raw_detections') or [])
-        )
-        if 'person' in blob or 'people' in blob:
-            return True
-    return False
-
-
-def _seek_lookup_person_hint(views):
-    """Which look-up panel still has a person (for keeping them in frame)."""
-    seen = {}
-    for name in ('left', 'straight', 'right'):
-        v = next((item for item in (views or []) if item.get('name') == name), None)
-        seen[name] = bool(v and _seek_views_mention_person([v]))
-    if seen.get('straight'):
-        prefer = 'straight'
-    elif seen.get('left') and not seen.get('right'):
-        prefer = 'left'
-    elif seen.get('right') and not seen.get('left'):
-        prefer = 'right'
-    elif seen.get('left'):
-        prefer = 'left'
-    else:
-        prefer = None
-    return {
-        'person_left': seen.get('left'),
-        'person_straight': seen.get('straight'),
-        'person_right': seen.get('right'),
-        'any': any(seen.values()),
-        'prefer': prefer,
-        'prefer_turn': (
-            'turn_left' if prefer == 'left'
-            else ('turn_right' if prefer == 'right' else None)
-        ),
-    }
-
-
-def _seek_maybe_lookup(ctrl, step, steps_label, views, label, conf):
-    """If a person is in the cruise scan, look up L/front/R to keep the face."""
-    if not _seek_views_mention_person(views):
-        return None, None
-    try:
-        ctrl.append_log(
-            'nav',
-            f'Step {step}: person nearby — look-up L/front/R (face height)',
-            step=step,
-        )
-    except Exception:
-        pass
-    lu_views, lu_found = _seek_capture_lookup_views(
-        ctrl, step, steps_label, goal_label=label, conf_threshold=conf,
-    )
-    hint = _seek_lookup_person_hint(lu_views)
-    try:
-        ctrl.append_log(
-            'nav',
-            f'Step {step}: look-up person L={hint.get("person_left")} '
-            f'C={hint.get("person_straight")} R={hint.get("person_right")} '
-            f'prefer={hint.get("prefer")}',
-            step=step,
-        )
-    except Exception:
-        pass
-    return lu_found, hint
-
-
-def _seek_parse_nav_action(raw_text):
-    """Parse nav JSON into action, drive_distance, reason, path_clear_forward."""
-    action = 'forward'
-    drive_distance = 'medium'
-    reason = ''
-    path_clear = True
-    parsed = None
-    text = (raw_text or '').strip()
-    if text.startswith('```'):
-        text = re.sub(r'^```(?:json)?\s*', '', text)
-        text = re.sub(r'\s*```$', '', text)
-    try:
-        parsed = json.loads(text)
-    except Exception:
-        m = re.search(r'\{[^{}]+\}', text, re.S)
-        if m:
-            try:
-                parsed = json.loads(m.group(0))
-            except Exception:
-                parsed = None
-    if isinstance(parsed, dict):
-        action = _seek_normalize_action(
-            parsed.get('action') or parsed.get('recommended_direction') or 'forward'
-        )
-        drive_distance = _seek_normalize_distance(
-            parsed.get('drive_distance')
-            or parsed.get('distance')
-            or parsed.get('range')
-            or 'medium'
-        )
-        reason = str(parsed.get('reason') or '')[:240]
-        pc = parsed.get('path_clear_forward')
-        if isinstance(pc, str):
-            path_clear = pc.strip().lower() in ('1', 'true', 'yes')
-        elif pc is not None:
-            path_clear = bool(pc)
-    plan = _seek_nav_plan(action, drive_distance, path_clear_forward=path_clear)
-    return {
-        'action': plan['action'],
-        'drive_distance': plan['drive_distance'],
-        'reason': reason,
-        'path_clear_forward': path_clear,
-        'magnitude': plan['magnitude'],
-        'summary': plan['summary'],
-        'repeats': plan['repeats'],
-        'duration_ms': plan['duration_ms'],
-        'turn_deg': plan['turn_deg'],
-        'raw': (raw_text or '')[:400],
-    }
 
 
 def _parse_json_from_text(text):
@@ -5558,643 +6635,6 @@ def _seek_centre_corridor_hint(views):
         return out
 
 
-# Dead-reckoning heading for exploration bias (no ROS odom required).
-# 0=N, 90=E, 180=S, 270=W — updated from executed seek moves.
-_SEEK_HEADING_DEG = 0.0
-_SEEK_EXPLORE_TRAIL = []  # newest last: {action, dist, heading, t}
-_SEEK_TRAIL_MAX = 16
-_SEEK_TURN_HEADING_DELTA = {
-    'short': float(_SEEK_TURN_DEG_BY_DIST.get('short', 35)),
-    'medium': float(_SEEK_TURN_DEG_BY_DIST.get('medium', 80)),
-    'long': float(_SEEK_TURN_DEG_BY_DIST.get('long', 130)),
-}
-
-
-def _seek_heading_cardinal(deg=None):
-    d = float(_SEEK_HEADING_DEG if deg is None else deg) % 360.0
-    dirs = ('N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW')
-    return dirs[int((d + 22.5) // 45) % 8]
-
-
-def _seek_explore_reset():
-    global _SEEK_HEADING_DEG, _SEEK_EXPLORE_TRAIL
-    _SEEK_HEADING_DEG = 0.0
-    _SEEK_EXPLORE_TRAIL = []
-
-
-def _seek_explore_record(action, dist='medium'):
-    """Update heading + trail after a move executes."""
-    global _SEEK_HEADING_DEG, _SEEK_EXPLORE_TRAIL
-    action = _seek_normalize_action(action)
-    dist = _seek_normalize_distance(dist, default='medium')
-    h = float(_SEEK_HEADING_DEG)
-    if action == 'turn_left':
-        h = (h - float(_SEEK_TURN_HEADING_DELTA.get(dist, 20.0))) % 360.0
-    elif action == 'turn_right':
-        h = (h + float(_SEEK_TURN_HEADING_DELTA.get(dist, 20.0))) % 360.0
-    # forward/backward keep heading (reverse doesn't flip map heading for trail bias)
-    _SEEK_HEADING_DEG = h
-    _SEEK_EXPLORE_TRAIL.append({
-        'action': action,
-        'dist': dist,
-        'heading': round(h, 1),
-        'cardinal': _seek_heading_cardinal(h),
-        't': time.time(),
-    })
-    if len(_SEEK_EXPLORE_TRAIL) > _SEEK_TRAIL_MAX:
-        _SEEK_EXPLORE_TRAIL = _SEEK_EXPLORE_TRAIL[-_SEEK_TRAIL_MAX:]
-    return h
-
-
-def _seek_explore_summary():
-    """Text + stats for LLM / heuristic exploration bias."""
-    trail = list(_SEEK_EXPLORE_TRAIL)
-    heading = float(_SEEK_HEADING_DEG)
-    card = _seek_heading_cardinal(heading)
-    # Count recent headings used while going forward
-    recent = trail[-8:]
-    fwd_cards = [
-        e.get('cardinal') for e in recent
-        if e.get('action') == 'forward' and e.get('cardinal')
-    ]
-    from collections import Counter
-    counts = Counter(fwd_cards)
-    # How often current heading was used for forward
-    same_heading_fwd = counts.get(card, 0)
-    # Suggest turn away from overused forward headings
-    overused = [c for c, n in counts.most_common() if n >= 2]
-    parts = []
-    for e in recent:
-        parts.append(f"{e.get('action')}/{e.get('dist')}@{e.get('cardinal')}")
-    trail_s = ' → '.join(parts) if parts else '(empty — start exploring)'
-    return {
-        'heading_deg': round(heading, 1),
-        'cardinal': card,
-        'trail_text': trail_s,
-        'forward_counts': dict(counts),
-        'same_heading_fwd': same_heading_fwd,
-        'overused': overused,
-        'prefer_new': same_heading_fwd >= 2,
-    }
-
-
-def _seek_unified_llm_analysis(
-    current_views, prev_forward_jpeg, goal_label, last_action=None,
-    lookdown=None, lookup=None,
-):
-    """Single unified LLM query: near-360° stitch + previous view.
-
-    last_action: previous executed move so recovery can turn toward open space
-    after a reverse instead of reversing forever.
-    """
-    pan = int(_SEEK_VIEW_PAN_DEG)
-    last = _seek_normalize_action(last_action) if last_action else None
-    side_info = _seek_side_openness(current_views)
-    prefer_turn = _seek_prefer_open_turn(current_views)
-    prefer_side = 'right' if prefer_turn == 'turn_right' else 'left'
-    rear = _seek_rear_clearance(current_views)
-    explore = _seek_explore_summary()
-
-    stitched_jpeg = _stitch_panorama_views(current_views)
-    if not stitched_jpeg:
-        return {
-            'goal_found': False,
-            'goal_found_view': None,
-            'path_forward_clear': False,
-            'obstacle_ahead_range': 'near',
-            'is_identical_to_previous': False,
-            'recommended_direction': 'left' if prefer_turn == 'turn_left' else 'right',
-            'drive_distance': 'short',
-            'open_side': prefer_side,
-            'prefer_turn': prefer_turn,
-            'reason': 'no camera images — turn short toward open (avoid reverse into wall)',
-            'explore': explore,
-        }
-
-    last_note = ''
-    if last == 'backward':
-        last_note = (
-            f'\nLAST MOVE: the robot just REVERSED. Do NOT reverse again. '
-            f'Turn toward open side (hint: {prefer_side}) then try forward when '
-            f'CENTRE looks clear.\n'
-        )
-    elif last in ('turn_left', 'turn_right'):
-        last_note = (
-            f'\nLAST MOVE: just turned ({last}). If CENTRE (front) is open, prefer '
-            f'forward medium/long into NEW space. Do not reverse just because LEFT/RIGHT show walls.\n'
-        )
-    elif last == 'forward':
-        last_note = '\nLAST MOVE: forward hop.\n'
-
-    explore_note = (
-        f'\nEXPLORATION (visit places not yet seen):\n'
-        f'  Heading now ≈ {explore["cardinal"]} ({explore["heading_deg"]}°).\n'
-        f'  Recent trail (old→new): {explore["trail_text"]}\n'
-        f'  Forward counts by heading: {explore["forward_counts"] or "{}"}.\n'
-        f'  Prefer open corridors facing headings NOT already used a lot.\n'
-        f'  If CENTRE is open but heading {explore["cardinal"]} was used ≥2 times recently, '
-        f'turn short toward the emptier unexplored side, then forward long.\n'
-        f'  Goal of seek: cover more of the environment, not only re-drive the same open path.\n'
-    )
-    last_note = last_note + explore_note
-
-    openness_hint = ''
-    if side_info.get('scores_ok'):
-        openness_hint = (
-            f'\nLocal side scores (for turning only; higher=more free): '
-            f'LEFT/rear-left={side_info.get("left")} '
-            f'RIGHT/rear-right={side_info.get("right")} '
-            f'→ prefer turn {prefer_side}.\n'
-        )
-    rear_note = (
-        f'\nREAR CLEARANCE (for reverse only):\n'
-        f'  LEFT photo (−135°) left-half score={rear.get("left_half")} '
-        f'clear={rear.get("left_clear")}.\n'
-        f'  RIGHT photo (+135°) right-half score={rear.get("right_half")} '
-        f'clear={rear.get("right_clear")}.\n'
-        f'  both_clear={rear.get("all_clear")} — reverse is ILLEGAL unless both_clear '
-        f'and you cannot go forward or turn.\n'
-    )
-    openness_hint = (openness_hint or '') + rear_note
-    lookdown_hint = ''
-    if lookdown:
-        lookdown_hint = (
-            f'\nLOOK-DOWN bumper inspect (L/front/R at tilt≈−22°):\n'
-            f'  scores L={lookdown.get("left")} C={lookdown.get("straight")} '
-            f'R={lookdown.get("right")} floor_blocked={lookdown.get("floor_blocked")} '
-            f'prefer={lookdown.get("prefer")}.\n'
-            f'  If floor_blocked, CENTRE is NEAR even if the high panorama looked open '
-            f'(bowls, cables, jambs, baseboards).\n'
-        )
-    if lookup:
-        lookdown_hint += (
-            f'\nLOOK-UP face inspect (L/front/R at tilt≈+18°): '
-            f'person L={lookup.get("person_left")} C={lookup.get("person_straight")} '
-            f'R={lookup.get("person_right")} prefer={lookup.get("prefer")}.\n'
-            f'  A human is nearby — keep the camera UP on them; do not stare at their feet. '
-            f'If the goal is a person and they are in a look-up panel, that is found.\n'
-        )
-
-    user_content = [
-        {
-            'type': 'text',
-            'text': (
-                f'Target object to seek: "{goal_label}".\n\n'
-                '=== HOW TO READ THIS IMAGE (CRITICAL) ===\n'
-                f'This is ONE stitched near-360° panorama of THREE photos the robot took '
-                f'by panning its camera. Layout left→right:\n'
-                f'  [ LEFT panel | CENTRE panel | RIGHT panel ]\n'
-                f'  LEFT   = camera aimed {pan}° LEFT of drive direction '
-                f'(≈ rear-left / over the left shoulder — NOT the front).\n'
-                f'  CENTRE = camera aimed STRAIGHT AHEAD (0°) = the ONLY view of '
-                f'where driving FORWARD goes.\n'
-                f'  RIGHT  = camera aimed {pan}° RIGHT of drive direction '
-                f'(≈ rear-right / over the right shoulder — NOT the front).\n'
-                'Together LEFT+CENTRE+RIGHT cover roughly all around the robot. '
-                'The outer edges of the strip are the REAR half of the world; '
-                'the middle strip is the FRONT.\n\n'
-                'Motion mapping:\n'
-                '  forward  → into what you see in CENTRE only\n'
-                '  backward → into the REAR (content that appears in LEFT/RIGHT edges, '
-                'behind the robot). If LEFT/RIGHT show close walls, do NOT reverse.\n'
-                '  left/right turns → rotate toward freer space (use LEFT vs RIGHT panels)\n\n'
-                f'{last_note}{openness_hint}{lookdown_hint}\n'
-                'YOUR NAV CONTRACT (the robot will execute this, not a heuristic):\n'
-                '  • If CENTRE is clear enough to drive: recommended_direction="forward" and '
-                'drive_distance is HOW FAR (short≈0.8s, medium≈1.1s, long≈1.6s punchy hops).\n'
-                '    Use long for open halls/rooms; medium for mixed; short only if something is close.\n'
-                '  • If CENTRE is blocked (wall, door slab, furniture, bowl): '
-                'recommended_direction="left" or "right" — whichever side is more open. '
-                'Set open_side to that same side. Do not pick forward.\n'
-                '  • backward ONLY if you cannot go forward AND cannot usefully turn, AND '
-                'BOTH rear quarters are clear: LEFT half of the LEFT (−135°) photo AND '
-                'RIGHT half of the RIGHT (+135°) photo. If either half is cluttered, turn instead.\n'
-                'Answer in ONE JSON object.\n\n'
-                'obstacle_ahead_range (CENTRE panel ONLY — ignore left/right for this field):\n'
-                '  none   = open floor ahead in CENTRE\n'
-                '  far    = something distant in CENTRE\n'
-                '  medium = mid-range in CENTRE\n'
-                '  near   = immediately blocking the CENTRE / filling the front view\n'
-                '  NEVER set near just because LEFT or RIGHT show furniture/walls behind.\n\n'
-                'HARD RULES:\n'
-                '  1. path_forward_clear and obstacle_ahead_range use CENTRE only.\n'
-                '  2. Obstacles only on LEFT/RIGHT = behind/side → do NOT reverse; '
-                'turn or go forward if CENTRE is clear.\n'
-                '  3. Prefer turn toward open_side when CENTRE is near — do NOT reverse '
-                'into a rear wall. Reverse only as a last short nudge after a turn failed.\n'
-                '  4. If reverse is used: drive_distance must be short only; never reverse twice.\n'
-                '  5. CENTRE clear (none/far) or open corridor / empty floor → prefer '
-                'forward medium or long (navigate into the empty space; do not creep short).\n'
-                '  6. If the empty corridor is offset left/right in the CENTRE panel, '
-                'turn short toward that empty lane first, then forward long next.\n'
-                '  7. medium range in CENTRE → forward medium (not reverse) unless blocked near.\n'
-                '  8. Explore: when several opens exist, pick the direction least used in the trail.\n'
-                '  9. never omit drive_distance, obstacle_ahead_range, open_side.\n'
-                ' 10. Drive AWAY from walls. A pale wall filling CENTRE is NEAR — turn to open_side, '
-                'do not creep toward the paint.\n'
-                ' 11. Doorway / hall chute (CENTRE open, LEFT+RIGHT look like jambs/walls): after a forward '
-                'into the frame, take another hop of similar length so the chassis is fully PAST the jambs. '
-                'Stopping in the doorway wedges this rover.\n'
-                ' 12. Floor hazards: bowls, cable runners, and baseboards are at bumper height. '
-                'If CENTRE lower frame shows an object on the floor, treat as near and turn around it.\n'
-                '  13. On approach the robot also takes a LOOK-DOWN left/front/right (~±55°, tilt −22°). '
-                'If that inspect says floor_blocked, do not go forward.\n'
-                '  14. If a PERSON is nearby, a LOOK-UP left/front/right (~±55°, tilt +18°) keeps the face '
-                'in frame. Identify them from that band; do not look down at their feet.\n\n'
-                'JSON schema:\n'
-                '{\n'
-                '  "goal_found": true|false,\n'
-                '  "goal_found_view": "straight"|"left"|"right"|null,\n'
-                '  "obstacle_ahead_range": "none"|"far"|"medium"|"near",\n'
-                '  "open_side": "left"|"right"|"neither",\n'
-                '  "path_forward_clear": true|false,\n'
-                '  "is_identical_to_previous": true|false,\n'
-                '  "recommended_direction": "forward"|"left"|"right"|"backward",\n'
-                '  "drive_distance": "short"|"medium"|"long",\n'
-                '  "reason": "cite CENTRE vs rear panels + why this move"\n'
-                '}'
-            ),
-        }
-    ]
-
-    if prev_forward_jpeg:
-        b64_prev = base64.b64encode(prev_forward_jpeg).decode('ascii')
-        user_content.append({
-            'type': 'text',
-            'text': (
-                'PREVIOUS CENTRE / FORWARD VIEW only (0° drive direction — not the rear):'
-            ),
-        })
-        user_content.append({'type': 'image_url', 'image_url': {'url': f'data:image/jpeg;base64,{b64_prev}'}})
-
-    b64_pano = base64.b64encode(stitched_jpeg).decode('ascii')
-    user_content.append({
-        'type': 'text',
-        'text': (
-            f'CURRENT NEAR-360° PANORAMA — call seek_nav_answer:\n'
-            f'  LEFT third  = camera −{pan}° REAR-LEFT. rear_left_clear = LEFT HALF of this panel.\n'
-            f'  MIDDLE third = camera 0° FRONT. forward_clear_cm / can_forward / forward_hop from this only.\n'
-            f'  RIGHT third = camera +{pan}° REAR-RIGHT. rear_right_clear = RIGHT HALF of this panel.\n'
-            f'can_backward only if both rear halves are clear AND we cannot go forward or turn.'
-        ),
-    })
-    user_content.append({'type': 'image_url', 'image_url': {'url': f'data:image/jpeg;base64,{b64_pano}'}})
-
-    messages = [
-        {
-            'role': 'system',
-            'content': (
-                'You are the sole navigator for a small UGV. '
-                'You MUST call the function seek_nav_answer. Do not write prose. '
-                'Each field is a one-token / enum answer. '
-                'CENTRE panel = path ahead (cm until collision, can_forward, forward_hop). '
-                'LEFT photo is camera −135° rear-left — judge rear_left_clear from its LEFT HALF. '
-                'RIGHT photo is camera +135° rear-right — judge rear_right_clear from its RIGHT HALF. '
-                'can_backward only if cannot go forward, cannot turn, and BOTH rear halves are clear.'
-            ),
-        },
-        {'role': 'user', 'content': user_content},
-    ]
-
-    centre_blocked_hint = _seek_centre_obstacle_hint(current_views)
-
-    try:
-        try:
-            msg, _body, _cfg = _openai_chat(
-                messages,
-                max_tokens=1024,
-                temperature=0.0,
-                timeout=20,
-                tools=[_SEEK_NAV_TOOL],
-                tool_choice={'type': 'function', 'function': {'name': _SEEK_NAV_TOOL_NAME}},
-            )
-        except Exception as e:
-            olog.warn('ai_seek', f'seek_nav tool_choice=required failed, retry auto: {e}')
-            msg, _body, _cfg = _openai_chat(
-                messages,
-                max_tokens=1024,
-                temperature=0.0,
-                timeout=20,
-                tools=[_SEEK_NAV_TOOL],
-                tool_choice='auto',
-            )
-        parsed = _parse_tool_call_args(msg, _SEEK_NAV_TOOL_NAME)
-        if not isinstance(parsed, dict):
-            txt = _message_text_content(msg) or ''
-            parsed = _parse_json_from_text(txt)
-        if not isinstance(parsed, dict):
-            # 96-token-era failure mode: reasoning ate the tool JSON
-            olog.warn('ai_seek', 'seek_nav parse empty — retry larger completion')
-            msg, _body, _cfg = _openai_chat(
-                messages,
-                max_tokens=2048,
-                temperature=0.0,
-                timeout=25,
-                tools=[_SEEK_NAV_TOOL],
-                tool_choice='auto',
-            )
-            parsed = _parse_tool_call_args(msg, _SEEK_NAV_TOOL_NAME)
-            if not isinstance(parsed, dict):
-                parsed = _parse_json_from_text(_message_text_content(msg) or '')
-        if isinstance(parsed, dict) and (
-            'can_forward' in parsed
-            or 'forward_clear_cm' in parsed
-            or parsed.get('recommended_direction')
-            or parsed.get('action')
-            or parsed.get('drive_distance')
-            or parsed.get('open_side')
-        ):
-            prefer_turn_llm = prefer_turn
-            open_side = prefer_side
-            fwd_clear = False
-            obs_range = 'unknown'
-            found = bool(parsed.get('goal_found'))
-            found_view = str(
-                parsed.get('goal_view') or parsed.get('goal_found_view') or 'straight'
-            ).lower().strip()
-            if found_view in ('', 'null', 'none'):
-                found_view = 'straight' if found else None
-
-            identical = bool(parsed.get('is_identical_to_previous'))
-            if 'can_forward' in parsed or 'forward_clear_cm' in parsed:
-                schema_move = _seek_action_from_schema(parsed, last_action=last)
-                if schema_move.get('action') == 'backward' and not rear.get('all_clear'):
-                    schema_move = _seek_action_from_schema(
-                        {**parsed, 'can_backward': False, 'backward_hop': 'none',
-                         'can_turn_left': parsed.get('can_turn_left', True)},
-                        last_action=last,
-                    )
-                direction = schema_move['action']
-                dist = schema_move['drive_distance']
-                if schema_move.get('open_side') in ('left', 'right'):
-                    open_side = schema_move['open_side']
-                    prefer_turn_llm = 'turn_' + open_side
-                fwd_clear = bool(schema_move.get('can_forward'))
-                cm = schema_move.get('forward_clear_cm')
-                if cm is None:
-                    obs_range = 'unknown'
-                elif cm <= 15:
-                    obs_range = 'near'
-                elif cm <= 60:
-                    obs_range = 'medium'
-                elif cm <= 120:
-                    obs_range = 'far'
-                else:
-                    obs_range = 'none'
-            else:
-                obs_range = _seek_normalize_obstacle_range(
-                    parsed.get('obstacle_ahead_range')
-                    or parsed.get('obstacle_range')
-                    or parsed.get('forward_obstacle_range')
-                    or parsed.get('clearance')
-                    or parsed.get('how_close')
-                )
-                open_raw = str(parsed.get('open_side') or parsed.get('preferred_side') or '').strip().lower()
-                if open_raw in ('left', 'l'):
-                    open_side = 'left'
-                    prefer_turn_llm = 'turn_left'
-                elif open_raw in ('right', 'r'):
-                    open_side = 'right'
-                    prefer_turn_llm = 'turn_right'
-                else:
-                    open_side = prefer_side
-                    prefer_turn_llm = prefer_turn
-                fwd_clear = parsed.get('path_forward_clear')
-                if isinstance(fwd_clear, str):
-                    fwd_clear = fwd_clear.lower() in ('true', '1', 'yes')
-                elif fwd_clear is None:
-                    fwd_clear = obs_range in ('none', 'far', 'medium')
-                else:
-                    fwd_clear = bool(fwd_clear)
-                direction = _seek_normalize_action(
-                    parsed.get('recommended_direction')
-                    or parsed.get('action')
-                    or ('forward' if fwd_clear else prefer_turn_llm)
-                )
-                if direction == 'backward' and not rear.get('all_clear'):
-                    direction = prefer_turn_llm if prefer_turn_llm in ('turn_left', 'turn_right') else 'turn_left'
-                dist = _seek_normalize_distance(
-                    parsed.get('drive_distance')
-                    or parsed.get('distance')
-                    or parsed.get('range')
-                    or ('medium' if direction == 'forward' else 'short')
-                )
-            # Tables only — do not rewrite the LLM's hop length / turn side via obstacle heuristics
-            plan = _seek_nav_plan(direction, dist)
-            reason = str(parsed.get('reason') or '')[:200]
-            cm = parsed.get('forward_clear_cm')
-            range_note = f'obstacle={obs_range} open={open_side} cm={cm}'
-            reason = f'LLM {plan["summary"]} ({range_note})' + (
-                f' | {reason}' if reason else ''
-            )
-
-            return {
-                'goal_found': found,
-                'goal_found_view': found_view if found else None,
-                'path_forward_clear': bool(fwd_clear),
-                'obstacle_ahead_range': obs_range,
-                'open_side': open_side,
-                'prefer_turn': prefer_turn_llm,
-                'side_openness': side_info,
-                'is_identical_to_previous': identical,
-                'recommended_direction': plan['action'],
-                'drive_distance': plan['drive_distance'],
-                'action': plan['action'],
-                'magnitude': plan['magnitude'],
-                'summary': plan['summary'],
-                'repeats': plan['repeats'],
-                'duration_ms': plan['duration_ms'],
-                'turn_deg': plan['turn_deg'],
-                'safety_override': None,
-                'vision_blocked_hint': centre_blocked_hint,
-                'source': 'llm',
-                'reason': reason[:240],
-            }
-    except Exception as e:
-        olog.warn('ai_seek', f'Unified LLM analysis error: {e}')
-
-    # LLM failed/slow: local vision heuristic that can still exit a room
-    return _seek_heuristic_room_nav(
-        current_views, last_action=last, last_dist=None, prefer_turn=prefer_turn,
-        prefer_side=prefer_side, side_info=side_info, reason_prefix='LLM failed — ',
-        lookdown=lookdown,
-    )
-
-
-def _seek_heuristic_room_nav(
-    views,
-    *,
-    last_action=None,
-    last_dist=None,
-    prefer_turn=None,
-    prefer_side=None,
-    side_info=None,
-    reason_prefix='',
-    lookdown=None,
-):
-    """Navigate without LLM: reverse once if blocked, aim into empty corridor, drive longer.
-
-    Goal: leave clutter toward free hallway space — longer hops when the centre is open.
-    """
-    side_info = side_info or _seek_side_openness(views)
-    prefer_turn = prefer_turn or _seek_prefer_open_turn(views)
-    if lookdown and lookdown.get('prefer_turn') in ('turn_left', 'turn_right'):
-        prefer_turn = lookdown['prefer_turn']
-    prefer_side = prefer_side or ('right' if prefer_turn == 'turn_right' else 'left')
-    if lookdown and lookdown.get('prefer') in ('left', 'right'):
-        prefer_side = lookdown['prefer']
-    last = _seek_normalize_action(last_action) if last_action else None
-    last_dist = _seek_normalize_distance(last_dist, default='medium') if last_dist else None
-    corridor = _seek_centre_corridor_hint(views)
-    blocked = corridor.get('blocked')
-    if blocked is None:
-        blocked = _seek_centre_obstacle_hint(views)
-    if lookdown and lookdown.get('floor_blocked'):
-        blocked = True
-    hop = corridor.get('hop') or 'medium'
-    lane = corridor.get('lane')
-    open_score = corridor.get('open_score')
-
-    if blocked is True:
-        if last == 'backward':
-            action, dist, obs = prefer_turn, 'short', 'near'
-            reason = f'heuristic: after reverse, turn {prefer_side} toward open space'
-        elif last in ('turn_left', 'turn_right'):
-            rear = _seek_rear_clearance(views)
-            if _seek_may_reverse(
-                can_forward=False,
-                can_turn=False,
-                rear_left_clear=bool(rear.get('left_clear')),
-                rear_right_clear=bool(rear.get('right_clear')),
-                last_action=last,
-            ):
-                action, dist, obs = 'backward', 'short', 'near'
-                reason = (
-                    f'heuristic: still blocked after {last}; rear L/R both clear '
-                    f'(Lhalf={rear.get("left_half")} Rhalf={rear.get("right_half")}) → reverse short'
-                )
-            else:
-                other = 'turn_right' if last == 'turn_left' else 'turn_left'
-                action, dist, obs = other, 'short', 'near'
-                reason = (
-                    f'heuristic: still blocked after {last}; rear not both-clear '
-                    f'(Lhalf={rear.get("left_half")} clear={rear.get("left_clear")} '
-                    f'Rhalf={rear.get("right_half")} clear={rear.get("right_clear")}) '
-                    f'→ {other} instead of reverse'
-                )
-        else:
-            # Prefer turn-to-open; reverse often hits rear wall in rooms/corridors
-            action, dist, obs = prefer_turn, 'short', 'near'
-            reason = f'heuristic: centre near-blocked → turn {prefer_side} (not reverse)'
-    elif blocked is False:
-        # Open floor / corridor — aim into emptier lane, then drive longer
-        explore = _seek_explore_summary()
-        if explore.get('prefer_new') and last == 'forward':
-            # Same heading overused — peel off toward open side for new space
-            action, dist, obs = prefer_turn, 'short', 'none'
-            reason = (
-                f'heuristic: explore leave {explore.get("cardinal")} '
-                f'(fwd×{explore.get("same_heading_fwd")}) → turn {prefer_side}'
-            )
-        elif last in ('turn_left', 'turn_right'):
-            # Just aimed: commit down the open path
-            action, dist, obs = 'forward', hop if hop in ('medium', 'long') else 'long', 'none'
-            if dist == 'short':
-                dist = 'medium'
-            reason = (
-                f'heuristic: after turn, centre open (score={open_score}) '
-                f'→ forward {dist} into corridor'
-            )
-        elif lane in ('left', 'right') and last not in ('turn_left', 'turn_right'):
-            # Empty space is off-center — small turn to face the free lane first
-            action = 'turn_left' if lane == 'left' else 'turn_right'
-            dist, obs = 'short', 'none'
-            reason = (
-                f'heuristic: empty corridor lane={lane} (L={corridor.get("left_score")} '
-                f'R={corridor.get("right_score")}) → aim short then go long'
-            )
-        else:
-            action, dist, obs = 'forward', hop if hop != 'short' else 'medium', 'none'
-            if open_score is not None and open_score >= 0.65:
-                dist = 'long'
-            reason = (
-                f'heuristic: centre open corridor (score={open_score}) '
-                f'→ forward {dist} into empty space hdg={explore.get("cardinal")}'
-            )
-    else:
-        # Unknown: prefer progressing into likely free space rather than spinning short
-        if last in ('turn_left', 'turn_right', 'backward'):
-            action, dist, obs = 'forward', 'medium', 'unknown'
-            reason = 'heuristic: after recovery, probe forward medium into space'
-        elif lane in ('left', 'right'):
-            action = 'turn_left' if lane == 'left' else 'turn_right'
-            dist, obs = 'short', 'unknown'
-            reason = f'heuristic: unclear but emptier lane={lane} → aim short'
-        else:
-            action, dist, obs = 'forward', 'medium', 'unknown'
-            reason = 'heuristic: unclear centre → forward medium (corridor progress)'
-
-    # Doorway/hall chute: don't stop in the frame (live: wedges on jambs).
-    commit = _seek_commit_through_opening(
-        last, last_dist or 'medium',
-        obstacle_range='near' if blocked is True else ('none' if blocked is False else 'unknown'),
-        left_open=side_info.get('left'),
-        right_open=side_info.get('right'),
-        centre_open=(blocked is False),
-    )
-    if commit:
-        action, dist = commit['action'], commit['drive_distance']
-        obs = 'none' if blocked is False else 'unknown'
-        reason = commit['reason']
-
-    away = _seek_prefer_away_from_wall(
-        action,
-        obstacle_range='near' if blocked is True else 'unknown',
-        left_open=side_info.get('left'),
-        right_open=side_info.get('right'),
-        prefer_turn=prefer_turn,
-    )
-    if away:
-        action, dist, obs = away, 'short', 'near'
-        reason = f'heuristic: wall ahead — turn {away} away (do not drive into paint)'
-
-    plan = _seek_nav_plan(
-        action, dist,
-        path_clear_forward=(obs in ('none', 'far')),
-        obstacle_range=obs,
-        last_action=last,
-        prefer_turn=prefer_turn,
-    )
-    dir_token = {
-        'forward': 'forward',
-        'turn_left': 'left',
-        'turn_right': 'right',
-        'backward': 'backward',
-    }.get(plan['action'], 'forward')
-
-    return {
-        'goal_found': False,
-        'goal_found_view': None,
-        'path_forward_clear': obs in ('none', 'far'),
-        'obstacle_ahead_range': plan.get('obstacle_range') or obs,
-        'open_side': prefer_side,
-        'prefer_turn': prefer_turn,
-        'side_openness': side_info,
-        'is_identical_to_previous': False,
-        'recommended_direction': dir_token,
-        'drive_distance': plan['drive_distance'],
-        'action': plan['action'],
-        'magnitude': plan['magnitude'],
-        'summary': plan['summary'],
-        'repeats': plan['repeats'],
-        'duration_ms': plan['duration_ms'],
-        'turn_deg': plan['turn_deg'],
-        'safety_override': plan.get('safety_override'),
-        'source': 'heuristic',
-        'reason': (reason_prefix + reason + f' | open={prefer_side}')[:240],
-    }
-
-
 def _seek_nav_decide(views, goal_label, labels_hint=None):
     """Fallback nav when LLM scene nav is off: always returns action + short|medium|long."""
     labels_hint = labels_hint or []
@@ -6218,7 +6658,7 @@ def _seek_nav_decide(views, goal_label, labels_hint=None):
     # No goal yet: bias into open corridor space (longer hop when centre free)
     corridor = _seek_centre_corridor_hint(views)
     if corridor.get('blocked') is True:
-        prefer = _seek_prefer_open_turn(views)
+        prefer = _seek_prefer_open_turn(views) or 'turn_left'
         plan = _seek_nav_plan(
             prefer, 'short',
             obstacle_range='near', path_clear_forward=False,
@@ -6257,6 +6697,30 @@ def _seek_fast_tank_turn(direction, duration_ms, should_stop=None):
     Matches Raw-mode left/right at Fast. Soft T:13 arcs (angular≈0.4–0.7) do
     not yaw this rover — live 2026-08-13: 350ms nudge, 700ms room turn, 1100ms large.
     """
+    if should_stop and should_stop():
+        return {
+            'ok': False, 'skipped': 'stop_requested',
+            'path': 't1_fast',
+        }
+    if not _seek_chassis_allowed():
+        if direction in ('left', 'turn_left'):
+            side = 'left'
+        else:
+            side = 'right'
+        dur = max(200, int(duration_ms or 600))
+        olog.info(
+            'ai_seek',
+            f'Seek dry-run: skip Fast tank {side} {dur}ms',
+            side=side, duration_ms=dur, dry_run=True,
+        )
+        return {
+            'ok': True,
+            'dry_run': True,
+            'skipped': 'seek_dry_run',
+            'side': side,
+            'duration_ms': dur,
+            'path': 'dry_run',
+        }
     args_cfg = f.get('args_config') or {}
     max_speed = float(args_cfg.get('max_speed', 1.3) or 1.3)
     max_rate = float(args_cfg.get('max_rate', 1.0) or 1.0)
@@ -6374,16 +6838,38 @@ def _seek_execute_nav_action(action, drive_distance='medium', should_stop=None, 
     - forward/backward: punchy timed hop (cable runner needs ~0.26, not 0.12)
 
     Camera: forward+turns look 0°; reverse looks ±135° (rear).
+    Dry-run: still aims the camera, never sends T:1 / T:13.
     """
     plan = _seek_nav_plan(action, drive_distance)
     action = plan['action']
     dist = plan['drive_distance']
+    dry = _seek_dry_run_active()
     aim = _seek_aim_for_motion(action, open_side=open_side, should_stop=should_stop)
+    if should_stop and should_stop():
+        return {
+            'ok': False,
+            'skipped': 'stop_requested',
+            'action': action,
+            'drive_distance': dist,
+            'summary': plan.get('summary'),
+            'dry_run': dry,
+            'cam_look': (aim or {}).get('label'),
+        }
+
+    prev_scope = _seek_drive_scope(True)
+    try:
+        return _seek_execute_nav_action_inner(
+            plan, action, dist, dry, aim, should_stop=should_stop, open_side=open_side,
+        )
+    finally:
+        _seek_drive_scope(prev_scope)
+
+
+def _seek_execute_nav_action_inner(
+    plan, action, dist, dry, aim, *, should_stop=None, open_side=None,
+):
     last_res = None
     last_args = {}
-
-    # Aim already published via cam_aim inside _seek_aim_for_motion / _seek_look_deg.
-    # Keep a short cam_look string only for log lines — not a second pan SoT.
     cam_look = aim.get('label')
 
     if action == 'turn_left':
@@ -6418,7 +6904,8 @@ def _seek_execute_nav_action(action, drive_distance='medium', should_stop=None, 
             'drive_distance': dist,
         }
         last_res = _execute_agent_tool('send_motor_command', last_args)
-        time.sleep(float(dur) / 1000.0 + 0.3)
+        if not dry:
+            time.sleep(float(dur) / 1000.0 + 0.3)
         # After reverse, return camera to front for the next step
         try:
             _seek_look_deg(0.0, wait_hw=True, should_stop=should_stop)
@@ -6436,7 +6923,8 @@ def _seek_execute_nav_action(action, drive_distance='medium', should_stop=None, 
             'drive_distance': dist,
         }
         last_res = _execute_agent_tool('send_motor_command', last_args)
-        time.sleep(float(dur) / 1000.0 + 0.3)
+        if not dry:
+            time.sleep(float(dur) / 1000.0 + 0.3)
 
     return {
         'name': 'send_motor_command' if action in ('forward', 'backward') else 'seek_fast_tank_turn',
@@ -6451,32 +6939,316 @@ def _seek_execute_nav_action(action, drive_distance='medium', should_stop=None, 
         'turn_deg': plan['turn_deg'],
         'speed_ctrl': 'fast' if action in ('turn_left', 'turn_right') else 'normal',
         'cam_look': cam_look,
+        'dry_run': dry,
+    }
+
+
+def _seek_forced_json(messages, schema, timeout, max_tokens=256):
+    """json_schema → json_object → plain; return (dict, error_or_none)."""
+    last_err = None
+    for fmt in (schema, {'type': 'json_object'}, None):
+        try:
+            msg, _body, _cfg = _openai_chat(
+                messages,
+                max_tokens=max_tokens,
+                temperature=0.0,
+                tools=None,
+                response_format=fmt,
+                timeout=timeout,
+            )
+            if isinstance(msg, dict) and isinstance(msg.get('content'), dict):
+                return msg['content'], None
+            parsed = _parse_json_from_text(_message_text_content(msg) or '')
+            if isinstance(parsed, dict) and parsed:
+                return parsed, None
+            last_err = 'unparseable llm json'
+        except Exception as e:
+            last_err = e
+            err_s = str(e).lower()
+            if 'timed out' in err_s or 'timeout' in err_s:
+                break
+            continue
+    return {}, (str(last_err)[:200] if last_err else 'empty llm json')
+
+
+def _seek_view_record(name, pan_deg, jpeg, chk=None):
+    data_url = None
+    if jpeg:
+        data_url = 'data:image/jpeg;base64,' + base64.b64encode(jpeg).decode('ascii')
+    return {
+        'name': name,
+        'pan_deg': pan_deg,
+        'jpeg': jpeg,
+        'bytes': len(jpeg) if jpeg else 0,
+        'data_url': data_url,
+        'has_target': bool(chk and chk.get('found')),
+        'detected_labels': list((chk or {}).get('labels_found') or []),
+        'raw_detections': list((chk or {}).get('raw_detections') or []),
+        'check': chk,
+    }
+
+
+def _seek_publish_views(ctrl, views):
+    if not ctrl or not views:
+        return
+    payload = {
+        'last_views': [{
+            'name': v.get('name'),
+            'pan_deg': v.get('pan_deg'),
+            'bytes': v.get('bytes') or 0,
+            'data_url': v.get('data_url'),
+            'has_target': v.get('has_target'),
+            'detected_labels': v.get('detected_labels') or [],
+        } for v in views if isinstance(v, dict)],
+    }
+    try:
+        pano = _stitch_panorama_views(views)
+        if pano:
+            payload['panorama_data_url'] = (
+                'data:image/jpeg;base64,' + base64.b64encode(pano).decode('ascii')
+            )
+    except Exception:
+        pass
+    ctrl.update(**payload)
+
+
+def _seek_recentre_gimbal(ctrl):
+    try:
+        _seek_look_deg(0.0, wait_hw=True, should_stop=ctrl.should_stop if ctrl else None)
+    except Exception:
+        try:
+            _seek_look_deg(0.0, wait_hw=False, settle_s=0.3)
+        except Exception:
+            pass
+
+
+def _seek_analyze_front_view(jpeg, goal_label, timeout=8):
+    """Analyze FRONT view only with forced JSON schema (3 yes/no fields).
+    
+    Returns dict with clear_forward_little, clear_forward_lot, subject_in_scene.
+    """
+    if not jpeg:
+        return {
+            'clear_forward_little': 'no',
+            'clear_forward_lot': 'no',
+            'subject_in_scene': 'no',
+            'error': 'no jpeg',
+        }
+    
+    b64_img = base64.b64encode(jpeg).decode('ascii')
+    user_content = [
+        {
+            'type': 'text',
+            'text': (
+                f'This is the robot\'s FRONT view (camera 0° straight ahead — drive direction).\n'
+                f'Target to seek: "{goal_label}"\n\n'
+                f'Answer THREE questions (forced yes/no only):\n'
+                f'1. clear_forward_little: Can the robot drive forward a LITTLE (short hop ~0.8s)? '
+                f'Say "no" ONLY if there is an immediate VERTICAL obstacle (wall, cabinet face, furniture BODY, baby gate) '
+                f'or an object sitting ON the floor (bowl, cables, toys) blocking the path. '
+                f'IGNORE: patterned carpet, rugs, floor textures, fabric patterns on the ground. '
+                f'These are CLEAR to drive — do not treat floor texture as furniture.\n'
+                f'2. clear_forward_lot: Can the robot drive forward A LOT (long hop ~1.6s)? '
+                f'Say "yes" only if the path is clearly open with plenty of space ahead. '
+                f'IGNORE floor patterns and carpet textures — focus on vertical obstacles and objects ON the floor.\n'
+                f'3. subject_in_scene: Is "{goal_label}" clearly visible in THIS front view? '
+                f'Say "yes" only if you can see the target object/subject.\n\n'
+                f'Reply with ONLY the JSON. No prose.'
+            ),
+        },
+        {'type': 'image_url', 'image_url': {'url': f'data:image/jpeg;base64,{b64_img}'}},
+    ]
+    
+    messages = [
+        {
+            'role': 'system',
+            'content': (
+                'You analyze robot camera views for ground-level navigation. Answer exactly 3 yes/no questions. '
+                'CRITICAL: Patterned carpets, rugs, and floor textures are CLEAR to drive — these are NOT obstacles. '
+                'Block only on vertical surfaces (walls, cabinets), furniture bodies (not floor patterns), '
+                'baby gates, and physical objects ON the floor (bowls, cables, toys). '
+                'Use the forced JSON schema. No explanations.'
+            ),
+        },
+        {'role': 'user', 'content': user_content},
+    ]
+    
+    result, err = _seek_forced_json(
+        messages, _SEEK_FRONT_NAV_SCHEMA, timeout=timeout, max_tokens=256,
+    )
+    if err:
+        olog.warn('ai_seek', f'front view LLM failed: {err}')
+        return {
+            'clear_forward_little': 'no',
+            'clear_forward_lot': 'no',
+            'subject_in_scene': 'no',
+            'error': err,
+        }
+    return {
+        'clear_forward_little': parse_forced_yesno(result.get('clear_forward_little')),
+        'clear_forward_lot': parse_forced_yesno(result.get('clear_forward_lot')),
+        'subject_in_scene': parse_forced_yesno(result.get('subject_in_scene')),
+    }
+
+
+def _seek_analyze_side_view(jpeg, pan_deg, timeout=8):
+    """Analyze ONE side view with forced JSON schema (direction_clear: yes/no).
+    
+    Returns dict with direction_clear.
+    """
+    if not jpeg:
+        return {'direction_clear': 'no', 'error': 'no jpeg'}
+    
+    side_name = 'LEFT' if pan_deg < 0 else 'RIGHT'
+    b64_img = base64.b64encode(jpeg).decode('ascii')
+    user_content = [
+        {
+            'type': 'text',
+            'text': (
+                f'This is the robot\'s {side_name} view (camera {int(pan_deg)}°).\n'
+                f'The robot front path is blocked, so it may need to rotate toward this side.\n\n'
+                f'ONE question (forced yes/no only):\n'
+                f'direction_clear: Is this {side_name} direction clear enough to rotate toward? '
+                f'Say "yes" if this direction has free space to turn into. '
+                f'Say "no" if this direction is also blocked (wall, furniture, obstacle).\n\n'
+                f'Reply with ONLY the JSON. No prose.'
+            ),
+        },
+        {'type': 'image_url', 'image_url': {'url': f'data:image/jpeg;base64,{b64_img}'}},
+    ]
+    
+    messages = [
+        {
+            'role': 'system',
+            'content': (
+                'You analyze robot camera views. Answer exactly 1 yes/no question about the image. '
+                'Use the forced JSON schema. No explanations.'
+            ),
+        },
+        {'role': 'user', 'content': user_content},
+    ]
+    
+    result, err = _seek_forced_json(
+        messages, _SEEK_SIDE_NAV_SCHEMA, timeout=timeout, max_tokens=128,
+    )
+    if err:
+        olog.warn('ai_seek', f'side view LLM failed: {err}')
+        return {'direction_clear': 'no', 'error': err}
+    return {'direction_clear': parse_forced_yesno(result.get('direction_clear'))}
+
+
+def _seek_analyze_multi_image(front_jpeg, left_jpeg, right_jpeg, goal_label, timeout=8):
+    """Analyze ALL THREE views in one LLM call with forced JSON schema.
+    
+    Optional mode when seek_multi_image=True. Sends FRONT/REAR-LEFT/REAR-RIGHT labeled.
+    Returns dict with clear_forward_little, clear_forward_lot, subject_in_scene,
+    left_direction_clear, right_direction_clear.
+    """
+    if not front_jpeg:
+        return {
+            'clear_forward_little': 'no',
+            'clear_forward_lot': 'no',
+            'subject_in_scene': 'no',
+            'left_direction_clear': 'no',
+            'right_direction_clear': 'no',
+            'error': 'no front jpeg',
+        }
+    
+    user_content = [
+        {
+            'type': 'text',
+            'text': (
+                f'You are analyzing THREE camera views from a ground robot seeking: "{goal_label}".\n\n'
+                f'Image 1 = FRONT view (0° straight ahead, robot drive direction)\n'
+                f'Image 2 = REAR-LEFT view (-135°)\n'
+                f'Image 3 = REAR-RIGHT view (+135°)\n\n'
+                f'Answer FIVE yes/no questions (forced JSON only):\n'
+                f'1. clear_forward_little: Can robot drive forward a LITTLE (short hop ~0.8s)? '
+                f'Say "no" ONLY if VERTICAL obstacle (wall, cabinet, furniture BODY, baby gate) '
+                f'or object ON the floor (bowl, cables) blocking FRONT path. '
+                f'IGNORE patterned carpet, rugs, floor textures — these are CLEAR.\n'
+                f'2. clear_forward_lot: Can robot drive forward A LOT (long hop ~1.6s)? '
+                f'Say "yes" only if FRONT path clearly open. IGNORE floor patterns.\n'
+                f'3. subject_in_scene: Is "{goal_label}" clearly visible in the FRONT view? '
+                f'Say "yes" only if you see the target in image 1.\n'
+                f'4. left_direction_clear: Is the LEFT direction (image 2) clear enough to rotate toward? '
+                f'Say "yes" if LEFT has free space, "no" if blocked by walls/furniture.\n'
+                f'5. right_direction_clear: Is the RIGHT direction (image 3) clear enough to rotate toward? '
+                f'Say "yes" if RIGHT has free space, "no" if blocked by walls/furniture.\n\n'
+                f'Reply with ONLY the JSON. No prose.'
+            ),
+        },
+        {'type': 'image_url', 'image_url': {'url': f'data:image/jpeg;base64,{base64.b64encode(front_jpeg).decode("ascii")}'}},
+    ]
+    
+    if left_jpeg:
+        user_content.append({'type': 'image_url', 'image_url': {'url': f'data:image/jpeg;base64,{base64.b64encode(left_jpeg).decode("ascii")}'}})
+    if right_jpeg:
+        user_content.append({'type': 'image_url', 'image_url': {'url': f'data:image/jpeg;base64,{base64.b64encode(right_jpeg).decode("ascii")}'}})
+    
+    messages = [
+        {
+            'role': 'system',
+            'content': (
+                'You analyze robot camera views for ground-level navigation. Answer exactly 5 yes/no questions. '
+                'CRITICAL: Patterned carpets, rugs, and floor textures are CLEAR to drive — these are NOT obstacles. '
+                'Block only on vertical surfaces (walls, cabinets), furniture bodies (not floor patterns), '
+                'baby gates, and physical objects ON the floor (bowls, cables, toys). '
+                'Use the forced JSON schema. No explanations.'
+            ),
+        },
+        {'role': 'user', 'content': user_content},
+    ]
+
+    result, err = _seek_forced_json(
+        messages, _SEEK_MULTI_NAV_SCHEMA, timeout=timeout, max_tokens=150,
+    )
+    if err:
+        olog.warn('ai_seek', f'multi-image LLM failed: {err}')
+        return {
+            'clear_forward_little': 'no',
+            'clear_forward_lot': 'no',
+            'subject_in_scene': 'no',
+            'left_direction_clear': 'no',
+            'right_direction_clear': 'no',
+            'error': err,
+        }
+    return {
+        'clear_forward_little': parse_forced_yesno(result.get('clear_forward_little')),
+        'clear_forward_lot': parse_forced_yesno(result.get('clear_forward_lot')),
+        'subject_in_scene': parse_forced_yesno(result.get('subject_in_scene')),
+        'left_direction_clear': parse_forced_yesno(result.get('left_direction_clear')),
+        'right_direction_clear': parse_forced_yesno(result.get('right_direction_clear')),
     }
 
 
 def _seek_loop(ctrl, label, conf, max_steps, timeout_s):
-    """Seek loop with support for single unified LLM scene navigation & triple scan thumbnail status."""
+    """Seek loop.
+
+    Mode a (detector, llm_scene_nav=False): L/C/R stills + heuristic nav. No LLM.
+    Modes b/c with scene nav: front-first forced-JSON LLM nav; sides only if blocked.
+    Modes b/c with scene nav off: scan + referee, no chassis.
+    """
     t0 = time.time()
     referee = ctrl.referee()
     max_steps = int(max_steps or 0)
     timeout_s = float(timeout_s or 0)
     unlimited = max_steps <= 0
     steps_label = '∞' if unlimited else str(max_steps)
-
+    
     st_dict = ctrl.status()
-    llm_scene_nav = bool(st_dict.get('llm_scene_nav', True))
-    llm_nav_interval = max(1, int(st_dict.get('llm_nav_interval', 10)))
+    dry = bool((st_dict or {}).get('dry_run', True))
+    dry_gen = int((st_dict or {}).get('dry_run_gen') or 0)
+    if dry and not dry_gen:
+        dry_gen = int(_begin_seek_dry_run() or 0)
+    
+    multi_image_mode = bool((st_dict or {}).get('seek_multi_image', False))
+    use_llm_nav = bool((st_dict or {}).get('llm_scene_nav', True))
 
-    prev_center_jpeg = None
-    cached_nav = None
-    last_drive_action = None  # for recovery: after reverse, turn to open
-    last_drive_distance = None
-    last_lookdown_step = None
-    try:
-        _seek_reset_escape_cycle()
-    except Exception:
-        pass
-
+    last_drive_action = None
+    last_turn_direction = None  # Track last turn to prevent flip-flop
+    blocked_cycles = 0  # Track how many times we've been blocked for tapering
+    
     def _halt(phase, message, step=0, **kwargs):
         try:
             _execute_agent_tool('stop_motors', {})
@@ -6486,18 +7258,12 @@ def _seek_loop(ctrl, label, conf, max_steps, timeout_s):
             _seek_look_deg(0.0, settle_s=0.2)
         except Exception:
             pass
-        # Final OLED frame then release overlay back to network status loop
         try:
             act = 'FOUND' if phase == 'found' else (phase or 'end').upper()[:12]
             _seek_oled_set(
-                goal=label,
-                referee=referee,
-                phase=phase,
-                step=step,
-                activity=act,
-                detail=(message or '')[:40],
-                message=message or '',
-                nav_summary=phase or 'end',
+                goal=label, referee=referee, phase=phase, step=step,
+                activity=act, detail=(message or '')[:40],
+                message=message or '', nav_summary=phase or 'end',
                 obstacle='',
             )
             _seek_oled_paint(force=True, advance_frame=1)
@@ -6510,25 +7276,100 @@ def _seek_loop(ctrl, label, conf, max_steps, timeout_s):
             pass
         ctrl.finish(phase, message=message, step=step, **kwargs)
 
+    def _halt_if_detector_found(chk, step, view_hits=1):
+        if referee != REFEREE_DETECTOR or not chk:
+            return False
+        ctrl.update(last_detection=chk)
+        verdict = _seek_found_confident(
+            chk, min_conf=DEFAULT_SEEK_FOUND_CONF, view_hits=view_hits, scan_conf=conf,
+        )
+        if not verdict.get('ok'):
+            return False
+        ctrl.append_log(
+            'found',
+            f'FOUND "{label}" via detector at step {step} · {verdict.get("reason")}',
+            step=step,
+        )
+        _seek_run_on_found(ctrl, label)
+        _halt(
+            'found',
+            message=f'Found {label} via detector at step {step}',
+            step=step,
+            last_detection=chk,
+        )
+        return True
+
+    def _halt_if_llm_found(chk, step, source='view'):
+        if referee != REFEREE_LLM or not chk or not chk.get('found'):
+            return False
+        ctrl.update(last_detection=chk)
+        ctrl.append_log(
+            'found',
+            f'FOUND "{label}" via LLM at step {step} ({source})',
+            step=step,
+        )
+        _seek_run_on_found(ctrl, label)
+        _halt(
+            'found',
+            message=f'Found {label} via LLM at step {step}',
+            step=step,
+            last_detection=chk,
+        )
+        return True
+
+    def _do_drive(action, dist, step, reason=None):
+        nonlocal last_drive_action, last_turn_direction
+        plan = _seek_nav_plan(action, dist)
+        verb = _seek_drive_log_verb(dry)
+        ctrl.append_log(
+            'nav',
+            f'Step {step}: {verb} {plan["summary"]}'
+            + (f' · {reason}' if reason else ''),
+            step=step, action=plan['action'], dist=plan['drive_distance'],
+        )
+        ctrl.update(
+            last_nav={
+                'action': plan['action'],
+                'drive_distance': plan['drive_distance'],
+                'summary': plan['summary'],
+            },
+            message=f'Step {step}/{steps_label}: {verb} {plan["summary"]}',
+        )
+        _seek_oled_set_nav(
+            plan['action'], plan['drive_distance'], plan=plan,
+            goal=label, referee=referee, phase='drive', step=step,
+            message=f'{plan["action"]} {plan["drive_distance"]}',
+        )
+        try:
+            _seek_execute_nav_action(
+                plan['action'], plan['drive_distance'], should_stop=ctrl.should_stop,
+            )
+            last_drive_action = plan['action']
+            if plan['action'] in ('turn_left', 'turn_right'):
+                last_turn_direction = plan['action']
+            ctrl.append_log(
+                'drive',
+                f'Step {step}: {verb} {plan["action"]}/{plan["drive_distance"]}',
+                step=step,
+            )
+        except Exception as e:
+            ctrl.append_log('warn', f'Step {step}: drive failed: {e}', step=step)
+        time.sleep(DEFAULT_SEEK_STEP_PAUSE_S)
+    
     try:
         _seek_force_tools_on()
         _seek_disable_steady()
-        _seek_explore_reset()
         _seek_oled_set(
-            goal=label,
-            referee=referee,
-            phase='running',
-            step=0,
-            activity='start',
-            detail=f'ref {referee}',
-            message=f'Seeking {label}',
-            nav_summary='start',
+            goal=label, referee=referee, phase='running', step=0,
+            activity='start', detail=f'ref {referee}',
+            message=f'Seeking {label}', nav_summary='start',
             obstacle='',
         )
         try:
             olog.info('ai_seek', f'OLED seek overlay ON goal={label} ref={referee}')
         except Exception:
             pass
+        
         step = 0
         while True:
             step += 1
@@ -6540,512 +7381,392 @@ def _seek_loop(ctrl, label, conf, max_steps, timeout_s):
             if timeout_s > 0 and (time.time() - t0) >= timeout_s:
                 _halt('timeout', f'Timeout after {timeout_s}s', step=step - 1)
                 return
-            batt_block = _seek_battery_block_reason()
-            if batt_block:
-                _halt('failed', batt_block, step=step - 1)
-                return
-
-            if llm_scene_nav:
-                # Never reuse a reverse escape: after backing up we must re-plan (turn/open).
-                # Also re-plan immediately after any safety escape so we don't crawl reverse×N.
-                force_replan = False
-                if cached_nav:
-                    ca = _seek_normalize_action(cached_nav.get('action'))
-                    # Re-plan after reverse only. After a turn we rewrite cache to a
-                    # forward hop so we cover ground instead of another 3-view+LLM wait.
-                    if ca == 'backward':
-                        force_replan = True
-                is_calc_step = (
-                    (step == 1)
-                    or ((step - 1) % llm_nav_interval == 0)
-                    or (cached_nav is None)
-                    or force_replan
-                )
-                if is_calc_step:
-                    ctrl.update(
-                        step=step,
-                        seek_phase='triple_scan',
-                        message=f'Step {step}/{steps_label}: Capturing Left, Centre & Right views for LLM Scene Nav…'
-                    )
-                    _seek_oled_set(
-                        goal=label, referee=referee, phase='triple_scan', step=step,
-                        activity='scan L/C/R', detail='waiting pan',
-                        message=f'step {step} scan', nav_summary='triple_scan',
-                        obstacle='',
-                    )
-                    views_to_analyze, found_det = _seek_capture_triple_views(
-                        ctrl, step, steps_label, goal_label=label, conf_threshold=conf, referee=referee
-                    )
-                    lu_found, lookup_hint = _seek_maybe_lookup(
-                        ctrl, step, steps_label, views_to_analyze, label, conf,
-                    )
-                    if lu_found and lu_found.get('found') and not (found_det and found_det.get('found')):
-                        found_det = lu_found
-                    ld_found, lookdown_hint = _seek_maybe_lookdown(
-                        ctrl, step, steps_label, views_to_analyze, label, conf,
-                        last_action=last_drive_action,
-                        last_lookdown_step=last_lookdown_step,
-                    )
-                    if lookdown_hint is not None:
-                        last_lookdown_step = step
-                    if ld_found and ld_found.get('found') and not (found_det and found_det.get('found')):
-                        found_det = ld_found
-                    
-                    if found_det and found_det.get('found'):
-                        found_v = found_det.get('found_view', 'scan')
-                        raw = found_det.get('raw_detections') or found_det.get('labels_found') or []
-                        ctrl.append_log(
-                            'found',
-                            f'FOUND “{label}” via detector at step {step} ({found_v} view)'
-                            f' · saw {raw or "match"}',
-                            step=step, view=found_v,
-                        )
-                        _seek_run_on_found(ctrl, label)
-                        _halt('found', message=f'Found {label} via detector at step {step} ({found_v} view)', step=step, last_detection=found_det)
-                        return
-
-                    stitched_jpeg = _stitch_panorama_views(views_to_analyze)
-                    b64_pano = base64.b64encode(stitched_jpeg).decode('ascii') if stitched_jpeg else ''
-                    pano_url = f'data:image/jpeg;base64,{b64_pano}' if b64_pano else ''
-
-                    ctrl.update(
-                        panorama_data_url=pano_url,
-                        last_views=[{
-                            'name': v['name'], 'pan_deg': v['pan_deg'], 'bytes': v['bytes'],
-                            'data_url': v.get('data_url'), 'has_target': v.get('has_target'),
-                            'detected_labels': v.get('detected_labels', []),
-                            'raw_detections': v.get('raw_detections', []),
-                        } for v in views_to_analyze]
-                    )
-
-                    straight_v = next((v for v in views_to_analyze if v.get('name') == 'straight'), None)
-                    straight_jpeg = straight_v.get('jpeg') if straight_v else None
-
-                    ctrl.append_log('nav', f'Step {step}: consulting LLM for scene navigation…', step=step)
-                    _seek_oled_set(
-                        goal=label, referee=referee, phase='nav_decide', step=step,
-                        activity='LLM think', detail='scene nav',
-                        message=f'step {step} LLM', nav_summary='llm',
-                        obstacle='',
-                    )
-                    analysis = _seek_unified_llm_analysis(
-                        views_to_analyze, prev_center_jpeg, label,
-                        last_action=last_drive_action,
-                        lookdown=lookdown_hint,
-                        lookup=lookup_hint,
-                    )
-                    
-                    if (referee == REFEREE_LLM and analysis.get('goal_found')) or (found_det and found_det.get('found')):
-                        found_v = analysis.get('goal_found_view') or (found_det.get('found_view') if found_det else 'straight')
-                        for v in views_to_analyze:
-                            if v.get('name') == found_v:
-                                v['has_target'] = True
-                        res_check = found_det or {
-                            'found': True, 'goal_label': label, 'referee': REFEREE_LLM,
-                            'reason': analysis.get('reason') or 'LLM unified query identified goal',
-                            'found_view': found_v
-                        }
-                        ctrl.append_log(
-                            'found',
-                            f'FOUND “{label}” via {referee} at step {step} ({found_v})'
-                            f' — {analysis.get("reason") or ""}',
-                            step=step,
-                        )
-                        _seek_run_on_found(ctrl, label)
-                        _halt('found', message=f'Found {label} via {referee} at step {step} ({found_v} view)', step=step, last_detection=res_check)
-                        return
-
-                    prefer_turn = analysis.get('prefer_turn') or _seek_prefer_open_turn(views_to_analyze)
-                    llm_said = (analysis.get('source') == 'llm')
-                    plan = _seek_nav_plan(
-                        analysis.get('action') or analysis.get('recommended_direction') or 'forward',
-                        analysis.get('drive_distance') or 'medium',
-                    )
-                    # Heuristic-only: doorway commit / turn-away. Do not rewrite an LLM hop/turn.
-                    if not llm_said:
-                        side = analysis.get('side_openness') or {}
-                        if lookdown_hint:
-                            side = {
-                                'left': lookdown_hint.get('left', side.get('left')),
-                                'right': lookdown_hint.get('right', side.get('right')),
-                            }
-                        commit = _seek_commit_through_opening(
-                            last_drive_action, last_drive_distance,
-                            obstacle_range=analysis.get('obstacle_ahead_range'),
-                            left_open=side.get('left'),
-                            right_open=side.get('right'),
-                            centre_open=analysis.get('path_forward_clear'),
-                        )
-                        if commit:
-                            plan = _seek_nav_plan(commit['action'], commit['drive_distance'])
-                            plan['safety_override'] = commit['reason']
-                        else:
-                            away = _seek_prefer_away_from_wall(
-                                plan.get('action'),
-                                obstacle_range=analysis.get('obstacle_ahead_range'),
-                                left_open=side.get('left'),
-                                right_open=side.get('right'),
-                                prefer_turn=prefer_turn,
-                            )
-                            if away:
-                                plan = _seek_nav_plan(away, 'short')
-                                plan['safety_override'] = (
-                                    f'wall ahead — turn {away} away (do not drive into paint)'
-                                )
-                    action = plan['action']
-                    dist = plan['drive_distance']
-                    obs_r = plan.get('obstacle_range') or analysis.get('obstacle_ahead_range') or '?'
-                    open_side = analysis.get('open_side') or (
-                        'right' if prefer_turn == 'turn_right' else 'left'
-                    )
-                    reason = analysis.get('reason') or ''
-                    if plan.get('safety_override'):
-                        reason = f"{plan['safety_override']}" + (f' | {reason}' if reason else '')
-                    if analysis.get('is_identical_to_previous'):
-                        reason = (
-                            f'STUCK DETECTED — recovery {plan["summary"]}'
-                            + (f' ({reason})' if reason else '')
-                        )
-
-                    prev_center_jpeg = straight_jpeg
-                    cached_nav = {
-                        'action': action,
-                        'drive_distance': dist,
-                        'reason': reason,
-                        'magnitude': plan['magnitude'],
-                        'summary': plan['summary'],
-                        'repeats': plan['repeats'],
-                        'duration_ms': plan['duration_ms'],
-                        'turn_deg': plan['turn_deg'],
-                        'path_clear_forward': analysis.get('path_forward_clear'),
-                        'obstacle_range': obs_r,
-                        'open_side': open_side,
-                        'prefer_turn': prefer_turn,
-                        'last_action': last_drive_action,
-                        'stuck': bool(analysis.get('is_identical_to_previous')),
-                        'goal_found': bool(analysis.get('goal_found')),
-                        'safety_override': plan.get('safety_override'),
-                        'vision_blocked_hint': analysis.get('vision_blocked_hint'),
-                        'source': 'llm',
-                    }
-                    clear_s = 'clear' if analysis.get('path_forward_clear') else 'blocked'
-                    stuck_s = ' · STUCK' if analysis.get('is_identical_to_previous') else ''
-                    safe_s = ' · SAFETY' if plan.get('safety_override') else ''
-                    ctrl.append_log(
-                        'nav',
-                        f'Step {step} LLM nav → {plan["summary"]} · obstacle={obs_r}'
-                        f' · open={open_side} · path {clear_s}{stuck_s}{safe_s}'
-                        f' — {reason or "(no reason)"}',
-                        step=step, action=action, dist=dist,
-                    )
-                    ctrl.update(
-                        last_nav=cached_nav,
-                        last_llm_reply=reason[:500],
-                        message=(
-                            f'Step {step}/{steps_label}: Nav {plan["summary"]}'
-                            f' — {(reason or "")[:50]}'
-                        ),
-                    )
-                    _seek_oled_set_nav(
-                        action, dist, plan=plan, nav=cached_nav, obstacle=obs_r,
-                        goal=label, referee=referee, phase='nav_decide', step=step,
-                        message=(reason or plan['summary'])[:48],
-                    )
-                else:
-                    # Intermediate step: run 0° goal check and reuse cached_nav
-                    ctrl.update(step=step, seek_phase='goal_check', message=f'Step {step}/{steps_label}: goal check for {label}…')
-                    _cn = cached_nav or {}
-                    _seek_oled_set(
-                        goal=label, referee=referee, phase='goal_check', step=step,
-                        activity='SCAN', detail='SCAN', message='SCAN',
-                        nav_summary=str(
-                            f"{_cn.get('action') or ''}/{_cn.get('drive_distance') or ''}"
-                        ).strip('/')[:48],
-                        obstacle=str(_cn.get('obstacle_range') or '')[:16],
-                    )
-                    _seek_look_deg(0.0, wait_hw=True, should_stop=ctrl.should_stop)
-                    straight_jpeg = _seek_grab_jpeg()
-                    chk_centre = seek_goal_check(label, referee=REFEREE_DETECTOR, conf_threshold=conf, jpeg=straight_jpeg)
-                    raw_c = chk_centre.get('raw_detections') or []
-                    ctrl.append_log(
-                        'detect',
-                        f'Step {step} · centre check: saw [{", ".join(raw_c) if raw_c else "none"}]'
-                        + (' · GOAL MATCH' if chk_centre.get('found') else ''),
-                        step=step,
-                    )
-                    if chk_centre.get('found'):
-                        ctrl.append_log('found', f'FOUND “{label}” via detector at step {step} (centre)', step=step)
-                        _seek_run_on_found(ctrl, label)
-                        _halt('found', message=f'Found {label} via detector at step {step}', step=step, last_detection=chk_centre)
-                        return
-
-                    # Update CENTRE image section in 180° panoramic scan live as we drive forward!
-                    if straight_jpeg and views_to_analyze:
-                        b64_s = base64.b64encode(straight_jpeg).decode('ascii')
-                        for v in views_to_analyze:
-                            if v.get('name') == 'straight':
-                                v['jpeg'] = straight_jpeg
-                                v['bytes'] = len(straight_jpeg)
-                                v['data_url'] = f'data:image/jpeg;base64,{b64_s}'
-                                v['detected_labels'] = chk_centre.get('labels_found') or []
-                                v['raw_detections'] = list(chk_centre.get('raw_detections') or [])
-                        
-                        partial_pano = _stitch_panorama_views(views_to_analyze)
-                        if partial_pano:
-                            b64_p = base64.b64encode(partial_pano).decode('ascii')
-                            ctrl.update(
-                                panorama_data_url=f'data:image/jpeg;base64,{b64_p}',
-                                last_views=[{
-                                    'name': v['name'], 'pan_deg': v['pan_deg'], 'bytes': v['bytes'],
-                                    'data_url': v.get('data_url'), 'has_target': v.get('has_target'),
-                                    'detected_labels': v.get('detected_labels', []),
-                                    'raw_detections': v.get('raw_detections', []),
-                                } for v in views_to_analyze]
-                            )
-
-                    action = cached_nav['action']
-                    dist = cached_nav['drive_distance']
-                    reason = cached_nav.get('reason') or ''
-                    mag = cached_nav.get('summary') or f'{action}/{dist}'
-                    ctrl.append_log(
-                        'nav',
-                        f'Step {step}: reusing nav {mag} — {reason or ""}',
-                        step=step, action=action, dist=dist,
-                    )
-                    ctrl.update(message=f'Step {step}/{steps_label}: Executing {mag}…')
-                    _seek_oled_set_nav(
-                        action, dist, nav=cached_nav,
-                        obstacle=cached_nav.get('obstacle_range'),
-                        goal=label, referee=referee, phase='drive', step=step,
-                        message=f'reuse {action}/{dist}'[:48],
-                    )
-            else:
-                # LLM Scene Nav disabled: use standard 3-view scan every step
-                ctrl.update(step=step, seek_phase='goal_check', message=f'Step {step}/{steps_label}: 3-view scan for {label}…')
-                _seek_oled_set(
-                    goal=label, referee=referee, phase='triple_scan', step=step,
-                    activity='scan L/C/R', detail='heuristic',
-                    message=f'step {step} scan', nav_summary='triple_scan',
-                    obstacle='',
-                )
-                views, found_chk = _seek_capture_triple_views(ctrl, step, steps_label, goal_label=label, conf_threshold=conf, referee=referee)
-                lu_found, lookup_hint = _seek_maybe_lookup(
-                    ctrl, step, steps_label, views, label, conf,
-                )
-                if lu_found and lu_found.get('found') and not (found_chk and found_chk.get('found')):
-                    found_chk = lu_found
-                ld_found, lookdown_hint = _seek_maybe_lookdown(
-                    ctrl, step, steps_label, views, label, conf,
-                    last_action=last_drive_action,
-                    last_lookdown_step=last_lookdown_step,
-                )
-                if lookdown_hint is not None:
-                    last_lookdown_step = step
-                if ld_found and ld_found.get('found') and not (found_chk and found_chk.get('found')):
-                    found_chk = ld_found
-                ctrl.update(
-                    last_views=[{
-                        'name': v['name'], 'pan_deg': v['pan_deg'], 'bytes': v['bytes'],
-                        'data_url': v.get('data_url'), 'has_target': v.get('has_target'),
-                        'detected_labels': v.get('detected_labels', []),
-                        'raw_detections': v.get('raw_detections', []),
-                    } for v in views]
-                )
-                if found_chk and found_chk.get('found'):
-                    found_v = found_chk.get('found_view', 'scan')
-                    ctrl.append_log(
-                        'found',
-                        f'FOUND “{label}” in {found_v} view at step {step}',
-                        step=step, view=found_v,
-                    )
-                    _seek_run_on_found(ctrl, label)
-                    _halt('found', message=f'Found {label} in {found_v} view at step {step}', step=step, last_detection=found_chk)
+            if not dry:
+                batt_block = _seek_battery_block_reason()
+                if batt_block:
+                    _halt('failed', batt_block, step=step - 1)
                     return
 
-                labels_h = (found_chk.get('labels_found') if isinstance(found_chk, dict) else []) or []
-                nav = _seek_nav_decide(views, label, labels_hint=labels_h)
-                nav = nav or {}
-                plan = _seek_nav_plan(
-                    nav.get('action') or 'forward',
-                    nav.get('drive_distance') or 'medium',
+            # Mode a (and scene-nav off): classic L/C/R. No LLM nav.
+            if not use_llm_nav:
+                ctrl.update(
+                    step=step, seek_phase='triple_scan',
+                    message=f'Step {step}/{steps_label}: classic L/C/R scan…',
                 )
-                if lookdown_hint and lookdown_hint.get('floor_blocked'):
-                    away = lookdown_hint.get('prefer_turn') or 'turn_left'
-                    plan = _seek_nav_plan(
-                        away, 'short',
-                        path_clear_forward=False,
-                        obstacle_range='near',
-                        last_action=last_drive_action,
-                        prefer_turn=away,
-                    )
-                    plan['safety_override'] = (
-                        f'look-down: floor blocked — turn {away} (bowl/wall/jamb)'
-                    )
-                action = plan['action']
-                dist = plan['drive_distance']
-                reason = plan.get('safety_override') or nav.get('reason') or plan['summary']
-                nav.update({
-                    'action': action,
-                    'drive_distance': dist,
-                    'magnitude': plan['magnitude'],
-                    'summary': plan['summary'],
-                    'repeats': plan['repeats'],
-                    'duration_ms': plan['duration_ms'],
-                    'turn_deg': plan['turn_deg'],
-                    'source': 'detector_heuristic',
-                    'reason': reason,
-                })
                 ctrl.append_log(
-                    'nav',
-                    f'Step {step} heuristic nav → {plan["summary"]} — {reason}',
-                    step=step, action=action, dist=dist,
-                )
-                ctrl.update(last_nav=nav, last_llm_reply=reason[:500])
-                _seek_oled_set_nav(
-                    action, dist, plan=plan, nav=nav,
-                    goal=label, referee=referee, phase='nav_decide', step=step,
-                    message=(reason or plan['summary'])[:48],
-                )
-
-            if ctrl.should_stop():
-                _halt('stopped', 'Stopped by user', step=step)
-                return
-
-            # Drive — always show short|medium|long + physical magnitude
-            drive_plan = _seek_nav_plan(action, dist)
-            action = drive_plan['action']
-            dist = drive_plan['drive_distance']
-            # Carry obstacle from cached/last nav when plan has no range context
-            _drive_obs = ''
-            try:
-                _ln = {}
-                try:
-                    _ln = (ctrl.status() or {}).get('last_nav') or {}
-                except Exception:
-                    _ln = {}
-                _drive_obs = (
-                    (cached_nav or {}).get('obstacle_range')
-                    or _ln.get('obstacle_range')
-                    or drive_plan.get('obstacle_range')
-                    or ''
-                )
-            except Exception:
-                _drive_obs = drive_plan.get('obstacle_range') or ''
-            ctrl.append_log(
-                'drive',
-                f'Step {step}: driving {drive_plan["summary"]}'
-                + (f' — {reason[:100]}' if reason else ''),
-                step=step, action=action, dist=dist,
-            )
-            _seek_oled_set_nav(
-                action, dist, plan=drive_plan,
-                obstacle=_drive_obs,
-                goal=label, referee=referee, phase='drive', step=step,
-                message=(reason or drive_plan['summary'])[:48],
-            )
-            try:
-                st_now = ctrl.status()
-                prev_nav = dict(st_now.get('last_nav') or {})
-            except Exception:
-                prev_nav = {}
-            prev_nav.update({
-                'action': action,
-                'drive_distance': dist,
-                'magnitude': drive_plan['magnitude'],
-                'summary': drive_plan['summary'],
-                'repeats': drive_plan['repeats'],
-                'duration_ms': drive_plan['duration_ms'],
-                'turn_deg': drive_plan['turn_deg'],
-            })
-            if reason:
-                prev_nav.setdefault('reason', reason)
-            ctrl.update(
-                seek_phase='drive',
-                message=f'Step {step}/{steps_label}: driving {drive_plan["summary"]}…',
-                last_nav=prev_nav,
-            )
-            # open_side for reverse camera aim (±135° rear); front for FWD/turns
-            open_side = 'left'
-            try:
-                open_side = (
-                    (cached_nav or {}).get('open_side')
-                    or prev_nav.get('open_side')
-                    or ('right' if (cached_nav or {}).get('prefer_turn') == 'turn_right' else 'left')
-                )
-            except Exception:
-                open_side = 'left'
-            try:
-                drive = _seek_execute_nav_action(
-                    action, dist,
-                    should_stop=ctrl.should_stop,
-                    open_side=open_side,
-                )
-                last_drive_action = action
-                last_drive_distance = dist
-                # Exploration trail + heading (dead-reckoning for LLM bias)
-                try:
-                    _seek_explore_record(action, dist)
-                    ex = _seek_explore_summary()
-                    ctrl.update(
-                        explore_heading=ex.get('cardinal'),
-                        explore_heading_deg=ex.get('heading_deg'),
-                        explore_trail=ex.get('trail_text'),
-                    )
-                except Exception:
-                    pass
-                # After reverse or a turn, drop cache so the next step *looks*
-                # again. Blind forward-after-turn is how we drove into the pot.
-                if action in ('backward', 'turn_left', 'turn_right'):
-                    cached_nav = None
-                ctrl.update(last_tools=[drive])
-                cam_note = ''
-                if isinstance(drive, dict) and drive.get('cam_look'):
-                    cam_note = f' cam={drive.get("cam_look")}'
-                try:
-                    ex = _seek_explore_summary()
-                    cam_note += f' hdg={ex.get("cardinal")}'
-                except Exception:
-                    pass
-                ctrl.append_log(
-                    'drive',
-                    f'Step {step}: done {drive.get("summary") or drive_plan["summary"]}{cam_note}',
+                    'scan',
+                    f'Step {step}: classic triple-view '
+                    + ('+ heuristic nav' if referee == REFEREE_DETECTOR else '+ LLM found, no drive'),
                     step=step,
                 )
+                views, found_check = _seek_capture_triple_views(
+                    ctrl, step, steps_label, goal_label=label,
+                    conf_threshold=conf, referee=REFEREE_DETECTOR,
+                )
+                hits = sum(1 for v in (views or []) if isinstance(v, dict) and v.get('has_target'))
+                if referee == REFEREE_DETECTOR and _halt_if_detector_found(
+                    found_check, step, view_hits=max(1, hits),
+                ):
+                    return
+                if referee == REFEREE_LLM:
+                    for v in (views or []):
+                        jpeg = v.get('jpeg') if isinstance(v, dict) else None
+                        if not jpeg:
+                            continue
+                        chk = llm_goal_check(label, jpeg=jpeg)
+                        if _halt_if_llm_found(chk, step, source=v.get('name') or 'view'):
+                            return
+                    time.sleep(DEFAULT_SEEK_STEP_PAUSE_S)
+                    continue
+                plan = _seek_nav_decide(views, label)
+                _do_drive(
+                    plan.get('action') or 'forward',
+                    plan.get('drive_distance') or 'short',
+                    step,
+                    reason=plan.get('reason') or plan.get('source'),
+                )
+                continue
+
+            # ========== STEP 1: CAPTURE FRONT STILL (0°) ==========
+            ctrl.update(
+                step=step, seek_phase='front_scan',
+                message=f'Step {step}/{steps_label}: capturing front view (0°)...'
+            )
+            ctrl.append_log('scan', f'Step {step}: pan to front 0° and capture', step=step)
+            
+            _seek_oled_set(
+                goal=label, referee=referee, phase='front_scan', step=step,
+                activity='pan 0°', detail='wait settle',
+                message=f'step {step} front', nav_summary='front scan',
+                obstacle='',
+            )
+            
+            # Wait for real pan settle (commanded angle + time, not lying HW ~0°)
+            try:
+                _seek_look_deg(0.0, wait_hw=True, should_stop=ctrl.should_stop)
             except Exception as e:
-                olog.warn('ai_seek', f'Drive failed: {e}', error=str(e)[:200], step=step)
-                ctrl.append_log('warn', f'Step {step}: drive failed: {e}', step=step)
+                ctrl.append_log('warn', f'Step {step}: pan wait failed: {e}', step=step)
+                time.sleep(0.5)  # Fallback settle time
+            
+            front_jpeg = _seek_grab_jpeg()
+            if not front_jpeg or len(front_jpeg) < 800:
+                ctrl.append_log('warn', f'Step {step}: front capture weak/missing, retry', step=step)
+                time.sleep(0.2)
                 try:
-                    alt = 'turn_left' if action != 'turn_left' else 'turn_right'
-                    alt_plan = _seek_nav_plan(
-                        alt, 'short',
-                        last_action=last_drive_action,
-                        prefer_turn=alt,
-                    )
-                    _seek_oled_set_nav(
-                        alt, 'short', plan=alt_plan,
-                        goal=label, referee=referee, phase='drive', step=step,
-                        message=f'fallback {alt}/short',
-                    )
-                    drive = _seek_execute_nav_action(
-                        alt, 'short',
-                        should_stop=ctrl.should_stop,
-                        open_side=open_side,
-                    )
-                    last_drive_action = alt
-                    ctrl.update(last_tools=[drive], message=f'Step {step}: fallback {alt_plan["summary"]}')
-                    ctrl.append_log('drive', f'Step {step}: fallback {alt_plan["summary"]}', step=step)
-                except Exception as e2:
-                    _halt('failed', f'Drive failed: {e2}', step=step, error=str(e2)[:300])
-                    return
+                    _seek_look_deg(0.0, wait_hw=True, should_stop=ctrl.should_stop)
+                except Exception:
+                    pass
+                front_jpeg = _seek_grab_jpeg()
+            
+            if not front_jpeg:
+                ctrl.append_log('error', f'Step {step}: no front image, turn fallback', step=step)
+                action = 'turn_left' if (step % 2) == 1 else 'turn_right'
+                _do_drive(action, 'short', step, reason='no front image')
+                continue
+            
+            left_jpeg = None
+            right_jpeg = None
+            front_det = None
+            if referee == REFEREE_DETECTOR:
+                front_det = seek_goal_check(
+                    label, referee=REFEREE_DETECTOR, conf_threshold=conf, jpeg=front_jpeg,
+                )
+            _seek_publish_views(ctrl, [_seek_view_record('straight', 0.0, front_jpeg, front_det)])
 
-            for _ in range(int(DEFAULT_SEEK_STEP_PAUSE_S / 0.1) or 1):
-                if ctrl.should_stop():
-                    _halt('stopped', 'Stopped by user', step=step)
-                    return
-                time.sleep(0.1)
+            # ========== STEP 2: LLM ANALYSIS (SINGLE OR MULTI-IMAGE) ==========
+            if multi_image_mode:
+                # MULTI-IMAGE MODE: Capture all 3 views, one LLM call
+                ctrl.update(
+                    seek_phase='multi_llm',
+                    message=f'Step {step}/{steps_label}: LLM analyzing 3 views...'
+                )
+                ctrl.append_log('llm', f'Step {step}: LLM multi-image (FRONT/LEFT/RIGHT)', step=step)
+                
+                _seek_oled_set(
+                    goal=label, referee=referee, phase='multi_llm', step=step,
+                    activity='LLM 3-view', detail='5 questions',
+                    message=f'step {step} LLM', nav_summary='llm',
+                    obstacle='',
+                )
+                
+                # Capture left and right views
+                left_jpeg = None
+                right_jpeg = None
+                try:
+                    _seek_look_deg(-135.0, wait_hw=True, should_stop=ctrl.should_stop)
+                    left_jpeg = _seek_grab_jpeg()
+                except Exception as e:
+                    ctrl.append_log('warn', f'Step {step}: left capture failed: {e}', step=step)
+                
+                try:
+                    _seek_look_deg(135.0, wait_hw=True, should_stop=ctrl.should_stop)
+                    right_jpeg = _seek_grab_jpeg()
+                except Exception as e:
+                    ctrl.append_log('warn', f'Step {step}: right capture failed: {e}', step=step)
+                
+                # Return to front
+                try:
+                    _seek_look_deg(0.0, wait_hw=True, should_stop=ctrl.should_stop)
+                except Exception:
+                    pass
+                
+                # Single LLM call with all 3 images
+                multi_result = _seek_analyze_multi_image(front_jpeg, left_jpeg, right_jpeg, label, timeout=8)
+                llm_error = multi_result.get('error')
+                
+                clear_little = multi_result.get('clear_forward_little') == 'yes'
+                clear_lot = multi_result.get('clear_forward_lot') == 'yes'
+                subject_visible = multi_result.get('subject_in_scene') == 'yes'
+                left_clear = multi_result.get('left_direction_clear') == 'yes'
+                right_clear = multi_result.get('right_direction_clear') == 'yes'
+                
+                ctrl.append_log(
+                    'llm',
+                    f'Step {step}: multi LLM → fwd_little={multi_result.get("clear_forward_little")} '
+                    f'fwd_lot={multi_result.get("clear_forward_lot")} subject={multi_result.get("subject_in_scene")} '
+                    f'left={multi_result.get("left_direction_clear")} right={multi_result.get("right_direction_clear")}',
+                    step=step,
+                )
+                _seek_publish_views(ctrl, [
+                    _seek_view_record('left', -135.0, left_jpeg),
+                    _seek_view_record('straight', 0.0, front_jpeg, front_det),
+                    _seek_view_record('right', 135.0, right_jpeg),
+                ])
+            else:
+                # SINGLE-IMAGE MODE (DEFAULT): Front view only, side scans when blocked
+                ctrl.update(
+                    seek_phase='front_llm',
+                    message=f'Step {step}/{steps_label}: LLM analyzing front view...'
+                )
+                ctrl.append_log('llm', f'Step {step}: LLM front analysis (3 questions)', step=step)
+                
+                _seek_oled_set(
+                    goal=label, referee=referee, phase='front_llm', step=step,
+                    activity='LLM front', detail='3 questions',
+                    message=f'step {step} LLM', nav_summary='llm',
+                    obstacle='',
+                )
+                
+                front_result = _seek_analyze_front_view(front_jpeg, label, timeout=8)
+                llm_error = front_result.get('error')
+                
+                clear_little = front_result.get('clear_forward_little') == 'yes'
+                clear_lot = front_result.get('clear_forward_lot') == 'yes'
+                subject_visible = front_result.get('subject_in_scene') == 'yes'
+                left_clear = False  # Will scan later if blocked
+                right_clear = False
+                
+                ctrl.append_log(
+                    'llm',
+                    f'Step {step}: front LLM → little={front_result.get("clear_forward_little")} '
+                    f'lot={front_result.get("clear_forward_lot")} '
+                    f'subject={front_result.get("subject_in_scene")}',
+                    step=step,
+                )
 
+            if llm_error:
+                ctrl.append_log(
+                    'warn',
+                    f'Step {step}: LLM nav failed ({llm_error}) → heuristic fallback',
+                    step=step,
+                )
+                plan = _seek_nav_decide(
+                    [_seek_view_record('straight', 0.0, front_jpeg, front_det)],
+                    label,
+                )
+                _do_drive(
+                    plan.get('action') or 'turn_left',
+                    plan.get('drive_distance') or 'short',
+                    step,
+                    reason=plan.get('reason') or 'heuristic after LLM fail',
+                )
+                continue
+
+            if subject_visible and _halt_if_llm_found(
+                {'found': True, 'parse_ok': True, 'goal_label': label, 'referee': REFEREE_LLM},
+                step,
+                source='front',
+            ):
+                return
+
+            if _halt_if_detector_found(front_det, step, view_hits=1):
+                return
+
+            # ========== STEP 3: IF CLEAR FORWARD → HOP ==========
+            if clear_little or clear_lot:
+                blocked_cycles = 0
+                dist = 'long' if clear_lot else 'short'
+                _do_drive('forward', dist, step, reason='front clear')
+                continue
+            
+            # ========== STEP 4: FRONT BLOCKED → SCAN SIDES (OR USE MULTI-IMAGE RESULTS) ==========
+            blocked_cycles += 1
+            
+            if not multi_image_mode:
+                # SINGLE-IMAGE MODE: Need to scan sides individually
+                # Taper: first cycle uses ±135, subsequent use narrower
+                if blocked_cycles == 1:
+                    side_pan_deg = 135
+                elif blocked_cycles == 2:
+                    side_pan_deg = 90
+                else:
+                    side_pan_deg = 60  # Corridor glance
+                
+                ctrl.append_log(
+                    'nav',
+                    f'Step {step}: front blocked (neither clear) → scan sides ±{side_pan_deg}°',
+                    step=step,
+                )
+                
+                # Scan left side
+                ctrl.update(
+                    seek_phase='side_scan',
+                    message=f'Step {step}/{steps_label}: scanning left side (−{side_pan_deg}°)...'
+                )
+                ctrl.append_log('scan', f'Step {step}: pan left −{side_pan_deg}°', step=step)
+                
+                _seek_oled_set(
+                    goal=label, referee=referee, phase='side_scan', step=step,
+                    activity=f'pan −{side_pan_deg}°', detail='wait settle',
+                    message=f'step {step} left', nav_summary='side scan',
+                    obstacle='',
+                )
+                
+                try:
+                    _seek_look_deg(-side_pan_deg, wait_hw=True, should_stop=ctrl.should_stop)
+                except Exception as e:
+                    ctrl.append_log('warn', f'Step {step}: left pan failed: {e}', step=step)
+                    time.sleep(0.5)
+                
+                left_jpeg = _seek_grab_jpeg()
+                if not left_jpeg or len(left_jpeg) < 800:
+                    time.sleep(0.2)
+                    left_jpeg = _seek_grab_jpeg()
+                
+                # LLM analyze left
+                ctrl.update(message=f'Step {step}/{steps_label}: LLM analyzing left side...')
+                ctrl.append_log('llm', f'Step {step}: LLM left side (direction_clear?)', step=step)
+                
+                left_result = _seek_analyze_side_view(left_jpeg, -side_pan_deg, timeout=8) if left_jpeg else {'direction_clear': 'no'}
+                left_clear = left_result.get('direction_clear', 'no') == 'yes'
+                
+                ctrl.append_log(
+                    'llm',
+                    f'Step {step}: left LLM → direction_clear={left_result.get("direction_clear")}',
+                    step=step,
+                )
+                
+                # Scan right side
+                ctrl.update(
+                    seek_phase='side_scan',
+                    message=f'Step {step}/{steps_label}: scanning right side (+{side_pan_deg}°)...'
+                )
+                ctrl.append_log('scan', f'Step {step}: pan right +{side_pan_deg}°', step=step)
+                
+                _seek_oled_set(
+                    goal=label, referee=referee, phase='side_scan', step=step,
+                    activity=f'pan +{side_pan_deg}°', detail='wait settle',
+                    message=f'step {step} right', nav_summary='side scan',
+                    obstacle='',
+                )
+                
+                try:
+                    _seek_look_deg(+side_pan_deg, wait_hw=True, should_stop=ctrl.should_stop)
+                except Exception as e:
+                    ctrl.append_log('warn', f'Step {step}: right pan failed: {e}', step=step)
+                    time.sleep(0.5)
+                
+                right_jpeg = _seek_grab_jpeg()
+                if not right_jpeg or len(right_jpeg) < 800:
+                    time.sleep(0.2)
+                    right_jpeg = _seek_grab_jpeg()
+                
+                # LLM analyze right
+                ctrl.update(message=f'Step {step}/{steps_label}: LLM analyzing right side...')
+                ctrl.append_log('llm', f'Step {step}: LLM right side (direction_clear?)', step=step)
+                
+                right_result = _seek_analyze_side_view(right_jpeg, +side_pan_deg, timeout=8) if right_jpeg else {'direction_clear': 'no'}
+                right_clear = right_result.get('direction_clear') == 'yes'
+                
+                ctrl.append_log(
+                    'llm',
+                    f'Step {step}: right LLM → direction_clear={right_result.get("direction_clear")}',
+                    step=step,
+                )
+                _seek_publish_views(ctrl, [
+                    _seek_view_record('left', -side_pan_deg, left_jpeg),
+                    _seek_view_record('straight', 0.0, front_jpeg, front_det),
+                    _seek_view_record('right', side_pan_deg, right_jpeg),
+                ])
+                _seek_recentre_gimbal(ctrl)
+            else:
+                # MULTI-IMAGE MODE: Already have side results from the multi-image LLM call
+                ctrl.append_log(
+                    'nav',
+                    f'Step {step}: front blocked → using multi-image side results '
+                    f'(left={left_clear} right={right_clear})',
+                    step=step,
+                )
+                _seek_recentre_gimbal(ctrl)
+
+            for side_name, side_jpeg in (('left', left_jpeg), ('right', right_jpeg)):
+                if not side_jpeg:
+                    continue
+                if referee == REFEREE_DETECTOR:
+                    side_chk = seek_goal_check(
+                        label, referee=REFEREE_DETECTOR, conf_threshold=conf, jpeg=side_jpeg,
+                    )
+                    if _halt_if_detector_found(side_chk, step, view_hits=1):
+                        return
+                elif referee == REFEREE_LLM:
+                    side_chk = llm_goal_check(label, jpeg=side_jpeg)
+                    if _halt_if_llm_found(side_chk, step, source=side_name):
+                        return
+
+            # ========== STEP 5: IF SIDE CLEAR → ROTATE ==========
+            if left_clear or right_clear:
+                # Hysteresis: prefer continuing in same direction to avoid flip-flop
+                # Only reverse if the committed side became blocked
+                if left_clear and right_clear:
+                    # Both clear: prefer last turn direction (commit), or pick based on step if first time
+                    if last_turn_direction in ('turn_left', 'turn_right'):
+                        turn_side = last_turn_direction
+                    else:
+                        turn_side = 'turn_right' if (step % 2) == 0 else 'turn_left'
+                elif left_clear and not right_clear:
+                    # Only left clear
+                    turn_side = 'turn_left'
+                elif right_clear and not left_clear:
+                    # Only right clear
+                    turn_side = 'turn_right'
+                else:
+                    # Shouldn't reach here, but fallback
+                    turn_side = last_turn_direction if last_turn_direction else 'turn_left'
+                
+                _do_drive(
+                    turn_side, 'short', step,
+                    reason=f'side clear (last={last_turn_direction or "none"})',
+                )
+                continue
+            
+            # ========== STEP 6: ALL BLOCKED → SMALL ROTATE OR STOP ==========
+            ctrl.append_log(
+                'nav',
+                f'Step {step}: all directions blocked (front + left + right) → small rotate',
+                step=step,
+            )
+            
+            # Hysteresis: prefer continuing same turn direction instead of flip-flopping
+            if last_turn_direction in ('turn_left', 'turn_right'):
+                action = last_turn_direction
+            else:
+                action = 'turn_left' if (step % 2) == 1 else 'turn_right'
+            
+            _do_drive(action, 'short', step, reason='all blocked, exploratory')
+        
         # Max steps exhausted
         _halt('timeout', message=f'Gave up after {max_steps} steps without match for {label}', step=max_steps)
+    
     except Exception as e:
         olog.error('ai_seek', f'Seek loop crashed: {e}', error=str(e)[:300])
         try:
@@ -7064,6 +7785,12 @@ def _seek_loop(ctrl, label, conf, max_steps, timeout_s):
         except Exception:
             pass
         ctrl.finish('failed', message=str(e)[:300], error=str(e)[:300])
+    finally:
+        _seek_clear_tool_override()
+        if dry:
+            _end_seek_dry_run(dry_gen)
+        else:
+            _set_seek_dry_run(False)
 
 
 @app.route('/api/ai/seek/labels', methods=['GET'])
@@ -7106,10 +7833,35 @@ def _seek_battery_block_reason():
     )
 
 
+def _parse_bool_flag(raw, default=False):
+    if raw is None:
+        return bool(default)
+    if isinstance(raw, bool):
+        return raw
+    s = str(raw).strip().lower()
+    if s in ('1', 'true', 'yes', 'on'):
+        return True
+    if s in ('0', 'false', 'no', 'off'):
+        return False
+    return bool(default)
+
+
 @app.route('/api/ai/seek/start', methods=['POST'])
 def api_ai_seek_start():
     data = request.get_json(silent=True) or {}
-    batt_block = _seek_battery_block_reason()
+    dry_run = _parse_bool_flag(
+        data.get('dry_run') if 'dry_run' in data else None,
+        default=DEFAULT_SEEK_DRY_RUN,
+    )
+    confirm_live = _parse_bool_flag(data.get('confirm_live'), default=False)
+    live_err = _seek_live_start_error(dry_run=dry_run, confirm_live=confirm_live)
+    if live_err:
+        return jsonify({
+            'success': False,
+            'error': live_err,
+            'dry_run_required': True,
+        }), 400
+    batt_block = None if dry_run else _seek_battery_block_reason()
     if batt_block:
         volts = _read_battery_voltage_v()
         olog.warn('ai_seek', batt_block, voltage_v=volts, threshold=_BATTERY_LOW_V)
@@ -7142,6 +7894,7 @@ def api_ai_seek_start():
         llm_nav_interval = int(data.get('llm_nav_interval', 10))
     except (ValueError, TypeError):
         llm_nav_interval = 10
+    seek_multi_image = bool(data.get('seek_multi_image', False))
     result = seek_controller.start(
         goal,
         loop_fn=_seek_loop,
@@ -7153,13 +7906,16 @@ def api_ai_seek_start():
         on_found_tts=on_found_tts,
         llm_scene_nav=llm_scene_nav,
         llm_nav_interval=llm_nav_interval,
+        seek_multi_image=seek_multi_image,
+        dry_run=dry_run,
     )
     code = 200 if result.get('success') else 400
     if result.get('success'):
         olog.info(
             'ai_seek',
-            f'Seek started ({referee}) for {result.get("status", {}).get("goal_label")} on_found={on_found}',
-            goal=goal, referee=referee, on_found=on_found,
+            f'Seek started ({referee}) for {result.get("status", {}).get("goal_label")} '
+            f'on_found={on_found} dry_run={dry_run}',
+            goal=goal, referee=referee, on_found=on_found, dry_run=dry_run,
         )
     return jsonify(result), code
 
@@ -7368,6 +8124,12 @@ def _track_loop(ctrl, label, conf, max_steps, timeout_s):
                         )
                         _track_goto(pan, tilt, should_stop=ctrl.should_stop)
                         jpeg = _seek_grab_jpeg()
+                        if not jpeg:
+                            ctrl.append_log(
+                                'detect',
+                                f'Scan {step} · pan {int(pan)}° tilt {int(tilt)}° · no jpeg — skip',
+                            )
+                            continue
                         chk = seek_goal_check(
                             label, referee=referee, conf_threshold=conf, jpeg=jpeg,
                         )
@@ -7383,7 +8145,13 @@ def _track_loop(ctrl, label, conf, max_steps, timeout_s):
                             f'{referee} saw [{", ".join(str(x) for x in raw) or "none"}]'
                             + (' · LOCK' if chk.get('found') else ''),
                         )
-                        if chk.get('found'):
+                        verdict = _seek_found_confident(
+                            chk,
+                            min_conf=DEFAULT_SEEK_FOUND_CONF,
+                            view_hits=1,
+                            scan_conf=conf,
+                        )
+                        if chk.get('found') and verdict.get('ok'):
                             found = True
                             locked = True
                             lost = 0
@@ -7409,6 +8177,13 @@ def _track_loop(ctrl, label, conf, max_steps, timeout_s):
                 _halt('stopped', 'Stopped by user')
                 return
             jpeg = _seek_grab_jpeg()
+            if not jpeg:
+                lost += 1
+                ctrl.append_log('nav', f'Lock lost ({lost}/4) — no jpeg')
+                if lost >= 4:
+                    locked = False
+                    ctrl.update(locked=False, message=f'Lost {label} — resuming PTZ sweep')
+                continue
             chk = seek_goal_check(label, referee=referee, conf_threshold=conf, jpeg=jpeg)
             ctrl.update(last_detection=chk)
             if chk.get('found'):
@@ -7434,7 +8209,7 @@ def _track_loop(ctrl, label, conf, max_steps, timeout_s):
     except Exception as e:
         olog.error('ai_track', f'Track loop crashed: {e}', error=str(e)[:300])
         try:
-            _execute_agent_tool('stop_motors', {})
+            _track_goto(0.0, 0.0)
         except Exception:
             pass
         ctrl.finish('failed', message=str(e)[:200], step=step)
@@ -7471,6 +8246,11 @@ def api_ai_track_status():
 @app.route('/api/ai/track/stop', methods=['POST'])
 def api_ai_track_stop():
     track_controller.stop()
+    # Track is PTZ-only, but line-follow / Chat may still be moving.
+    try:
+        _emergency_stop_motion(source='track_stop', stop_seek=False)
+    except Exception:
+        pass
     return jsonify({'success': True, 'status': track_controller.status()})
 
 
@@ -7540,7 +8320,7 @@ def ai_agent_page():
 @app.route('/')
 def index():
     audio_ctrl.play_random_audio("connected", False)
-    return render_template('index.html')
+    return render_template('index.html', ugv_ai_token=_ai_auth_token())
 
 @app.route('/3d')
 def digital_twin_3d():
@@ -7905,6 +8685,8 @@ def _route_json_command(cmd):
 
     - T:1 / T:13  chassis → serial (if direct) or /cmd_vel (if ros2)
     - T:133 / T:141 gimbal → serial or ROS joint_states + pt controller topic
+    - T:144 arm UI (E/Z/R) → USB RoArm when hangar attachment=roarm2, else base UART
+    - USB-native arm T:100/102/105/114/121/210 → USB when attachment=roarm2
     - everything else → serial always
 
     Zero chassis cmds are ignored while AI motion lock is active (so the UI 2s
@@ -7931,6 +8713,29 @@ def _route_json_command(cmd):
         f.get('cmd_config', {}).get('cmd_gimbal_base_ctrl'),
     }
     chassis_types = {1, 13, '1', '13', f.get('cmd_config', {}).get('cmd_movition_ctrl')}
+    arm_ui_type = f.get('cmd_config', {}).get('cmd_arm_ctrl_ui', 144)
+    arm_ui_types = {144, '144', arm_ui_type, str(arm_ui_type) if arm_ui_type is not None else None}
+    roarm_raw_types = {100, 102, 105, 114, 121, 210, '100', '102', '105', '114', '121', '210'}
+
+    # Dry-run Seek: refuse non-zero chassis (sticks + leftover heartbeats).
+    # Live Seek/Track: same — autonomy owns the wheels. Zeros / STOP still go through.
+    if (
+        t in chassis_types
+        and not force_stop
+        and not _chassis_cmd_is_zero(cmd)
+        and (
+            not _seek_chassis_allowed()
+            or (_autonomy_owns_chassis() and not _seek_thread_may_drive())
+        )
+    ):
+        why = 'seek_dry_run' if not _seek_chassis_allowed() else 'autonomy_owns_chassis'
+        olog.info('ai_seek', f'Dropped chassis cmd ({why})', T=t, reason=why)
+        return {
+            'path': 'blocked',
+            'ok': True,
+            'reason': why,
+            'dry_run': not _seek_chassis_allowed(),
+        }
 
     # UI 2s idle heartbeat sends T:1 L=0 R=0; do not clobber an in-flight AI drive.
     # Emergency STOP sets force_stop so zeros always land and clear motion.
@@ -7950,6 +8755,18 @@ def _route_json_command(cmd):
     if force_stop and t in chassis_types and _chassis_cmd_is_zero(cmd):
         _clear_ai_motion_lock()
         _cancel_ai_drive_timer()
+
+    # ---- Arm UI stick (T:144 E/Z/R) — USB when hangar attachment=roarm2 ----
+    if t in arm_ui_types:
+        result = _route_arm_ui_cmd(cmd)
+        result['mode'] = mode
+        return result
+
+    # ---- USB-native RoArm JSON when hangar wants RoArm ----
+    if t in roarm_raw_types and arm_usb_enabled():
+        result = _route_roarm_raw(cmd)
+        result['mode'] = mode
+        return result
 
     # ---- Gimbal / pan-tilt ----
     if t in gimbal_types:
