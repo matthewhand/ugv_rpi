@@ -177,6 +177,58 @@
         min-width: 50px;
         text-align: right;
       }
+      /* RoArm 3D workspace preview */
+      .roarm-workspace-box {
+        margin-top: 12px;
+        padding: 0;
+        background: rgba(20, 23, 32, 0.9);
+        border: 1px solid #2a2f3d;
+        border-radius: 6px;
+        max-width: 280px;
+        overflow: hidden;
+      }
+      .roarm-workspace-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 6px 10px;
+        background: #1a1d27;
+        border-bottom: 1px solid #2a2f3d;
+      }
+      .roarm-workspace-title {
+        font-size: 11px;
+        font-weight: 700;
+        color: #9aa3b2;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+      }
+      .roarm-workspace-btn {
+        background: none;
+        border: none;
+        color: #6b7280;
+        font-size: 10px;
+        cursor: pointer;
+        padding: 2px 4px;
+        transition: color 0.15s;
+      }
+      .roarm-workspace-btn:hover {
+        color: #4FF5C0;
+      }
+      .roarm-workspace-canvas-wrap {
+        width: 100%;
+        height: 200px;
+        position: relative;
+        background: #0b0f19;
+        transition: height 0.3s ease;
+      }
+      .roarm-workspace-canvas-wrap.collapsed {
+        height: 0;
+      }
+      #roarm-workspace-canvas {
+        width: 100%;
+        height: 100%;
+        display: block;
+      }
     </style>
   </head>
 <body>
@@ -375,6 +427,24 @@
         color: #6b7280;
         margin: 0;
       }
+      .ugv-boot-row.toggleable {
+        cursor: pointer;
+        user-select: none;
+      }
+      .ugv-boot-row.toggleable:hover {
+        border-color: #5b8cff;
+        background: rgba(91, 140, 255, 0.08);
+      }
+      .ugv-boot-row.toggleable .ugv-boot-label::after {
+        content: ' ⇄';
+        font-size: 10px;
+        color: #6b7280;
+        opacity: 0;
+        transition: opacity 0.2s;
+      }
+      .ugv-boot-row.toggleable:hover .ugv-boot-label::after {
+        opacity: 1;
+      }
     </style>
     <script>
       (function initBootSplash() {
@@ -419,7 +489,7 @@
             btn.style.cursor = 'pointer';
           }
           var hint = document.querySelector('.ugv-boot-hint');
-          if (hint) hint.textContent = 'All systems nominal · Click to continue';
+          if (hint) hint.textContent = 'All systems nominal · Click HB / RTSP / WiFi to toggle · Click ENTER to continue';
         }
 
         function dismiss() {
@@ -510,6 +580,83 @@
             maybeReady();
           }
         }, 5000);
+
+        // Make heartbeat / rtsp / wifi rows toggleable
+        function makeToggleable(name, title, toggleFnName) {
+          var row = document.querySelector('[data-check="' + name + '"]');
+          if (!row) return;
+          row.classList.add('toggleable');
+          row.setAttribute('role', 'button');
+          row.setAttribute('tabindex', '0');
+          row.setAttribute('title', title);
+          
+          var handleToggle = function () {
+            // Resolve function by name at call time (not wire time)
+            var fn = window[toggleFnName];
+            if (typeof fn === 'function') {
+              try {
+                fn();
+                setTimeout(function () { refreshRow(name); }, 300);
+              } catch (e) {
+                console.warn('[boot splash] toggle ' + name + ' failed:', e);
+              }
+            } else {
+              console.warn('[boot splash] ' + toggleFnName + ' not available');
+            }
+          };
+          
+          row.addEventListener('click', handleToggle);
+          row.addEventListener('keydown', function (e) {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              handleToggle();
+            }
+          });
+        }
+
+        function refreshRow(name) {
+          if (name === 'heartbeat') {
+            try {
+              var hbEnabled = localStorage.getItem('ugv_chassis_heartbeat') !== '0';
+              setCheck('heartbeat', hbEnabled ? 'ok' : 'off', hbEnabled ? 'enabled' : 'disabled');
+            } catch (e) {
+              setCheck('heartbeat', 'ok', 'enabled');
+            }
+          } else if (name === 'rtsp' || name === 'wifi') {
+            fetch('/api/status', {
+              method: 'GET',
+              headers: { 'Accept': 'application/json' }
+            })
+              .then(function (r) { return r.json(); })
+              .then(function (d) {
+                if (name === 'rtsp') {
+                  var rtspOn = d.enable_rtsp_stream === true || d.enable_rtsp_stream === 'true';
+                  setCheck('rtsp', rtspOn ? 'ok' : 'off', rtspOn ? 'enabled' : 'disabled');
+                } else if (name === 'wifi') {
+                  var wifiStopped = d.esp32_wifi_stopped === true || d.esp32_wifi_stopped === 'true';
+                  setCheck('wifi', wifiStopped ? 'off' : 'ok', wifiStopped ? 'stopped' : 'active');
+                }
+              })
+              .catch(function (e) {
+                console.warn('[boot splash] refresh ' + name + ' failed:', e);
+              });
+          }
+        }
+
+        // Wire toggles on window load (control.js functions available)
+        // Fallback: poll briefly if load already fired
+        function wireToggles() {
+          makeToggleable('heartbeat', 'Click to toggle chassis heartbeat', 'toggleChassisHeartbeat');
+          makeToggleable('rtsp', 'Click to toggle RTSP stream', 'toggleRTSP');
+          makeToggleable('wifi', 'Click to toggle ESP32 WiFi', 'toggleEsp32Wifi');
+        }
+        
+        if (document.readyState === 'complete') {
+          // Page already loaded, wire immediately
+          wireToggles();
+        } else {
+          window.addEventListener('load', wireToggles);
+        }
       })();
     </script>
 
@@ -622,7 +769,7 @@
                                                 <div class="ctrl_stick ctrl_stick_s" id="ctrl_stick"></div>
                                             </div>
                                         </div>
-                                        <!-- RoArm grip + height sliders (module_type=1 only) -->
+                                        <!-- RoArm grip + reach sliders (module_type=1 only) -->
                                         <div id="roarm-sliders-box" class="roarm-sliders-box" style="display:none;">
                                             <div class="roarm-slider-row">
                                                 <label for="roarm-grip-slider" class="roarm-slider-label">
@@ -634,13 +781,23 @@
                                                 <span id="roarm-grip-value" class="roarm-slider-value">Closed</span>
                                             </div>
                                             <div class="roarm-slider-row">
-                                                <label for="roarm-height-slider" class="roarm-slider-label">
-                                                    <span class="roarm-slider-icon">↕</span>
-                                                    <span>Height</span>
+                                                <label for="roarm-reach-slider" class="roarm-slider-label">
+                                                    <span class="roarm-slider-icon">→</span>
+                                                    <span>Distance ahead</span>
                                                 </label>
-                                                <input type="range" id="roarm-height-slider" class="roarm-slider" 
-                                                    min="-100" max="100" value="0" step="5" />
-                                                <span id="roarm-height-value" class="roarm-slider-value">0</span>
+                                                <input type="range" id="roarm-reach-slider" class="roarm-slider" 
+                                                    min="-150" max="150" value="0" step="5" />
+                                                <span id="roarm-reach-value" class="roarm-slider-value">0</span>
+                                            </div>
+                                        </div>
+                                        <!-- RoArm 3D workspace preview (module_type=1 only) -->
+                                        <div id="roarm-workspace-box" class="roarm-workspace-box" style="display:none;">
+                                            <div class="roarm-workspace-header">
+                                                <span class="roarm-workspace-title">Workspace (approx)</span>
+                                                <button type="button" id="roarm-workspace-toggle" class="roarm-workspace-btn" title="Toggle 3D view">▼</button>
+                                            </div>
+                                            <div id="roarm-workspace-canvas-wrap" class="roarm-workspace-canvas-wrap">
+                                                <canvas id="roarm-workspace-canvas"></canvas>
                                             </div>
                                         </div>
                                     </div>
@@ -1449,6 +1606,7 @@
         };
       })();
     </script>
+    <script src="./three.min.js"></script>
     <script src="./modes.js?v=seek-chat-finish-1"></script>
     <script src="./loadout.js?v=dual-hw-1"></script>
     <script src="./control.js?v=ui-iter-10"></script>
