@@ -84,6 +84,11 @@ main {
     height: 440px;
     left: 20px;
     top: 20px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    box-sizing: border-box;
+    overflow: hidden;
 }
 .feed_section{position: absolute;}
 .feed_section > div{
@@ -91,7 +96,23 @@ main {
     display: flex;
     justify-content: space-between;
 }
-/* .feed_top{} */
+/* Overlay HUD is a column, not three stacked absolute layers. */
+.video_feed .feed_section{
+    position: relative;
+    width: 100%;
+    left: auto;
+    top: auto;
+    right: auto;
+    bottom: auto;
+}
+.video_feed .feed_section > div{
+    width: 100%;
+    box-sizing: border-box;
+}
+.video_feed .feed_top{
+    flex: 0 0 auto;
+    z-index: 2;
+}
 .feed_middle{
     width: inherit;
     height: inherit;
@@ -99,11 +120,27 @@ main {
     justify-content: center;
     align-items: center;
 }
+.video_feed .feed_middle{
+    flex: 1 1 auto;
+    width: 100%;
+    height: auto;
+    min-height: 0;
+    overflow: hidden;
+    z-index: 1;
+}
 .feed_bottom{bottom: 0;}
+.video_feed .feed_bottom{
+    flex: 0 0 auto;
+    bottom: auto;
+    z-index: 2;
+}
 .feed_middle > div {align-items: center;}
 .feed_bottom > div {
     align-items: flex-end;
     /* align-content: flex-end; */
+}
+.video_feed .feed_bottom > div{
+    gap: 8px;
 }
 .video_feed .feed_l_t{flex:1}
 .video_feed .feed_u{flex:1.6}
@@ -207,7 +244,11 @@ main {
     position: relative;
     bottom: -20px;
 }
+.video_feed .pan{
+    bottom: 0;
+}
 .pan .pan_scale_box{
+    position: relative;
     width: 144px;
     height: 110px;
     overflow: hidden;
@@ -338,6 +379,18 @@ main {
     justify-content: right;
 } */
 .ctrl_base_box{float: right;}
+.video_feed .ctrl_base_box{
+    float: none;
+    display: flex;
+    justify-content: flex-end;
+    align-items: flex-end;
+}
+.video_feed .ctrl_base_l{
+    margin: 0;
+}
+.raw-drive-row .controller{
+    margin: 0;
+}
 .ctrl_base {
     border-radius: 50%;
     position: relative;
@@ -878,6 +931,7 @@ ul.video-list li a:hover div .normal_btn_play::before{background-image: url('./i
         padding: 5%;
     }
     .pan{bottom: -2vw;}
+    .video_feed .pan{bottom: 0;}
     .ctrl_base_l{margin-right: 40px;}
     .audio_input,
     .code_input{
@@ -1006,6 +1060,7 @@ ul.video-list li a:hover div .normal_btn_play::before{background-image: url('./i
     }
     .tilt .tilt_scale{height: 100px;}
     .pan{bottom: -2vw;}
+    .video_feed .pan{bottom: 0;}
     .feed_ct_tt + div > div{
         width: 32%;
     }
