@@ -199,9 +199,16 @@ class TestShippedYamlExamples(unittest.TestCase):
             return yaml.safe_load(fh)
 
     def test_live_config_not_beast_defaults(self):
+        # Live config.yaml is the MACHINE file (docs/CONFIG_PROFILES.md):
+        # main_type/signs differ per robot (rover=2/-1, beast=3/+1), so only
+        # cross-machine invariants are asserted here. Rover-specific values
+        # are pinned in test_example_rover_yaml.
         cfg = self._load_yaml("config.yaml")
-        self.assertEqual(int(cfg["base_config"]["main_type"]), 2)
-        self.assertEqual(int(cfg["base_config"]["drive_linear_sign"]), -1)
+        self.assertIn("base_config", cfg)
+        self.assertIn(int(cfg["base_config"].get("main_type", 0)), (2, 3))
+        self.assertIn(
+            int(cfg["base_config"].get("drive_linear_sign", 0)), (-1, 1)
+        )
         self.assertFalse(bool(cfg["base_config"].get("use_lidar")))
 
     def test_example_rover_yaml(self):
