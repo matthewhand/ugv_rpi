@@ -136,8 +136,9 @@ PTZ-only hunt: the camera sweeps; the chassis does not drive. A VOC class uses M
 
 | guide_id | Feature | Expected UI |
 |----------|---------|-------------|
-| `twin.page` | Full page `/3d` | Grid floor + box robot + HUD |
-| `twin.drawer` | In-page drawer | Open from Twin chip; Back/full tab link |
+| `twin.page` | Full page `/3d` | Hangar-true chassis + RoArm-M2 (Waveshare L1/L2/L3 FK) or PT gimbal; HUD joints |
+| `twin.drawer` | In-page drawer | Open from Twin chip; same `/3d` model; Back/full tab link |
+| `twin.hangar` | Raw RoArm overlay | Same twin as `/3d` (not a separate “workspace approx”) |
 
 ---
 

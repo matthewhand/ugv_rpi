@@ -129,6 +129,63 @@ def e_z_r_to_joints(
     }
 
 
+# Official Waveshare RoArm-M2-S link lengths (EEMode=0 clamp).
+# Source: RoArm-M2_example/RoArm-M2_config.h in waveshareteam/roarm_m2
+# https://github.com/waveshareteam/roarm_m2
+ARM_L1_MM = 126.06  # base column (visual; firmware lastZ starts at the shoulder)
+ARM_L2A_MM = 236.82  # upper-arm vertical at home
+ARM_L2B_MM = 30.00  # shoulder→elbow forward offset at home
+ARM_L3A_MM = 280.15  # forearm
+ARM_L3B_MM = 1.73
+ARM_L2_MM = math.hypot(ARM_L2A_MM, ARM_L2B_MM)
+ARM_L3_MM = math.hypot(ARM_L3A_MM, ARM_L3B_MM)
+ARM_T2_RAD = math.atan2(ARM_L2B_MM, ARM_L2A_MM)
+
+# Firmware T:104 example / init pose in millimetres (z from shoulder, L1 omitted).
+ARM_INIT_X_MM = ARM_L3A_MM + ARM_L2B_MM  # 310.15
+ARM_INIT_Z_MM = ARM_L2A_MM - ARM_L3B_MM  # 235.09 (IK seed; EEMode=0 FK z = L2A)
+
+HAND_CLOSED_RAD = 3.1416
+HAND_OPEN_RAD = 1.08
+
+
+def forward_kinematics(
+    base: float,
+    shoulder: float,
+    elbow: float,
+    hand: Optional[float] = None,
+) -> Dict[str, float]:
+    """RoArm-M2 EEMode=0 FK matching firmware `RoArmM2_computePosbyJointRad`.
+
+    polarToCartesian(l2, π/2 − (shoulder + t2rad))
+    polarToCartesian(l3, π/2 − (elbow + shoulder))
+    then yaw `base` in the XY plane (X+ forward, Y+ left, Z+ up).
+
+    Returns metres. `z` is firmware lastZ (from the shoulder). `z_world` includes L1.
+    """
+    l2 = ARM_L2_MM / 1000.0
+    l3 = ARM_L3_MM / 1000.0
+    l1 = ARM_L1_MM / 1000.0
+    th2 = (math.pi / 2.0) - (float(shoulder) + ARM_T2_RAD)
+    a_out = l2 * math.cos(th2)
+    b_out = l2 * math.sin(th2)
+    th3 = (math.pi / 2.0) - (float(elbow) + float(shoulder))
+    c_out = l3 * math.cos(th3)
+    d_out = l3 * math.sin(th3)
+    r_ee = a_out + c_out
+    z_ee = b_out + d_out
+    base_r = float(base)
+    return {
+        "x": r_ee * math.cos(base_r),
+        "y": r_ee * math.sin(base_r),
+        "z": z_ee,
+        "z_world": l1 + z_ee,
+        "elbow_r": a_out,
+        "elbow_z": b_out,
+        "hand": float(hand) if hand is not None else _HOME["hand"],
+    }
+
+
 class RoArmController:
     """Thread-safe USB JSON serial to the RoArm ESP32."""
 

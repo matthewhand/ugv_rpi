@@ -67,7 +67,7 @@ Navbar chips. **Direct** (default for Seek / PTZ): Flask owns UART. **ROS 2**: F
 - **Idle heartbeat (HB):** every 2s the UI re-sends the last wheel cmd (idle → stop). ON for sticks; OFF for timed AI drives.
 - Drive polarity: `base_config.drive_linear_sign` (this tree **`-1`**). After a yaml change, **restart the app** and check `GET /api/status`.
 - **Loadout** tab / `GET|POST /api/loadout`: chassis + attachment; live `camera_prefer` re-init; RoArm gated on `roarm2`. Examples `config.rover.yaml` / `config.beast.yaml` — live file stays `config.yaml`. [docs/CONFIG_PROFILES.md](docs/CONFIG_PROFILES.md).
-- Ops log drawer, 3D Twin (box robot, Three.js/roslib **vendored locally** — works offline; still not a digital twin), session-only ESP32 WiFi stop.
+- Ops log drawer, 3D Twin (RoArm-M2 firmware FK / PT gimbal / chassis — hangar overlay is the same model; Three.js **vendored locally**), session-only ESP32 WiFi stop.
 - Unit tests: `tests/test_seek_nav.py`, `tests/test_ai_track.py`, `tests/test_loadout.py`, `tests/test_dual_hw_gating.py` (planner / referee / hangar gates — not a live find-rate).
 
 ---

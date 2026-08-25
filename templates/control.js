@@ -2299,369 +2299,112 @@ document.addEventListener('ugv:loadout-changed', function (ev) {
     }
 });
 
-// ---- RoArm 3D Workspace Visualization (module_type=1) ----
+// ---- RoArm 3D twin overlay (same UgvTwin model as /3d) ----
 var roarmWorkspace = (function() {
-    var scene, camera, renderer, arm, axes, eeMarker, reachLine, motionTrail;
-    var canvas, canvasWrap, workspaceBox;
-    var isInitialized = false;
+    var view = null;
+    var canvasWrap, workspaceBox;
     var isCollapsed = false;
-    
-    // Motion trail buffer (stores recent EE world positions)
-    var trailBuffer = [];
-    var TRAIL_MAX_LENGTH = 50;  // ~1.5-2s at typical update rate
-    var TRAIL_MIN_DISTANCE = 2; // mm - skip points too close together
-    
-    // Rough arm geometry for visualization (in mm, matching e_z_r_to_joints units)
-    var ARM_BASE_H = 60;      // Base height
-    var SHOULDER_L = 115;     // Upper arm length (shoulder to elbow)
-    var FOREARM_L = 105;      // Forearm length (elbow to EE)
-    
+
     function init() {
-        canvas = document.getElementById('roarm-workspace-canvas');
+        var canvas = document.getElementById('roarm-workspace-canvas');
         canvasWrap = document.getElementById('roarm-workspace-canvas-wrap');
         workspaceBox = document.getElementById('roarm-workspace-box');
-        
-        if (!canvas || isInitialized) return;
-        
-        var width = canvas.clientWidth || 280;
-        var height = canvas.clientHeight || 200;
-        
-        // Scene
-        scene = new THREE.Scene();
-        scene.background = new THREE.Color(0x0b0f19);
-        
-        // Camera
-        camera = new THREE.PerspectiveCamera(50, width / height, 1, 2000);
-        camera.position.set(250, 200, 250);
-        camera.lookAt(0, ARM_BASE_H, 0);
-        
-        // Renderer
-        renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true });
-        renderer.setSize(width, height);
-        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-        
-        // Lights
-        var ambient = new THREE.AmbientLight(0x404060, 1.2);
-        scene.add(ambient);
-        var dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
-        dirLight.position.set(200, 300, 200);
-        scene.add(dirLight);
-        
-        // Ground grid
-        var gridHelper = new THREE.GridHelper(400, 20, 0x2a2f3d, 0x1a1d27);
-        gridHelper.position.y = 0;
-        scene.add(gridHelper);
-        
-        // Axes helper at origin (E/X=red, Z=green, R/Y=blue)
-        var axesHelper = new THREE.AxesHelper(120);
-        scene.add(axesHelper);
-        
-        // Axis labels (E/ahead, Z/up, R/yaw)
-        addAxisLabel('E (ahead)', 140, 5, 0, 0xff4444);
-        addAxisLabel('Z (up)', 0, 140, 0, 0x44ff44);
-        addAxisLabel('R (yaw)', 0, 5, 140, 0x4444ff);
-        
-        // Arm segments group
-        arm = new THREE.Group();
-        scene.add(arm);
-        
-        // Base (fixed)
-        var baseGeom = new THREE.CylinderGeometry(15, 20, ARM_BASE_H, 8);
-        var baseMat = new THREE.MeshPhongMaterial({ color: 0x5b8cff });
-        var baseMesh = new THREE.Mesh(baseGeom, baseMat);
-        baseMesh.position.y = ARM_BASE_H / 2;
-        arm.add(baseMesh);
-        
-        // Shoulder joint (will rotate for yaw)
-        var shoulderJoint = new THREE.Mesh(
-            new THREE.SphereGeometry(10, 12, 12),
-            new THREE.MeshPhongMaterial({ color: 0x4FF5C0 })
-        );
-        shoulderJoint.position.y = ARM_BASE_H;
-        arm.add(shoulderJoint);
-        
-        // Upper arm segment (shoulder to elbow)
-        var upperArmGeom = new THREE.CylinderGeometry(6, 6, SHOULDER_L, 8);
-        var upperArmMat = new THREE.MeshPhongMaterial({ color: 0x9aa3b2 });
-        var upperArm = new THREE.Mesh(upperArmGeom, upperArmMat);
-        upperArm.name = 'upperArm';
-        upperArm.position.y = ARM_BASE_H + SHOULDER_L / 2;
-        arm.add(upperArm);
-        
-        // Elbow joint
-        var elbowJoint = new THREE.Mesh(
-            new THREE.SphereGeometry(8, 12, 12),
-            new THREE.MeshPhongMaterial({ color: 0x4FF5C0 })
-        );
-        elbowJoint.name = 'elbowJoint';
-        elbowJoint.position.y = ARM_BASE_H + SHOULDER_L;
-        arm.add(elbowJoint);
-        
-        // Forearm segment (elbow to EE)
-        var forearmGeom = new THREE.CylinderGeometry(5, 5, FOREARM_L, 8);
-        var forearmMat = new THREE.MeshPhongMaterial({ color: 0x6b7280 });
-        var forearm = new THREE.Mesh(forearmGeom, forearmMat);
-        forearm.name = 'forearm';
-        forearm.position.y = ARM_BASE_H + SHOULDER_L + FOREARM_L / 2;
-        arm.add(forearm);
-        
-        // End effector marker
-        eeMarker = new THREE.Mesh(
-            new THREE.SphereGeometry(12, 16, 16),
-            new THREE.MeshPhongMaterial({ color: 0xff8c8c, emissive: 0xff4444, emissiveIntensity: 0.3 })
-        );
-        eeMarker.name = 'eeMarker';
-        eeMarker.position.y = ARM_BASE_H + SHOULDER_L + FOREARM_L;
-        arm.add(eeMarker);
-        
-        // Reach line from base to EE
-        var lineMat = new THREE.LineBasicMaterial({ color: 0xfbbf24, linewidth: 2, transparent: true, opacity: 0.6 });
-        var lineGeom = new THREE.BufferGeometry().setFromPoints([
-            new THREE.Vector3(0, ARM_BASE_H, 0),
-            new THREE.Vector3(0, ARM_BASE_H + SHOULDER_L + FOREARM_L, 0)
-        ]);
-        reachLine = new THREE.Line(lineGeom, lineMat);
-        scene.add(reachLine);
-        
-        // Motion trail (fade-out comet trail of recent EE positions)
-        var trailMat = new THREE.LineBasicMaterial({ 
-            vertexColors: true, 
-            transparent: true,
-            linewidth: 2
+        if (!canvas || view || typeof UgvTwin === 'undefined') return;
+        view = UgvTwin.create({
+            canvas: canvas,
+            compact: true,
+            defaultE: arm_default_e,
+            defaultZ: arm_default_z,
+            defaultR: arm_default_r
         });
-        var trailGeom = new THREE.BufferGeometry();
-        motionTrail = new THREE.Line(trailGeom, trailMat);
-        scene.add(motionTrail);
-        
-        isInitialized = true;
-        
-        // Render initial frame
-        render();
-        
-        console.log('[roarm-workspace] 3D workspace initialized');
+        view.setLoadout({ chassis: (typeof main_type !== 'undefined' && main_type == 3) ? 'beast' : 'rover', attachment: 'roarm2' });
+        if (armE != null) view.setFromEZR(armE, armZ, armR, roarmCurrentJoints.hand);
+        console.log('[roarm-twin] hangar overlay = /3d model');
     }
-    
-    function addAxisLabel(text, x, y, z, color) {
-        // Simple text label using sprite (three.js doesn't have built-in text, so we'll skip for now)
-        // In production, you'd use TextGeometry or canvas-based sprites
-        // For now, the axes helper colors are sufficient
-    }
-    
+
     function updatePose(e, z, r) {
-        if (!isInitialized || !arm || !eeMarker || !reachLine) return;
-        
-        // E = reach ahead (X in world), Z = height, R = base yaw (rotation around Y)
-        // This is a simplified visualization based on E/Z/R commands
-        // For accurate joint angles, we'd need to call e_z_r_to_joints on the backend
-        
-        // Base yaw (R controls rotation around Y axis)
-        arm.rotation.y = (r || 0) * Math.PI / 180; // Convert degrees to radians
-        
-        // Simplified forward kinematics approximation:
-        // We'll just position the EE at (E, Z+base_height, 0) in arm-local space
-        // then the arm rotation will apply the yaw
-        var eeX = e || arm_default_e || 60;
-        var eeY = ARM_BASE_H + (z || arm_default_z || 24);
-        var eeZ = 0;
-        
-        // Update EE marker position (in arm-local coordinates)
-        eeMarker.position.set(eeX, eeY, eeZ);
-        
-        // Update reach line
-        var linePoints = [
-            new THREE.Vector3(0, ARM_BASE_H, 0),
-            new THREE.Vector3(eeX, eeY, eeZ)
-        ];
-        reachLine.geometry.setFromPoints(linePoints);
-        
-        // Rough arm segment positioning (simplified)
-        // In reality, e_z_r_to_joints computes shoulder/elbow angles
-        // Here we'll just aim the segments toward the EE
-        var upperArm = arm.getObjectByName('upperArm');
-        var elbowJoint = arm.getObjectByName('elbowJoint');
-        var forearm = arm.getObjectByName('forearm');
-        
-        if (upperArm && elbowJoint && forearm) {
-            // Simple two-link IK approximation (not perfect but gives visual feedback)
-            var dist = Math.sqrt(eeX * eeX + (eeY - ARM_BASE_H) * (eeY - ARM_BASE_H));
-            var reachable = dist <= (SHOULDER_L + FOREARM_L);
-            
-            if (reachable) {
-                // Elbow-up solution (simplified)
-                var shoulderAngle = Math.atan2(eeY - ARM_BASE_H, eeX);
-                var elbowAngle = Math.acos(
-                    Math.max(-1, Math.min(1,
-                        (SHOULDER_L * SHOULDER_L + FOREARM_L * FOREARM_L - dist * dist) /
-                        (2 * SHOULDER_L * FOREARM_L)
-                    ))
-                );
-                
-                // Position upper arm
-                upperArm.position.set(0, ARM_BASE_H + SHOULDER_L / 2, 0);
-                upperArm.rotation.z = shoulderAngle;
-                
-                // Position elbow joint
-                var elbowX = SHOULDER_L * Math.cos(shoulderAngle);
-                var elbowY = ARM_BASE_H + SHOULDER_L * Math.sin(shoulderAngle);
-                elbowJoint.position.set(elbowX, elbowY, 0);
-                
-                // Position forearm
-                var forearmAngle = shoulderAngle + elbowAngle - Math.PI;
-                forearm.position.set(
-                    elbowX + FOREARM_L / 2 * Math.cos(forearmAngle),
-                    elbowY + FOREARM_L / 2 * Math.sin(forearmAngle),
-                    0
-                );
-                forearm.rotation.z = forearmAngle;
-            }
-        }
-        
-        // Update motion trail (convert EE local position to world space)
-        var eeWorldPos = new THREE.Vector3(eeX, eeY, eeZ);
-        eeWorldPos.applyMatrix4(arm.matrixWorld);
-        
-        // Add to trail buffer if moved enough
-        if (trailBuffer.length === 0) {
-            trailBuffer.push(eeWorldPos.clone());
-        } else {
-            var lastPos = trailBuffer[trailBuffer.length - 1];
-            var distance = eeWorldPos.distanceTo(lastPos);
-            if (distance >= TRAIL_MIN_DISTANCE) {
-                trailBuffer.push(eeWorldPos.clone());
-                // Cap buffer length
-                if (trailBuffer.length > TRAIL_MAX_LENGTH) {
-                    trailBuffer.shift();
-                }
-            }
-        }
-        
-        // Update trail geometry with fading alpha
-        if (motionTrail && trailBuffer.length > 1) {
-            var positions = [];
-            var colors = [];
-            var trailColor = new THREE.Color(0x4FF5C0); // Cyan
-            
-            for (var i = 0; i < trailBuffer.length; i++) {
-                var pos = trailBuffer[i];
-                positions.push(pos.x, pos.y, pos.z);
-                
-                // Fade from opaque (newest) to transparent (oldest)
-                var alpha = i / (trailBuffer.length - 1); // 0 to 1
-                colors.push(trailColor.r, trailColor.g, trailColor.b, alpha);
-            }
-            
-            motionTrail.geometry.setAttribute('position', 
-                new THREE.Float32BufferAttribute(positions, 3));
-            motionTrail.geometry.setAttribute('color', 
-                new THREE.Float32BufferAttribute(colors, 4));
-            motionTrail.geometry.computeBoundingSphere();
-        }
-        
-        render();
+        if (!view) return;
+        view.setFromEZR(e, z, r, roarmCurrentJoints && roarmCurrentJoints.hand);
     }
-    
-    function render() {
-        if (!renderer || !scene || !camera) return;
-        renderer.render(scene, camera);
+
+    function setJoints(j) {
+        if (!view || !j) return;
+        view.setJoints(j);
+        if (j.hand != null) roarmCurrentJoints.hand = j.hand;
     }
-    
+
     function show() {
+        if (!workspaceBox) workspaceBox = document.getElementById('roarm-workspace-box');
         if (!workspaceBox) return;
         workspaceBox.style.display = 'block';
-        if (!isInitialized) {
-            setTimeout(init, 100); // Delay to ensure canvas has size
-        }
+        if (!view) setTimeout(init, 80);
+        else if (view.resize) view.resize();
     }
-    
+
     function hide() {
         if (!workspaceBox) return;
         workspaceBox.style.display = 'none';
-        clearTrail(); // Clear trail when hiding
+        if (view && view.clearTrail) view.clearTrail();
     }
-    
-    function clearTrail() {
-        trailBuffer = [];
-        if (motionTrail && motionTrail.geometry) {
-            motionTrail.geometry.setAttribute('position', 
-                new THREE.Float32BufferAttribute([], 3));
-            motionTrail.geometry.setAttribute('color', 
-                new THREE.Float32BufferAttribute([], 4));
-        }
-    }
-    
+
     function toggle() {
+        if (!canvasWrap) canvasWrap = document.getElementById('roarm-workspace-canvas-wrap');
         if (!canvasWrap) return;
         isCollapsed = !isCollapsed;
-        if (isCollapsed) {
-            canvasWrap.classList.add('collapsed');
-            document.getElementById('roarm-workspace-toggle').textContent = '▶';
-        } else {
-            canvasWrap.classList.remove('collapsed');
-            document.getElementById('roarm-workspace-toggle').textContent = '▼';
-            if (isInitialized) render();
-        }
+        canvasWrap.classList.toggle('collapsed', isCollapsed);
+        var btn = document.getElementById('roarm-workspace-toggle');
+        if (btn) btn.textContent = isCollapsed ? '▶' : '▼';
+        if (!isCollapsed && view && view.resize) view.resize();
     }
-    
-    function handleResize() {
-        if (!isInitialized || !canvas || !renderer || !camera) return;
-        var width = canvas.clientWidth;
-        var height = canvas.clientHeight;
-        if (width > 0 && height > 0) {
-            camera.aspect = width / height;
-            camera.updateProjectionMatrix();
-            renderer.setSize(width, height);
-            render();
-        }
-    }
-    
+
     return {
         init: init,
         updatePose: updatePose,
+        setJoints: setJoints,
         show: show,
         hide: hide,
         toggle: toggle,
-        handleResize: handleResize,
-        clearTrail: clearTrail
+        handleResize: function () { if (view && view.resize) view.resize(); },
+        clearTrail: function () { if (view && view.clearTrail) view.clearTrail(); }
     };
 })();
 
 function updateRoarmWorkspaceVisibility() {
     var box = document.getElementById('roarm-workspace-box');
-    if (box) {
-        if (module_type == 1) {
-            box.style.display = 'block';
-            roarmWorkspace.init();
-            roarmWorkspace.updatePose(armE, armZ, armR);
-        } else {
-            box.style.display = 'none';
-            roarmWorkspace.clearTrail(); // Clear trail when switching away from RoArm
-        }
+    if (!box) return;
+    if (module_type == 1) {
+        box.style.display = 'block';
+        roarmWorkspace.init();
+        roarmWorkspace.updatePose(armE, armZ, armR);
+    } else {
+        box.style.display = 'none';
+        roarmWorkspace.clearTrail();
     }
 }
 
-// Wire up workspace toggle button
 document.addEventListener('DOMContentLoaded', function() {
     var toggleBtn = document.getElementById('roarm-workspace-toggle');
-    if (toggleBtn) {
-        toggleBtn.addEventListener('click', roarmWorkspace.toggle);
-    }
-    
-    // Update visibility after config loads
+    if (toggleBtn) toggleBtn.addEventListener('click', roarmWorkspace.toggle);
     setTimeout(updateRoarmWorkspaceVisibility, 500);
-    
-    // Handle window resize
     window.addEventListener('resize', roarmWorkspace.handleResize);
 });
 
-// Update workspace when controls change
 var originalCmdJsonCmd = cmdJsonCmd;
 cmdJsonCmd = function(jsonData) {
     originalCmdJsonCmd(jsonData);
-    
-    // Update 3D workspace if this is an arm command
-    if (module_type == 1 && jsonData.T == cmd_arm_ctrl_ui) {
+    if (module_type != 1 || !jsonData) return;
+    if (jsonData.T == cmd_arm_ctrl_ui) {
         if (jsonData.E !== undefined || jsonData.Z !== undefined || jsonData.R !== undefined) {
             roarmWorkspace.updatePose(jsonData.E || armE, jsonData.Z || armZ, jsonData.R || armR);
         }
+    } else if (jsonData.T == 102) {
+        roarmWorkspace.setJoints({
+            base: jsonData.base,
+            shoulder: jsonData.shoulder,
+            elbow: jsonData.elbow,
+            hand: jsonData.hand
+        });
+    } else if (jsonData.T == 100) {
+        roarmWorkspace.setJoints(UgvTwin && UgvTwin.HOME);
     }
 };

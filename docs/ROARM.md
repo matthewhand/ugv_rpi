@@ -26,6 +26,16 @@ r.pose("home")          # stock inverted L
 
 JSON equivalent: `{"T":102,"base":0,"shoulder":-0.62,"elbow":0.88,"hand":3.05,"spd":0,"acc":10}`
 
+## 3D Twin
+
+`/3d`, the Twin drawer, and the Raw hangar overlay are **one model** (`templates/twin.js`):
+
+- Chassis follows hangar `base` (rover wheels / beast tracks)
+- Attachment `roarm2` draws the Waveshare RoArm-M2-S (L1=126.06, L2A=236.82, L2B=30, L3A=280.15 mm) with firmware FK
+- Joints come from last commanded T:102 / T:144 (`GET /api/twin`)
+
+Home is the inverted L (elbow π/2, reach ~310 mm). `travel_tuck` leans back over the deck.
+
 ## UI Aim mode
 
 - **Aim: RoArm** — video overlay stick → `T:144` E/Z/R → USB joints  

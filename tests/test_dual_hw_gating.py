@@ -147,6 +147,12 @@ class TestAppArmUsbGate(unittest.TestCase):
         self.assertIn("wants_roarm", body)
         self.assertIn("_loadout_store", body)
 
+    def test_api_twin_route_exists(self):
+        src = Path(ROOT, "app.py").read_text(encoding="utf-8")
+        self.assertIn("@app.route('/api/twin')", src)
+        self.assertIn("def api_twin()", src)
+        self.assertIn("forward_kinematics", src)
+
     def test_route_json_has_t144_branch(self):
         src = Path(ROOT, "app.py").read_text(encoding="utf-8")
         idx = src.find("def _route_json_command")

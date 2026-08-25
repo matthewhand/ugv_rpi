@@ -202,6 +202,14 @@
         text-transform: uppercase;
         letter-spacing: 0.5px;
       }
+      .roarm-workspace-joints {
+        font-size: 10px;
+        font-weight: 600;
+        color: #4FF5C0;
+        font-variant-numeric: tabular-nums;
+        margin-left: auto;
+        margin-right: 8px;
+      }
       .roarm-workspace-btn {
         background: none;
         border: none;
@@ -216,7 +224,7 @@
       }
       .roarm-workspace-canvas-wrap {
         width: 100%;
-        height: 200px;
+        height: 240px;
         position: relative;
         background: #0b0f19;
         transition: height 0.3s ease;
@@ -790,10 +798,11 @@
                                                 <span id="roarm-reach-value" class="roarm-slider-value">0</span>
                                             </div>
                                         </div>
-                                        <!-- RoArm 3D workspace preview (module_type=1 only) -->
+                                        <!-- Same 3D twin as /3d (RoArm-M2 FK) -->
                                         <div id="roarm-workspace-box" class="roarm-workspace-box" style="display:none;">
                                             <div class="roarm-workspace-header">
-                                                <span class="roarm-workspace-title">Workspace (approx)</span>
+                                                <span class="roarm-workspace-title">3D Twin</span>
+                                                <span id="roarm-workspace-joints" class="roarm-workspace-joints"></span>
                                                 <button type="button" id="roarm-workspace-toggle" class="roarm-workspace-btn" title="Toggle 3D view">▼</button>
                                             </div>
                                             <div id="roarm-workspace-canvas-wrap" class="roarm-workspace-canvas-wrap">
@@ -1607,9 +1616,11 @@
       })();
     </script>
     <script src="./three.min.js"></script>
+    <script src="./OrbitControls.js"></script>
+    <script src="./twin.js?v=roarm-twin-1"></script>
     <script src="./modes.js?v=seek-chat-finish-1"></script>
     <script src="./loadout.js?v=dual-hw-1"></script>
-    <script src="./control.js?v=ui-iter-10"></script>
+    <script src="./control.js?v=roarm-twin-1"></script>
     <script src="./main.js"></script>
 </body>
 </html>

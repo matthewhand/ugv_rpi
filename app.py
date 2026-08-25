@@ -950,6 +950,63 @@ def api_ui_aim_mode():
         'roarm': (get_roarm().status() if get_roarm() else None),
     })
 
+
+def _twin_joints_snapshot():
+    """Last commanded RoArm joints, or the configured default pose for the overlay."""
+    import roarm_ctrl
+    arm = get_roarm()
+    if arm is not None:
+        st = arm.status()
+        joints = st.get('last_joints')
+        if isinstance(joints, dict) and joints:
+            return dict(joints), bool(st.get('connected')), st.get('port')
+        return dict(roarm_ctrl._HOME), bool(st.get('connected')), st.get('port')
+    pose_name = str((_arm_cfg().get('default_pose') or 'travel_tuck')).strip().lower()
+    pose = roarm_ctrl.POSES.get(pose_name) or roarm_ctrl.POSES['home']
+    return dict(pose), False, None
+
+
+@app.route('/api/twin')
+def api_twin():
+    """Shared 3D twin snapshot — hangar overlay and /3d use the same payload.
+
+    Joints are last commanded USB RoArm radians (T:102 / T:144 map). Direct
+    serial does not need rosbridge. PTZ robots still get pan/tilt degrees.
+    """
+    import roarm_ctrl
+    lo = _loadout_store.get()
+    types = loadout_mod.effective_types(lo)
+    joints, connected, port = _twin_joints_snapshot()
+    fk = roarm_ctrl.forward_kinematics(
+        joints.get('base', 0.0),
+        joints.get('shoulder', 0.0),
+        joints.get('elbow', 1.5708),
+        joints.get('hand'),
+    )
+    return jsonify({
+        'ok': True,
+        'robot_name': types.get('robot_name') or f.get('base_config', {}).get('robot_name') or 'UGV',
+        'chassis': lo.get('base') or 'rover',
+        'attachment': lo.get('attachment') or 'ptz',
+        'drive': types.get('drive'),
+        'main_type': int(types.get('main_type') or 2),
+        'module_type': int(types.get('module_type') or 0),
+        'roarm_started': roarm_started(),
+        'roarm_connected': connected,
+        'roarm_port': port,
+        'joints': joints,
+        'ee_m': {k: fk[k] for k in ('x', 'y', 'z', 'z_world')},
+        'ptz': _ptz_aim_public(),
+        'kinematics': {
+            'l1_mm': roarm_ctrl.ARM_L1_MM,
+            'l2a_mm': roarm_ctrl.ARM_L2A_MM,
+            'l2b_mm': roarm_ctrl.ARM_L2B_MM,
+            'l3a_mm': roarm_ctrl.ARM_L3A_MM,
+            'l3b_mm': roarm_ctrl.ARM_L3B_MM,
+        },
+    })
+
+
 def _control_mode_payload(mode=None, *, mode_changed=False, prev_mode=None):
     """Shared status + restart guidance after control_mode changes."""
     mode = mode or get_control_mode()

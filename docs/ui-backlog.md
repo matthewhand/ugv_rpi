@@ -33,6 +33,7 @@
 - [x] Single USB RoArm handle: app.py uses `roarm_ctrl.current_roarm/get_roarm/shutdown_roarm`; hangar stop/start cannot leave a closed handle
 - [x] Seek run does not persist Chat tool toggles (thread-local override, not `.ai_capabilities.json` writes)
 - [x] 3D Twin libs vendored locally (`three.min.js`, `OrbitControls.js`, `roslib.min.js`) — page loads offline in ~2s, was ~12s CDN-blocked
+- [x] 3D Twin = hangar overlay: one `twin.js` RoArm-M2 firmware FK (not a second “workspace approx” stick cartoon)
 - [x] `[hidden]` always wins over class `display:` rules (global CSS rule) — dead "Recalculate every N steps" interval row now actually hidden
 - [x] Stale Seek copy fixed: pano empty hint, scene-nav tooltip, start log no longer claim triple-view / interval nav
 - [x] Catalog captures `seek.dry_run` + `shell.loadout` (coverage 55/56; `shell.path_ros2` env-dependent by design)
