@@ -2297,6 +2297,12 @@ document.addEventListener('ugv:loadout-changed', function (ev) {
         updateRoarmSlidersVisibility();
         updateRoarmWorkspaceVisibility();
     }
+    if (roarmWorkspace && roarmWorkspace.setLoadout) {
+        roarmWorkspace.setLoadout({
+            chassis: ev.detail.base === 'beast' ? 'beast' : 'rover',
+            attachment: ev.detail.attachment
+        });
+    }
 });
 
 // ---- RoArm 3D twin overlay (same UgvTwin model as /3d) ----
@@ -2318,7 +2324,7 @@ var roarmWorkspace = (function() {
             defaultR: arm_default_r
         });
         view.setLoadout({ chassis: (typeof main_type !== 'undefined' && main_type == 3) ? 'beast' : 'rover', attachment: 'roarm2' });
-        if (armE != null) view.setFromEZR(armE, armZ, armR, roarmCurrentJoints.hand);
+        // Do not apply E/Z/R here — that is home. First /api/twin poll has last/default pose.
         console.log('[roarm-twin] hangar overlay = /3d model');
     }
 
@@ -2328,9 +2334,18 @@ var roarmWorkspace = (function() {
     }
 
     function setJoints(j) {
-        if (!view || !j) return;
-        view.setJoints(j);
-        if (j.hand != null) roarmCurrentJoints.hand = j.hand;
+        if (!j) return;
+        roarmCurrentJoints = {
+            base: j.base != null ? j.base : roarmCurrentJoints.base,
+            shoulder: j.shoulder != null ? j.shoulder : roarmCurrentJoints.shoulder,
+            elbow: j.elbow != null ? j.elbow : roarmCurrentJoints.elbow,
+            hand: j.hand != null ? j.hand : roarmCurrentJoints.hand
+        };
+        if (view) view.setJoints(roarmCurrentJoints);
+    }
+
+    function setLoadout(lo) {
+        if (view && view.setLoadout) view.setLoadout(lo);
     }
 
     function show() {
@@ -2338,13 +2353,17 @@ var roarmWorkspace = (function() {
         if (!workspaceBox) return;
         workspaceBox.style.display = 'block';
         if (!view) setTimeout(init, 80);
-        else if (view.resize) view.resize();
+        else {
+            if (view.setPaused) view.setPaused(false);
+            if (view.resize) view.resize();
+        }
     }
 
     function hide() {
         if (!workspaceBox) return;
         workspaceBox.style.display = 'none';
         if (view && view.clearTrail) view.clearTrail();
+        if (view && view.setPaused) view.setPaused(true);
     }
 
     function toggle() {
@@ -2354,6 +2373,7 @@ var roarmWorkspace = (function() {
         canvasWrap.classList.toggle('collapsed', isCollapsed);
         var btn = document.getElementById('roarm-workspace-toggle');
         if (btn) btn.textContent = isCollapsed ? '▶' : '▼';
+        if (view && view.setPaused) view.setPaused(isCollapsed);
         if (!isCollapsed && view && view.resize) view.resize();
     }
 
@@ -2361,6 +2381,7 @@ var roarmWorkspace = (function() {
         init: init,
         updatePose: updatePose,
         setJoints: setJoints,
+        setLoadout: setLoadout,
         show: show,
         hide: hide,
         toggle: toggle,
@@ -2370,15 +2391,11 @@ var roarmWorkspace = (function() {
 })();
 
 function updateRoarmWorkspaceVisibility() {
-    var box = document.getElementById('roarm-workspace-box');
-    if (!box) return;
     if (module_type == 1) {
-        box.style.display = 'block';
+        roarmWorkspace.show();
         roarmWorkspace.init();
-        roarmWorkspace.updatePose(armE, armZ, armR);
     } else {
-        box.style.display = 'none';
-        roarmWorkspace.clearTrail();
+        roarmWorkspace.hide();
     }
 }
 
@@ -2405,6 +2422,6 @@ cmdJsonCmd = function(jsonData) {
             hand: jsonData.hand
         });
     } else if (jsonData.T == 100) {
-        roarmWorkspace.setJoints(UgvTwin && UgvTwin.HOME);
+        roarmWorkspace.setJoints((UgvTwin && UgvTwin.HOME) || { base: 0, shoulder: 0, elbow: 1.5708, hand: 3.1416 });
     }
 };

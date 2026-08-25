@@ -33,6 +33,11 @@
         return Math.max(lo, Math.min(hi, v));
     }
 
+    function num(v, fallback) {
+        var n = Number(v);
+        return isFinite(n) ? n : fallback;
+    }
+
     function eZrToJoints(e, z, r, defaults) {
         defaults = defaults || {};
         var defaultE = defaults.e != null ? defaults.e : 60;
@@ -48,9 +53,9 @@
     }
 
     function fk(joints) {
-        var base = joints.base || 0;
-        var shoulder = joints.shoulder || 0;
-        var elbow = joints.elbow != null ? joints.elbow : HOME.elbow;
+        var base = num(joints.base, 0);
+        var shoulder = num(joints.shoulder, 0);
+        var elbow = num(joints.elbow, HOME.elbow);
         var th2 = Math.PI / 2 - (shoulder + T2);
         var aOut = L2 * Math.cos(th2);
         var bOut = L2 * Math.sin(th2);
@@ -127,7 +132,7 @@
         var vs0 = viewSize();
         var scene = new THREE.Scene();
         scene.background = new THREE.Color(0x0b0f19);
-        scene.fog = compact ? null : new THREE.FogExp2(0x0b0f19, 0.22);
+        scene.fog = compact ? null : new THREE.FogExp2(0x0b0f19, 0.08);
 
         var camera = new THREE.PerspectiveCamera(compact ? 48 : 50, vs0.w / vs0.h, 0.02, 20);
         var renderer = canvas
@@ -146,6 +151,7 @@
             controls.maxPolarAngle = Math.PI * 0.92;
             controls.minDistance = compact ? 0.25 : 0.4;
             controls.maxDistance = compact ? 2.2 : 6;
+            if (compact) controls.enablePan = false;
         }
 
         scene.add(new THREE.AmbientLight(0xffffff, compact ? 0.85 : 0.7));
@@ -158,6 +164,11 @@
 
         var grid = new THREE.GridHelper(compact ? 1.6 : 4, compact ? 16 : 20, 0x38bdf8, 0x1e293b);
         scene.add(grid);
+        var fwd = new THREE.ArrowHelper(
+            new THREE.Vector3(0, 0, 1), new THREE.Vector3(0, 0.002, 0),
+            compact ? 0.22 : 0.35, 0x38bdf8, 0.04, 0.025
+        );
+        scene.add(fwd);
 
         var robot = new THREE.Group();
         scene.add(robot);
@@ -207,12 +218,16 @@
             ptzPan: 0,
             ptzTilt: 0,
             connected: false,
+            pollOk: false,
             robotName: 'UGV'
         };
         var chassisBuiltFor = '';
         var mount = { y: 0.12, z: 0.04 };
         var running = true;
+        var paused = false;
         var pollTimer = null;
+        var localHoldUntil = 0;
+        var lastFk = null;
 
         function clearGroup(g) {
             while (g.children.length) {
@@ -281,18 +296,20 @@
             }
 
             mount.y = body.position.y + bodyH / 2 + 0.01;
-            mount.z = beast ? 0.06 : 0.02;
+            // Front deck: arm sits near the camera-forward edge, not mid-chassis.
+            mount.z = bodyL * 0.32;
             armRoot.position.set(0, mount.y, mount.z);
             ptGroup.position.set(0, mount.y + 0.02, 0);
         }
 
-        function applyJoints(joints) {
+        function applyJoints(joints, fromPoll) {
             if (!joints) return;
+            if (!fromPoll) localHoldUntil = Date.now() + 450;
             state.joints = {
-                base: +joints.base || 0,
-                shoulder: +joints.shoulder || 0,
-                elbow: joints.elbow != null ? +joints.elbow : HOME.elbow,
-                hand: joints.hand != null ? +joints.hand : HOME.hand
+                base: num(joints.base, 0),
+                shoulder: num(joints.shoulder, 0),
+                elbow: num(joints.elbow, HOME.elbow),
+                hand: num(joints.hand, HOME.hand)
             };
             defaults.hand = state.joints.hand;
             var p = fk(state.joints);
@@ -337,12 +354,13 @@
                 for (var i = 0; i < trailPts.length; i++) {
                     pos.push(trailPts[i].x, trailPts[i].y, trailPts[i].z);
                     var a = i / (trailPts.length - 1);
-                    col.push(c.r, c.g, c.b, a);
+                    col.push(c.r * a, c.g * a, c.b * a);
                 }
                 trailLine.geometry.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-                trailLine.geometry.setAttribute('color', new THREE.Float32BufferAttribute(col, 4));
+                trailLine.geometry.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
                 trailLine.geometry.computeBoundingSphere();
             }
+            lastFk = p;
             updateHud();
         }
 
@@ -364,13 +382,13 @@
 
         function frameCamera() {
             if (compact && state.attachment === 'roarm2') {
-                camera.position.set(0.55, 0.48, 0.62);
-                if (controls) controls.target.set(0, mount.y + 0.18, mount.z + 0.12);
-                else camera.lookAt(0, mount.y + 0.18, mount.z + 0.12);
+                camera.position.set(0.72, 0.58, 0.78);
+                if (controls) controls.target.set(0, mount.y + 0.22, mount.z + 0.08);
+                else camera.lookAt(0, mount.y + 0.22, mount.z + 0.08);
             } else {
                 camera.position.set(1.15, 0.95, 1.35);
-                if (controls) controls.target.set(0, 0.18, 0.05);
-                else camera.lookAt(0, 0.18, 0.05);
+                if (controls) controls.target.set(0, 0.22, 0.08);
+                else camera.lookAt(0, 0.22, 0.08);
             }
         }
 
@@ -395,13 +413,19 @@
                 'B ' + (j.base * DEG).toFixed(0) +
                 '  S ' + (j.shoulder * DEG).toFixed(0) +
                 '  E ' + (j.elbow * DEG).toFixed(0));
+            if (lastFk) {
+                var reachMm = Math.sqrt(lastFk.x * lastFk.x + lastFk.y * lastFk.y) * 1000;
+                setText(hud.ee || 'ee-val',
+                    reachMm.toFixed(0) + ' mm fwd · ' + (lastFk.zWorld * 1000).toFixed(0) + ' mm up');
+            }
             var roarmHud = document.getElementById('hud-roarm');
             var ptzHud = document.getElementById('hud-ptz');
             if (roarmHud) roarmHud.style.display = state.attachment === 'roarm2' ? '' : 'none';
             if (ptzHud) ptzHud.style.display = state.attachment === 'ptz' ? '' : 'none';
             var dot = document.getElementById('status-dot');
             if (dot) {
-                if (state.connected || state.attachment !== 'roarm2') dot.classList.add('connected');
+                var live = state.attachment === 'roarm2' ? state.connected : state.pollOk;
+                if (live) dot.classList.add('connected');
                 else dot.classList.remove('connected');
             }
         }
@@ -414,10 +438,12 @@
             if (d.attachment) state.attachment = d.attachment;
             if (d.robot_name) state.robotName = d.robot_name;
             state.connected = !!d.roarm_connected;
+            state.pollOk = true;
             rebuildChassis();
             setAttachmentVisibility();
             if (chassisChanged || attachChanged) frameCamera();
-            if (d.joints) applyJoints(d.joints);
+            // Stick/T:102 preview wins for ~450ms so the poll cannot snap the arm back.
+            if (d.joints && Date.now() >= localHoldUntil) applyJoints(d.joints, true);
             if (d.ptz) {
                 var pan = d.ptz.pan_deg != null ? d.ptz.pan_deg : d.ptz.cmd;
                 var tilt = d.ptz.tilt_deg != null ? d.ptz.tilt_deg : d.ptz.tilt;
@@ -437,10 +463,11 @@
         }
 
         function poll() {
+            if (paused) return;
             fetch('/api/twin')
                 .then(function (r) { return r.json(); })
                 .then(applySnapshot)
-                .catch(function () {});
+                .catch(function () { state.pollOk = false; updateHud(); });
         }
 
         function resize() {
@@ -451,10 +478,17 @@
         }
 
         function animate() {
-            if (!running) return;
+            if (!running || paused) return;
             requestAnimationFrame(animate);
             if (controls) controls.update();
             renderer.render(scene, camera);
+        }
+
+        function setPaused(p) {
+            var next = !!p;
+            if (next === paused) return;
+            paused = next;
+            if (!paused) animate();
         }
 
         rebuildChassis();
@@ -476,12 +510,12 @@
 
         return {
             applySnapshot: applySnapshot,
-            setJoints: applyJoints,
+            setJoints: function (j) { applyJoints(j, false); },
             setFromEZR: function (e, z, r, hand) {
                 applyJoints(eZrToJoints(e, z, r, {
                     e: defaults.e, z: defaults.z, r: defaults.r,
                     hand: hand != null ? hand : defaults.hand
-                }));
+                }), false);
             },
             setLoadout: function (lo) {
                 if (!lo) return;
@@ -498,6 +532,7 @@
             },
             resize: resize,
             poll: poll,
+            setPaused: setPaused,
             destroy: function () {
                 running = false;
                 if (pollTimer) clearInterval(pollTimer);

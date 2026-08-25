@@ -959,11 +959,11 @@ def _twin_joints_snapshot():
         st = arm.status()
         joints = st.get('last_joints')
         if isinstance(joints, dict) and joints:
-            return dict(joints), bool(st.get('connected')), st.get('port')
-        return dict(roarm_ctrl._HOME), bool(st.get('connected')), st.get('port')
+            return dict(joints), bool(st.get('connected')), st.get('port'), 'commanded'
+        return dict(roarm_ctrl.POSES['home']), bool(st.get('connected')), st.get('port'), 'home'
     pose_name = str((_arm_cfg().get('default_pose') or 'travel_tuck')).strip().lower()
     pose = roarm_ctrl.POSES.get(pose_name) or roarm_ctrl.POSES['home']
-    return dict(pose), False, None
+    return dict(pose), False, None, pose_name
 
 
 @app.route('/api/twin')
@@ -976,7 +976,7 @@ def api_twin():
     import roarm_ctrl
     lo = _loadout_store.get()
     types = loadout_mod.effective_types(lo)
-    joints, connected, port = _twin_joints_snapshot()
+    joints, connected, port, joints_source = _twin_joints_snapshot()
     fk = roarm_ctrl.forward_kinematics(
         joints.get('base', 0.0),
         joints.get('shoulder', 0.0),
@@ -995,15 +995,10 @@ def api_twin():
         'roarm_connected': connected,
         'roarm_port': port,
         'joints': joints,
-        'ee_m': {k: fk[k] for k in ('x', 'y', 'z', 'z_world')},
+        'joints_source': joints_source,
+        'ee_m': {k: round(fk[k], 4) for k in ('x', 'y', 'z', 'z_world')},
         'ptz': _ptz_aim_public(),
-        'kinematics': {
-            'l1_mm': roarm_ctrl.ARM_L1_MM,
-            'l2a_mm': roarm_ctrl.ARM_L2A_MM,
-            'l2b_mm': roarm_ctrl.ARM_L2B_MM,
-            'l3a_mm': roarm_ctrl.ARM_L3A_MM,
-            'l3b_mm': roarm_ctrl.ARM_L3B_MM,
-        },
+        'kinematics': roarm_ctrl.kinematics_public(),
     })
 
 

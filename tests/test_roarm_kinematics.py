@@ -69,6 +69,20 @@ class TestRoArmM2Kinematics(unittest.TestCase):
         self.assertAlmostEqual(j["shoulder"], 0.0, places=5)
         self.assertAlmostEqual(j["elbow"], 1.5708, places=3)
 
+    def test_e_z_r_reach_extends_elbow(self):
+        home = roarm_ctrl.e_z_r_to_joints(60, 24, 0)
+        far = roarm_ctrl.e_z_r_to_joints(200, 24, 0)
+        self.assertLess(far["elbow"], home["elbow"])
+
+    def test_e_z_r_r_yaws_left(self):
+        j = roarm_ctrl.e_z_r_to_joints(60, 24, 45)
+        self.assertGreater(j["base"], 0.5)
+
+    def test_kinematics_public_matches_constants(self):
+        pub = roarm_ctrl.kinematics_public()
+        self.assertAlmostEqual(pub["l1_mm"], roarm_ctrl.ARM_L1_MM)
+        self.assertAlmostEqual(pub["init_x_mm"], 310.15, places=2)
+
 
 if __name__ == "__main__":
     unittest.main()

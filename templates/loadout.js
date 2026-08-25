@@ -482,6 +482,7 @@
     try {
       var event = new CustomEvent('ugv:loadout-changed', {
         detail: {
+          base: selection.base,
           attachment: selection.attachment,
           module_type: moduleType,
         },

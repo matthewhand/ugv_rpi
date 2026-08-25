@@ -149,6 +149,21 @@ HAND_CLOSED_RAD = 3.1416
 HAND_OPEN_RAD = 1.08
 
 
+def kinematics_public() -> Dict[str, float]:
+    """Link lengths for the shared 3D twin (millimetres)."""
+    return {
+        "l1_mm": ARM_L1_MM,
+        "l2a_mm": ARM_L2A_MM,
+        "l2b_mm": ARM_L2B_MM,
+        "l3a_mm": ARM_L3A_MM,
+        "l3b_mm": ARM_L3B_MM,
+        "l2_mm": ARM_L2_MM,
+        "l3_mm": ARM_L3_MM,
+        "init_x_mm": ARM_INIT_X_MM,
+        "init_z_mm": ARM_INIT_Z_MM,
+    }
+
+
 def forward_kinematics(
     base: float,
     shoulder: float,

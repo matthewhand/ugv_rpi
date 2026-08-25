@@ -389,7 +389,7 @@ def run_catalog(base: str, out: Path, viewports: list[str]) -> list[dict]:
             if "phone" in vp_name:
                 record(results, out, vp_name, page, "ai_landscape", "ai.landscape")
 
-            # --- Twin full page (CDN scripts can be slow — generous timeout) ---
+            # --- Twin full page (local three.js + twin.js; keep a budget for WebGL) ---
             go(page, base, "/3d", wait_ms=1800, timeout_ms=45000)
             record(results, out, vp_name, page, "twin_page", "twin.page")
 
