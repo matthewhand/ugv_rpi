@@ -34,13 +34,14 @@ base_config:
   # Override with env UGV_DRIVE_LINEAR_SIGN / UGV_DRIVE_ANGULAR_SIGN (±1).
   drive_linear_sign: 1
   drive_angular_sign: 1
-# Optional machine-local arm hints (hangar attachment still gates start).
-# arm_config:
-#   transport: usb_serial   # CP2102 RoArm ESP32 — not base UART
-#   serial_port: ""         # or ROARM_SERIAL / by-id auto
-#   baud: 115200
-#   ui_aim_default: roarm
-#   default_pose: travel_tuck
+# Machine-local arm hints — PROVEN on this Beast's CP2102 RoArm (2026-08).
+# Hangar attachment=roarm2 still gates driver start.
+arm_config:
+  transport: usb_serial   # CP2102 RoArm ESP32 — not base UART
+  serial_port: ""         # or ROARM_SERIAL / by-id auto
+  baud: 115200
+  ui_aim_default: roarm
+  default_pose: travel_tuck
 cmd_config:
   cmd_arm_ctrl_ui: 144
   cmd_gimbal_base_ctrl: 141

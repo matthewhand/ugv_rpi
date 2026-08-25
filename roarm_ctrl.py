@@ -149,6 +149,178 @@ HAND_CLOSED_RAD = 3.1416
 HAND_OPEN_RAD = 1.08
 
 
+def _wrap_pi(a: float) -> float:
+    """Wrap angle to (-pi, pi]."""
+    while a > math.pi:
+        a -= 2.0 * math.pi
+    while a <= -math.pi:
+        a += 2.0 * math.pi
+    return a
+
+
+def planar_ik(
+    r_mm: float,
+    z_mm: float,
+    *,
+    seed_shoulder: float = 0.0,
+    seed_elbow: float = 1.5708,
+    enforce_limits: bool = True,
+) -> Optional[Dict[str, Any]]:
+    """Closed-form 2-link planar IK — exact inverse of `forward_kinematics`.
+
+    Planar frame is from the shoulder pivot (X forward, Z up), millimetres;
+    base yaw is independent (rotate afterwards). Matches firmware FK:
+        pos = L2·e(π/2−(shoulder+t2)) + L3·e(π/2−(elbow+shoulder))
+
+    Returns {"shoulder": rad, "elbow": rad, "clamped": bool} or None when the
+    target is outside the physical annulus |L2−L3|..L2+L3. Branch (elbow-up /
+    elbow-down) is chosen for continuity with the seed pose so small stick /
+    slider steps never flip the arm through the workspace.
+    """
+    l2 = ARM_L2_MM
+    l3 = ARM_L3_MM
+    r = float(r_mm)
+    z = float(z_mm)
+    d = math.hypot(r, z)
+    d_max = l2 + l3 - 0.5  # 0.5 mm margin avoids acos domain noise at full reach
+    d_min = abs(l2 - l3) + 0.5
+    if d > d_max or d < d_min:
+        return None
+
+    beta = math.atan2(z, r)
+    cos_gamma = _clamp((l2 * l2 + d * d - l3 * l3) / (2.0 * l2 * d), -1.0, 1.0)
+    gamma = math.acos(cos_gamma)
+
+    def _solve(u: float) -> Dict[str, Any]:
+        # Exact forearm direction: passes from the elbow through the target.
+        w = math.atan2(z - l2 * math.sin(u), r - l2 * math.cos(u))
+        delta = _wrap_pi(w - u)
+        elbow_raw = ARM_T2_RAD - delta
+        shoulder_raw = (math.pi / 2.0) - ARM_T2_RAD - u
+        sh = _clamp(shoulder_raw, *_SHOULDER_LIM)
+        el = _clamp(elbow_raw, *_ELBOW_LIM)
+        # Honest post-clamp error so a limit-bound branch can lose to a
+        # branch that actually reaches the target.
+        th2 = (math.pi / 2.0) - (sh + ARM_T2_RAD)
+        th3 = (math.pi / 2.0) - (el + sh)
+        px = l2 * math.cos(th2) + l3 * math.cos(th3)
+        pz = l2 * math.sin(th2) + l3 * math.sin(th3)
+        err = math.hypot(px - r, pz - z)
+        cont = abs(sh - seed_shoulder) + abs(el - seed_elbow)
+        cl = abs(sh - shoulder_raw) > 1e-9 or abs(el - elbow_raw) > 1e-9
+        return {
+            "shoulder": sh,
+            "elbow": el,
+            "clamped": cl,
+            "_err": err,
+            "_cont": cont,
+        }
+
+    a = _solve(beta + gamma)
+    b = _solve(beta - gamma)
+    # FK error dominates; continuity breaks ties between exact solutions so
+    # small stick / slider steps never flip the arm through the workspace.
+    best = min((a, b), key=lambda s: (round(s["_err"], 6), s["_cont"]))
+    shoulder, elbow = best["shoulder"], best["elbow"]
+    clamped = best["clamped"]
+
+    return {"shoulder": shoulder, "elbow": elbow, "clamped": clamped}
+
+
+def relative_move(
+    dr_mm: float = 0.0,
+    dz_mm: float = 0.0,
+    dyaw_deg: float = 0.0,
+    joints: Optional[Dict[str, float]] = None,
+) -> Dict[str, Any]:
+    """Coordinated EE jog: reach ±Δ keeping height, lift ±Δ keeping reach, yaw ±Δ.
+
+    Seeds IK from the current pose (branch continuity), clamps targets that fall
+    outside the physical workspace / safe joint limits, and reports what was
+    actually achieved (`achieved_r_mm` / `achieved_z_mm`) plus a `clamped` flag
+    so UIs can stay honest about partial moves. Hand is always preserved.
+    """
+    cur = dict(POSES["travel_tuck"] if joints is None else joints)
+    for key in ("base", "shoulder", "elbow", "hand"):
+        cur[key] = float(cur.get(key, 0.0) or 0.0)
+
+    fk_cur = forward_kinematics(cur["base"], cur["shoulder"], cur["elbow"])
+    # Signed radial reach from the shoulder axis (tuck leans BACKWARD: x<0);
+    # must keep the sign or a zero-delta jog would mirror the pose.
+    r0 = fk_cur["r"] * 1000.0
+    z0 = fk_cur["z"] * 1000.0
+
+    r_t = r0 + float(dr_mm)
+    z_t = z0 + float(dz_mm)
+
+    sol = planar_ik(r_t, z_t, seed_shoulder=cur["shoulder"], seed_elbow=cur["elbow"])
+    clamped = False
+    if sol is None:
+        # Outside the annulus: walk from the current pose toward the target and
+        # stop at the last still-reachable point (keeps the other axis as close
+        # as possible instead of snapping radially).
+        l2 = ARM_L2_MM
+        l3 = ARM_L3_MM
+        d_max = l2 + l3 - 6.0
+        d_min = abs(l2 - l3) + 6.0
+
+        def _inside(px: float, pz: float) -> bool:
+            dd = math.hypot(px, pz)
+            return d_min <= dd <= d_max
+
+        dir_x, dir_z = r_t - r0, z_t - z0
+        norm = math.hypot(dir_x, dir_z)
+        if norm < 1e-6:
+            dir_x, dir_z = r_t, z_t
+            norm = math.hypot(r_t, z_t)
+            best = _clamp(norm, d_min, d_max)
+            r_t, z_t = r_t * best / max(norm, 1e-6), z_t * best / max(norm, 1e-6)
+        elif _inside(r0, z0):
+            t_lo, t_hi = 0.0, 1.0
+            for _ in range(40):
+                mid = (t_lo + t_hi) / 2.0
+                if _inside(r0 + dir_x * mid, z0 + dir_z * mid):
+                    t_lo = mid
+                else:
+                    t_hi = mid
+            r_t, z_t = r0 + dir_x * t_lo, z0 + dir_z * t_lo
+        else:
+            scale = _clamp(math.hypot(r_t, z_t), d_min, d_max) / max(norm, 1e-6)
+            r_t, z_t = r_t * scale, z_t * scale
+        clamped = True
+        sol = planar_ik(r_t, z_t, seed_shoulder=cur["shoulder"], seed_elbow=cur["elbow"])
+        if sol is None:
+            return {
+                "ok": False,
+                "error": "target outside workspace even after clamp",
+                "joints": dict(cur),
+                "clamped": True,
+            }
+    elif sol.get("clamped"):
+        clamped = True
+
+    new_base = _clamp(cur["base"] + math.radians(float(dyaw_deg)), *_BASE_LIM)
+    if abs(new_base - (cur["base"] + math.radians(float(dyaw_deg)))) > 1e-9:
+        clamped = True
+
+    joints_out = {
+        "base": new_base,
+        "shoulder": sol["shoulder"],
+        "elbow": sol["elbow"],
+        "hand": cur["hand"],
+    }
+    fk_new = forward_kinematics(new_base, sol["shoulder"], sol["elbow"])
+    return {
+        "ok": True,
+        "joints": joints_out,
+        "clamped": clamped or bool(sol.get("clamped")),
+        "target_r_mm": r_t,
+        "target_z_mm": z_t,
+        "achieved_r_mm": fk_new["r"] * 1000.0,
+        "achieved_z_mm": fk_new["z"] * 1000.0,
+    }
+
+
 def kinematics_public() -> Dict[str, float]:
     """Link lengths for the shared 3D twin (millimetres)."""
     return {
@@ -195,6 +367,7 @@ def forward_kinematics(
         "y": r_ee * math.sin(base_r),
         "z": z_ee,
         "z_world": l1 + z_ee,
+        "r": r_ee,
         "elbow_r": a_out,
         "elbow_z": b_out,
         "hand": float(hand) if hand is not None else _HOME["hand"],

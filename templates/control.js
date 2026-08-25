@@ -423,8 +423,15 @@ function pointInCircle(radius, x, y) {
     }
 }
 document.addEventListener('mousewheel', (e) => {
+    var delta = e.deltaY || e.detail || e.wheelDelta;
+    if (module_type == 1) {
+        // RoArm reach: wheel works any time (no drag needed). IK keeps the
+        // gripper height while shoulder+elbow coordinate the extension.
+        e.preventDefault();
+        roarmQueueMove(0, 0, delta > 0 ? -10 : 10);  // wheel up = extend
+        return;
+    }
     if (isDragging && isEnlarged) {
-        var delta = e.deltaY || e.detail || e.wheelDelta;
         e.preventDefault();
         if (delta > 0) {
             // console.log("down");
@@ -473,19 +480,20 @@ function applyHudPtz(panX, tiltY) {
         "px)";
 }
 
-function joyStickCtrl(inputX, inputY) {
+function joyStickCtrl(inputX, inputY, dx, dy) {
     if (module_type == 1) {
+        // RoArm: stick X = base yaw, stick Y = lift — both IK-coordinated
+        // server-side (/api/arm/move). Deltas stream through the shared queue;
+        // keyboard nudges pass explicit dx/dy, drags diff consecutive positions.
+        var ddx = (typeof dx === 'number') ? dx : (inputX - roarmPrevStickX);
+        var ddy = (typeof dy === 'number') ? dy : (inputY - roarmPrevStickY);
+        roarmPrevStickX = inputX;
+        roarmPrevStickY = inputY;
+        if (ddx || ddy) {
+            // Full stick throw ≈ ±64° yaw / ±120mm lift; screen-down = gripper down.
+            roarmQueueMove(-ddx * (64 / 450), -ddy * (120 / 170), 0);
+        }
         var x_cmd = Math.max(-180, Math.min(inputX/7, 180));
-        // Stick X controls base yaw (armR), Stick Y controls height (armZ)
-        armR = -inputX/7;
-        armZ = armZ + inputY/20;  // Apply incremental vertical adjustment
-        // Clamp armZ to safe working range around default
-        var minZ = arm_default_z - 150;
-        var maxZ = arm_default_z + 150;
-        armZ = Math.max(minZ, Math.min(maxZ, armZ));
-        // Send updated E/Z/R
-        cmdJsonCmd({"T":cmd_arm_ctrl_ui,"E":armE,"Z":armZ,"R":armR});
-
         RotateAngle = document.getElementById("Pan").innerHTML = x_cmd.toFixed(2);
         var panScale = document.getElementById("pan_scale");
         panScale.style.transform = `rotate(${-RotateAngle}deg)`;
@@ -2235,16 +2243,71 @@ function roarmSendGrip(percent) {
 }
 
 function roarmSendReach(reachDelta) {
-    // Distance-ahead slider adjusts armE (reach) from default (arm_default_e typically 60)
-    var newE = arm_default_e + reachDelta;
-    armE = newE;
-    // Apply circular limit constraint (same as mousewheel handler)
-    var armLimit = pointInCircle(510, armE, armZ);
-    armE = armLimit.x;
-    armZ = armLimit.y;
-    // Re-send T:144 with updated E (this will call e_z_r_to_joints)
-    cmdJsonCmd({'T': cmd_arm_ctrl_ui, 'E': armE, 'Z': armZ, 'R': armR});
-    console.log('[roarm] reach delta=' + reachDelta + ' → E=' + newE);
+    // Distance-ahead slider → IK jog. Reach changes keep gripper height;
+    // shoulder+elbow are coordinated server-side (/api/arm/move).
+    var mm = parseInt(reachDelta, 10) || 0;
+    if (!mm) return;
+    roarmQueueMove(0, 0, mm);
+    console.log('[roarm] reach delta=' + mm + 'mm (IK, height held)');
+}
+
+// ---- IK end-effector jogging (/api/arm/move) -------------------------------
+// Deltas are queued and flushed at a fixed rate so stick/keyboard/wheel all
+// share one coordinated path: reach holds height, lift holds reach, yaw is
+// base-only. Server seeds IK from the last commanded pose (no branch flips).
+var roarmMoveQueue = { yaw: 0, lift: 0, reach: 0, timer: null };
+var roarmPrevStickX = 0;
+var roarmPrevStickY = 0;
+// Aim gate: server default until /api/ui_aim_mode answers ('roarm' | 'pt').
+var uiAimMode = null;
+try {
+    fetch('/api/ui_aim_mode')
+        .then(function (r) { return r.json(); })
+        .then(function (d) { if (d && d.mode) uiAimMode = d.mode; })
+        .catch(function () {});
+} catch (e) { /* older browsers */ }
+
+function roarmQueueMove(dYawDeg, dLiftMm, dReachMm) {
+    if (typeof uiAimMode !== 'undefined' && uiAimMode !== 'roarm') return;
+    roarmMoveQueue.yaw += Number(dYawDeg) || 0;
+    roarmMoveQueue.lift += Number(dLiftMm) || 0;
+    roarmMoveQueue.reach += Number(dReachMm) || 0;
+    if (roarmMoveQueue.timer) return;
+    roarmMoveQueue.timer = setTimeout(roarmFlushMove, 110);
+}
+
+function roarmFlushMove() {
+    roarmMoveQueue.timer = null;
+    var yaw = roarmMoveQueue.yaw;
+    var lift = roarmMoveQueue.lift;
+    var reach = roarmMoveQueue.reach;
+    roarmMoveQueue.yaw = 0;
+    roarmMoveQueue.lift = 0;
+    roarmMoveQueue.reach = 0;
+    if (!yaw && !lift && !reach) return;
+    fetch('/api/arm/move', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ d_yaw_deg: yaw, d_lift_mm: lift, d_reach_mm: reach })
+    })
+        .then(function (r) { return r.json(); })
+        .then(function (res) {
+            if (res && res.ok && res.joints) {
+                applyRoarmIkHud(res.joints);
+            } else if (res && res.error) {
+                console.warn('[roarm] move rejected:', res.error);
+            }
+        })
+        .catch(function (e) { console.warn('[roarm] move failed', e); });
+}
+
+function applyRoarmIkHud(joints) {
+    // Pan gauge mirrors commanded base yaw (same convention as T:144 path).
+    var baseDeg = (Number(joints.base) || 0) * 180 / Math.PI;
+    var panEl = document.getElementById('Pan');
+    if (panEl) panEl.innerHTML = (-baseDeg).toFixed(2);
+    var panScale = document.getElementById('pan_scale');
+    if (panScale) panScale.style.transform = 'rotate(' + baseDeg + 'deg)';
 }
 
 // Wire up sliders
@@ -2277,10 +2340,13 @@ function roarmSendReach(reachDelta) {
             var delta = parseInt(this.value, 10);
             reachValue.textContent = (delta >= 0 ? '+' : '') + delta;
         });
-        
+
         reachSlider.addEventListener('change', function () {
             var delta = parseInt(this.value, 10);
             roarmSendReach(delta);
+            // Relative control: spring back to centre after the jog
+            this.value = 0;
+            reachValue.textContent = '0';
         });
     }
     

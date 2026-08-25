@@ -1002,6 +1002,82 @@ def api_twin():
     })
 
 
+@app.route('/api/arm/move', methods=['POST'])
+def api_arm_move():
+    """IK end-effector jog for the USB RoArm.
+
+    Body (all optional, applied together):
+      d_reach_mm / d_lift_mm / d_yaw_deg — relative EE deltas.
+    Reach keeps gripper height; lift keeps reach; yaw is base-only. Seeded
+    from the last commanded pose so branch selection stays continuous.
+    Hangar-gated: rover + ptz/none gets 400 and never touches USB.
+    """
+    import roarm_ctrl
+
+    if not arm_usb_enabled():
+        return jsonify({
+            'ok': False,
+            'error': 'arm move requires hangar attachment=roarm2',
+            'roarm_started': False,
+        }), 400
+
+    body = request.get_json(silent=True) or {}
+    try:
+        dr = float(body.get('d_reach_mm') or 0.0)
+        dz = float(body.get('d_lift_mm') or 0.0)
+        dyaw = float(body.get('d_yaw_deg') or 0.0)
+    except (TypeError, ValueError):
+        return jsonify({'ok': False, 'error': 'deltas must be numbers'}), 400
+    if not (math.isfinite(dr) and math.isfinite(dz) and math.isfinite(dyaw)):
+        return jsonify({'ok': False, 'error': 'deltas must be finite'}), 400
+    if max(abs(dr), abs(dz)) > 250.0:
+        return jsonify({'ok': False, 'error': 'delta too large (max 250mm)'}), 400
+
+    arm = get_roarm()
+    if arm is None:
+        _start_roarm(reason='api_arm_move')
+        arm = get_roarm()
+    if arm is None:
+        return jsonify({'ok': False, 'error': 'RoArm USB unavailable'}), 503
+
+    seed = getattr(arm, '_last_joints', None)
+    if not isinstance(seed, dict) or not seed:
+        seed = _twin_joints_snapshot()[0]
+
+    res = roarm_ctrl.relative_move(dr_mm=dr, dz_mm=dz, dyaw_deg=dyaw, joints=seed)
+    if not res.get('ok'):
+        return jsonify(res), 400
+
+    j = res['joints']
+    ok, text = arm.set_joints(j['base'], j['shoulder'], j['elbow'], j['hand'])
+
+    # Mirror to ROS viz when a bridge is up (same as the T:144 path).
+    ros_mirror = None
+    try:
+        import ros_motion
+        if get_control_mode() == 'ros2' or ros_motion.rosbridge_status().get('ok'):
+            ros_mirror = ros_motion.publish_roarm_joints(
+                j['base'], j['shoulder'], j['elbow'], j['hand'], throttle=True,
+            )
+    except Exception:
+        ros_mirror = None
+
+    resp = {
+        'ok': bool(ok),
+        'text': text[:200],
+        'clamped': bool(res.get('clamped')),
+        'target_r_mm': round(res['target_r_mm'], 1),
+        'target_z_mm': round(res['target_z_mm'], 1),
+        'achieved_r_mm': round(res['achieved_r_mm'], 1),
+        'achieved_z_mm': round(res['achieved_z_mm'], 1),
+        'joints': {k: round(v, 5) for k, v in j.items()},
+        'roarm_started': True,
+    }
+    if ros_mirror:
+        resp['ros_mirror_ok'] = bool(ros_mirror.get('ok'))
+    return jsonify(resp)
+
+
 def _control_mode_payload(mode=None, *, mode_changed=False, prev_mode=None):
     """Shared status + restart guidance after control_mode changes."""
     mode = mode or get_control_mode()
