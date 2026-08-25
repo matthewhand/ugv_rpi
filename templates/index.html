@@ -6,7 +6,7 @@
     <script src="./jquery-3.7.1.min.js"></script>
     <script src="./js-yaml.min.js"></script>
     <script src="./socket.io.js"></script>
-    <link rel="stylesheet" type="text/css" href="./style.css?v=chat-still-3">
+    <link rel="stylesheet" type="text/css" href="./style.css?v=roarm-dock-1">
     <link rel="stylesheet" type="text/css" href="./loadout.css?v=dual-hw-1">
     <style type="text/css">
       .seek-pano-card {
@@ -105,14 +105,30 @@
       .ugv-voice-mode-select option[disabled] {
         color: #666;
       }
-      /* RoArm sliders (grip + height) */
+      /* RoArm tools sit beside the chassis D-pad — never in the video overlay with the stick */
+      .raw-drive-row {
+        display: flex;
+        justify-content: center;
+        align-items: flex-start;
+        gap: 16px;
+        flex-wrap: wrap;
+        margin: 12px auto 0;
+        max-width: 640px;
+        padding: 0 8px;
+      }
+      .roarm-raw-dock {
+        flex: 1 1 260px;
+        min-width: 220px;
+        max-width: 360px;
+      }
+      /* RoArm sliders (grip + reach) */
       .roarm-sliders-box {
-        margin-top: 12px;
+        margin-top: 0;
         padding: 8px 12px;
         background: rgba(20, 23, 32, 0.9);
         border: 1px solid #2a2f3d;
         border-radius: 6px;
-        max-width: 280px;
+        max-width: none;
       }
       .roarm-slider-row {
         display: flex;
@@ -179,12 +195,12 @@
       }
       /* RoArm 3D workspace preview */
       .roarm-workspace-box {
-        margin-top: 12px;
+        margin-top: 10px;
         padding: 0;
         background: rgba(20, 23, 32, 0.9);
         border: 1px solid #2a2f3d;
         border-radius: 6px;
-        max-width: 340px;
+        max-width: none;
         overflow: hidden;
       }
       .roarm-workspace-header {
@@ -224,7 +240,7 @@
       }
       .roarm-workspace-canvas-wrap {
         width: 100%;
-        height: 240px;
+        height: 180px;
         position: relative;
         background: #0b0f19;
         transition: height 0.3s ease;
@@ -236,6 +252,17 @@
         width: 100%;
         height: 100%;
         display: block;
+      }
+      @media (max-width: 767px) {
+        .raw-drive-row {
+          flex-direction: column;
+          align-items: center;
+          max-width: 100%;
+        }
+        .roarm-raw-dock {
+          max-width: 92vw;
+          width: 92vw;
+        }
       }
     </style>
   </head>
@@ -777,38 +804,6 @@
                                                 <div class="ctrl_stick ctrl_stick_s" id="ctrl_stick"></div>
                                             </div>
                                         </div>
-                                        <!-- RoArm grip + reach sliders (module_type=1 only) -->
-                                        <div id="roarm-sliders-box" class="roarm-sliders-box" style="display:none;">
-                                            <div class="roarm-slider-row">
-                                                <label for="roarm-grip-slider" class="roarm-slider-label">
-                                                    <span class="roarm-slider-icon">🤏</span>
-                                                    <span>Grip</span>
-                                                </label>
-                                                <input type="range" id="roarm-grip-slider" class="roarm-slider" 
-                                                    min="0" max="100" value="0" step="1" />
-                                                <span id="roarm-grip-value" class="roarm-slider-value">Closed</span>
-                                            </div>
-                                            <div class="roarm-slider-row">
-                                                <label for="roarm-reach-slider" class="roarm-slider-label">
-                                                    <span class="roarm-slider-icon">→</span>
-                                                    <span>Distance ahead</span>
-                                                </label>
-                                                <input type="range" id="roarm-reach-slider" class="roarm-slider" 
-                                                    min="-150" max="150" value="0" step="5" />
-                                                <span id="roarm-reach-value" class="roarm-slider-value">0</span>
-                                            </div>
-                                        </div>
-                                        <!-- Same 3D twin as /3d (RoArm-M2 FK) -->
-                                        <div id="roarm-workspace-box" class="roarm-workspace-box" style="display:none;">
-                                            <div class="roarm-workspace-header">
-                                                <span class="roarm-workspace-title">3D Twin</span>
-                                                <span id="roarm-workspace-joints" class="roarm-workspace-joints"></span>
-                                                <button type="button" id="roarm-workspace-toggle" class="roarm-workspace-btn" title="Toggle 3D view">▼</button>
-                                            </div>
-                                            <div id="roarm-workspace-canvas-wrap" class="roarm-workspace-canvas-wrap">
-                                                <canvas id="roarm-workspace-canvas"></canvas>
-                                            </div>
-                                        </div>
                                     </div>
                                 </div>
                             </div>
@@ -835,7 +830,7 @@
                     </div>
                 </div>
                 <!-- global toggles + restart banner live in #ugv-navbar chrome -->
-                <div>
+                <div class="raw-drive-row">
                     <div class="controller">
                         <div class="ctl9_middle">
                             <div class="ctl9_middle_pos">
@@ -902,6 +897,38 @@
                                 onmouseup="cmdJsonCmd({'T':cmd_movition_ctrl,'L':0,'R':0});" 
                                 ontouchend="cmdJsonCmd({'T':cmd_movition_ctrl,'L':0,'R':0});"></li>
                             </ul>
+                        </div>
+                    </div>
+                    <div id="roarm-raw-dock" class="roarm-raw-dock" style="display:none;">
+                        <div id="roarm-sliders-box" class="roarm-sliders-box">
+                            <div class="roarm-slider-row">
+                                <label for="roarm-grip-slider" class="roarm-slider-label">
+                                    <span class="roarm-slider-icon">🤏</span>
+                                    <span>Grip</span>
+                                </label>
+                                <input type="range" id="roarm-grip-slider" class="roarm-slider"
+                                    min="0" max="100" value="0" step="1" />
+                                <span id="roarm-grip-value" class="roarm-slider-value">Closed</span>
+                            </div>
+                            <div class="roarm-slider-row">
+                                <label for="roarm-reach-slider" class="roarm-slider-label">
+                                    <span class="roarm-slider-icon">→</span>
+                                    <span>Reach</span>
+                                </label>
+                                <input type="range" id="roarm-reach-slider" class="roarm-slider"
+                                    min="-150" max="150" value="0" step="5" />
+                                <span id="roarm-reach-value" class="roarm-slider-value">0</span>
+                            </div>
+                        </div>
+                        <div id="roarm-workspace-box" class="roarm-workspace-box">
+                            <div class="roarm-workspace-header">
+                                <span class="roarm-workspace-title">3D Twin</span>
+                                <span id="roarm-workspace-joints" class="roarm-workspace-joints"></span>
+                                <button type="button" id="roarm-workspace-toggle" class="roarm-workspace-btn" title="Toggle 3D view">▼</button>
+                            </div>
+                            <div id="roarm-workspace-canvas-wrap" class="roarm-workspace-canvas-wrap">
+                                <canvas id="roarm-workspace-canvas"></canvas>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -1620,7 +1647,7 @@
     <script src="./twin.js?v=roarm-twin-2"></script>
     <script src="./modes.js?v=seek-chat-finish-1"></script>
     <script src="./loadout.js?v=roarm-twin-2"></script>
-    <script src="./control.js?v=roarm-twin-2"></script>
+    <script src="./control.js?v=roarm-twin-3"></script>
     <script src="./main.js"></script>
 </body>
 </html>

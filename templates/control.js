@@ -2172,10 +2172,11 @@ var roarmGripPercent = 0; // 0=closed, 100=open
 var roarmCurrentJoints = { base: 0.0, shoulder: 0.0, elbow: 1.5708, hand: 3.1416 };
 
 function updateRoarmSlidersVisibility() {
+    var on = (module_type == 1);
     var box = document.getElementById('roarm-sliders-box');
-    if (box) {
-        box.style.display = (module_type == 1) ? 'block' : 'none';
-    }
+    var dock = document.getElementById('roarm-raw-dock');
+    if (box) box.style.display = on ? 'block' : 'none';
+    if (dock) dock.style.display = on ? 'block' : 'none';
 }
 
 function roarmGripPercentToRad(percent) {
@@ -2391,6 +2392,7 @@ var roarmWorkspace = (function() {
 })();
 
 function updateRoarmWorkspaceVisibility() {
+    updateRoarmSlidersVisibility();
     if (module_type == 1) {
         roarmWorkspace.show();
         roarmWorkspace.init();
