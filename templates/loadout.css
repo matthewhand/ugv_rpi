@@ -296,6 +296,78 @@
   accent-color: #5b8cff;
 }
 
+.loadout-hw-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  padding: 6px 12px;
+  min-height: 38px;
+  border: 1px solid #3a4a5c;
+  border-radius: 8px;
+  background: #0f1720;
+  color: #c4d0e0;
+  font: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.loadout-hw-toggle:hover {
+  border-color: #5b8cff;
+}
+
+.loadout-hw-toggle[aria-pressed="true"] {
+  border-color: #2a7a52;
+  background: #10241c;
+  color: #b8ffea;
+}
+
+.loadout-hw-toggle.is-detected:not([aria-pressed="true"]) {
+  border-color: #5c4a2a;
+}
+
+.loadout-hw-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  line-height: 1.2;
+}
+
+.loadout-hw-copy strong {
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.loadout-hw-copy span {
+  font-size: 11px;
+  color: #9aa3b2;
+}
+
+.loadout-hw-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #4b5563;
+  box-shadow: none;
+  flex: 0 0 auto;
+}
+
+.loadout-hw-toggle.is-live .loadout-hw-dot {
+  background: #22c55e;
+  box-shadow: 0 0 8px #22c55e;
+}
+
+.loadout-hw-toggle.is-detected .loadout-hw-dot {
+  background: #fbbf24;
+  box-shadow: 0 0 8px #fbbf24;
+}
+
+.loadout-hw-toggle[aria-pressed="true"].is-live .loadout-hw-dot {
+  background: #22c55e;
+  box-shadow: 0 0 8px #22c55e;
+}
+
 .loadout-signs {
   display: flex;
   flex-wrap: wrap;

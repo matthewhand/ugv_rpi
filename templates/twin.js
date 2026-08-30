@@ -193,6 +193,152 @@
         var gripB = new THREE.Mesh(new THREE.BoxGeometry(0.008, 0.006, 0.055), makeMat(0xfbbf24));
         armRoot.add(l1Bone, l2Bone, l3Bone, shoulderBall, elbowBall, eeBall, gripA, gripB);
 
+        // Joint rings: full /3d + Twin popup iframe only (not the hangar canvas overlay).
+        // Base → yaw, shoulder → lift, elbow → reach. Grip stays a slider.
+        var showRings = opts.jointRings != null ? !!opts.jointRings : !canvas;
+        var ringDrag = null;
+        var ringRay = new THREE.Raycaster();
+        var ringPtr = new THREE.Vector2();
+
+        function makeRing(name, radius, color) {
+            var geo = new THREE.TorusGeometry(radius, 0.006, 10, 48);
+            var mat = new THREE.MeshStandardMaterial({
+                color: color, metalness: 0.25, roughness: 0.4,
+                transparent: true, opacity: 0.82, side: THREE.DoubleSide,
+                depthWrite: false
+            });
+            var mesh = new THREE.Mesh(geo, mat);
+            mesh.name = 'ring-' + name;
+            mesh.userData.joint = name;
+            mesh.renderOrder = 3;
+            var hit = new THREE.Mesh(
+                new THREE.TorusGeometry(radius, 0.018, 8, 32),
+                new THREE.MeshBasicMaterial({ visible: false, side: THREE.DoubleSide })
+            );
+            hit.userData.joint = name;
+            mesh.add(hit);
+            return mesh;
+        }
+
+        var ringBase = makeRing('base', 0.09, 0x38bdf8);
+        var ringShoulder = makeRing('shoulder', 0.075, 0x4FF5C0);
+        var ringElbow = makeRing('elbow', 0.065, 0xfbbf24);
+        ringBase.rotation.x = Math.PI / 2;
+        ringShoulder.rotation.y = Math.PI / 2;
+        ringElbow.rotation.y = Math.PI / 2;
+        if (showRings) {
+            armRoot.add(ringBase, ringShoulder, ringElbow);
+        }
+
+        function updateRings() {
+            if (!showRings) return;
+            var on = state.attachment === 'roarm2';
+            ringBase.visible = ringShoulder.visible = ringElbow.visible = on;
+            ringBase.position.set(0, 0.012, 0);
+            ringShoulder.position.copy(shoulderBall.position);
+            ringElbow.position.copy(elbowBall.position);
+        }
+
+        function sendIkJog(yaw, lift, reach) {
+            if (!yaw && !lift && !reach) return;
+            try {
+                if (window.parent && window.parent !== window &&
+                    typeof window.parent.roarmQueueMove === 'function') {
+                    window.parent.roarmQueueMove(yaw, lift, reach);
+                    return;
+                }
+            } catch (e) {}
+            if (typeof window.roarmQueueMove === 'function') {
+                window.roarmQueueMove(yaw, lift, reach);
+                return;
+            }
+            fetch('/api/arm/move', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ d_yaw_deg: yaw, d_lift_mm: lift, d_reach_mm: reach })
+            }).catch(function () {});
+        }
+
+        function ringNdc(ev) {
+            var rect = renderer.domElement.getBoundingClientRect();
+            ringPtr.x = ((ev.clientX - rect.left) / Math.max(1, rect.width)) * 2 - 1;
+            ringPtr.y = -((ev.clientY - rect.top) / Math.max(1, rect.height)) * 2 + 1;
+        }
+
+        function ringAngle(ev, joint) {
+            ringNdc(ev);
+            ringRay.setFromCamera(ringPtr, camera);
+            armRoot.updateMatrixWorld(true);
+            var axisLocal = joint === 'base' ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(1, 0, 0);
+            var axisWorld = axisLocal.clone().transformDirection(armRoot.matrixWorld);
+            var mesh = joint === 'base' ? ringBase : (joint === 'shoulder' ? ringShoulder : ringElbow);
+            var center = new THREE.Vector3();
+            mesh.getWorldPosition(center);
+            var plane = new THREE.Plane().setFromNormalAndCoplanarPoint(axisWorld, center);
+            var hit = new THREE.Vector3();
+            if (!ringRay.ray.intersectPlane(plane, hit)) return null;
+            var local = armRoot.worldToLocal(hit.clone());
+            var c = armRoot.worldToLocal(center.clone());
+            var v = local.sub(c);
+            return joint === 'base' ? Math.atan2(v.x, v.z) : Math.atan2(v.y, v.z);
+        }
+
+        function pickRing(ev) {
+            ringNdc(ev);
+            ringRay.setFromCamera(ringPtr, camera);
+            var hits = ringRay.intersectObjects([ringBase, ringShoulder, ringElbow], true);
+            if (!hits.length) return null;
+            var obj = hits[0].object;
+            while (obj && !obj.userData.joint) obj = obj.parent;
+            return obj ? obj.userData.joint : null;
+        }
+
+        function jogRing(joint, dAng) {
+            var deg = dAng * 180 / Math.PI;
+            var yaw = 0, lift = 0, reach = 0;
+            if (joint === 'base') yaw = clamp(deg, -12, 12);
+            else if (joint === 'shoulder') lift = clamp(deg * 2.2, -25, 25);
+            else if (joint === 'elbow') reach = clamp(deg * 2.8, -30, 30);
+            sendIkJog(yaw, lift, reach);
+        }
+
+        function onRingDown(ev) {
+            if (!showRings || state.attachment !== 'roarm2') return;
+            var joint = pickRing(ev);
+            if (!joint) return;
+            var ang = ringAngle(ev, joint);
+            if (ang == null) return;
+            ringDrag = { joint: joint, lastAngle: ang };
+            if (controls) controls.enabled = false;
+            ev.preventDefault();
+            ev.stopPropagation();
+        }
+
+        function onRingMove(ev) {
+            if (!ringDrag) return;
+            var ang = ringAngle(ev, ringDrag.joint);
+            if (ang == null) return;
+            var d = ang - ringDrag.lastAngle;
+            if (d > Math.PI) d -= Math.PI * 2;
+            if (d < -Math.PI) d += Math.PI * 2;
+            ringDrag.lastAngle = ang;
+            jogRing(ringDrag.joint, d);
+            ev.preventDefault();
+        }
+
+        function onRingUp() {
+            if (!ringDrag) return;
+            ringDrag = null;
+            if (controls) controls.enabled = true;
+        }
+
+        if (showRings) {
+            renderer.domElement.addEventListener('pointerdown', onRingDown);
+            window.addEventListener('pointermove', onRingMove);
+            window.addEventListener('pointerup', onRingUp);
+            window.addEventListener('pointercancel', onRingUp);
+        }
+
         var panLink = new THREE.Group();
         var tiltLink = new THREE.Group();
         var panMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.04, 16), makeMat(0x38bdf8));
@@ -211,6 +357,34 @@
         );
         scene.add(trailLine);
 
+        var LIDAR_BINS = 36;
+        var lidarPos = new Float32Array(LIDAR_BINS * 3);
+        var lidarGeo = new THREE.BufferGeometry();
+        lidarGeo.setAttribute('position', new THREE.BufferAttribute(lidarPos, 3));
+        lidarGeo.setDrawRange(0, 0);
+        var lidarPts = new THREE.Points(
+            lidarGeo,
+            new THREE.PointsMaterial({
+                color: 0x38bdf8,
+                size: compact ? 0.028 : 0.035,
+                sizeAttenuation: true,
+                transparent: true,
+                opacity: 0.95
+            })
+        );
+        lidarPts.visible = false;
+        scene.add(lidarPts);
+        var lidarRayPos = new Float32Array(LIDAR_BINS * 2 * 3);
+        var lidarRayGeo = new THREE.BufferGeometry();
+        lidarRayGeo.setAttribute('position', new THREE.BufferAttribute(lidarRayPos, 3));
+        lidarRayGeo.setDrawRange(0, 0);
+        var lidarRays = new THREE.LineSegments(
+            lidarRayGeo,
+            new THREE.LineBasicMaterial({ color: 0x38bdf8, transparent: true, opacity: compact ? 0.18 : 0.28 })
+        );
+        lidarRays.visible = false;
+        scene.add(lidarRays);
+
         var state = {
             chassis: 'rover',
             attachment: 'ptz',
@@ -219,7 +393,8 @@
             ptzTilt: 0,
             connected: false,
             pollOk: false,
-            robotName: 'UGV'
+            robotName: 'UGV',
+            lidar: null
         };
         var chassisBuiltFor = '';
         var mount = { y: 0.12, z: 0.04 };
@@ -361,6 +536,7 @@
                 trailLine.geometry.computeBoundingSphere();
             }
             lastFk = p;
+            updateRings();
             updateHud();
         }
 
@@ -378,6 +554,7 @@
             armRoot.visible = arm;
             trailLine.visible = arm;
             ptGroup.visible = pt;
+            updateRings();
         }
 
         function frameCamera() {
@@ -389,6 +566,92 @@
                 camera.position.set(1.15, 0.95, 1.35);
                 if (controls) controls.target.set(0, 0.22, 0.08);
                 else camera.lookAt(0, 0.22, 0.08);
+            }
+        }
+
+        function applyLidarScan(lidar) {
+            state.lidar = lidar || null;
+            var bins = lidar && lidar.bins_10deg_mm;
+            var live = !!(lidar && lidar.open && bins && bins.length);
+            lidarPts.visible = live;
+            lidarRays.visible = live;
+            if (!live) {
+                lidarGeo.setDrawRange(0, 0);
+                lidarRayGeo.setDrawRange(0, 0);
+                return;
+            }
+            var n = Math.min(LIDAR_BINS, bins.length);
+            var i, mm, m, nativeRad, rx, ry, v, deckY = 0.055;
+            var shown = 0;
+            for (i = 0; i < n; i++) {
+                mm = bins[i];
+                if (mm == null || mm <= 0) continue;
+                m = mm / 1000;
+                // API deg is OSD (lidar+180). Native 0° = camera-forward = THREE +Z.
+                nativeRad = ((i * 10 + 5) - 180) * Math.PI / 180;
+                rx = m * Math.cos(nativeRad);
+                ry = m * Math.sin(nativeRad);
+                v = robotToThree(rx, ry, deckY);
+                lidarPos[shown * 3] = v.x;
+                lidarPos[shown * 3 + 1] = v.y;
+                lidarPos[shown * 3 + 2] = v.z;
+                lidarRayPos[shown * 6] = 0;
+                lidarRayPos[shown * 6 + 1] = deckY;
+                lidarRayPos[shown * 6 + 2] = 0;
+                lidarRayPos[shown * 6 + 3] = v.x;
+                lidarRayPos[shown * 6 + 4] = v.y;
+                lidarRayPos[shown * 6 + 5] = v.z;
+                shown++;
+            }
+            lidarGeo.setDrawRange(0, shown);
+            lidarRayGeo.setDrawRange(0, shown * 2);
+            lidarGeo.attributes.position.needsUpdate = true;
+            lidarRayGeo.attributes.position.needsUpdate = true;
+            lidarGeo.computeBoundingSphere();
+        }
+
+        function drawLidarRadar(lidar) {
+            var cv = document.getElementById('lidar-radar');
+            if (!cv || !cv.getContext) return;
+            var ctx = cv.getContext('2d');
+            var w = cv.width;
+            var h = cv.height;
+            var cx = w / 2;
+            var cy = h / 2;
+            var R = Math.min(w, h) / 2 - 8;
+            ctx.clearRect(0, 0, w, h);
+            ctx.strokeStyle = 'rgba(56,189,248,0.22)';
+            ctx.lineWidth = 1;
+            ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI * 2); ctx.stroke();
+            ctx.beginPath(); ctx.arc(cx, cy, R * 0.5, 0, Math.PI * 2); ctx.stroke();
+            ctx.strokeStyle = '#38bdf8';
+            ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx, cy - R); ctx.stroke();
+            ctx.fillStyle = '#64748b';
+            ctx.font = '9px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('fwd', cx, 12);
+            var bins = lidar && lidar.bins_10deg_mm;
+            if (!bins) return;
+            var maxM = 2.5;
+            if (lidar.max_mm) maxM = Math.max(1.0, lidar.max_mm / 1000);
+            var i, mm, m, nativeRad, sx, sy;
+            ctx.fillStyle = '#38bdf8';
+            for (i = 0; i < bins.length; i++) {
+                mm = bins[i];
+                if (mm == null || mm <= 0) continue;
+                m = Math.min(mm / 1000, maxM);
+                nativeRad = ((i * 10 + 5) - 180) * Math.PI / 180;
+                sx = cx - Math.sin(nativeRad) * (m / maxM) * R;
+                sy = cy - Math.cos(nativeRad) * (m / maxM) * R;
+                ctx.fillRect(sx - 1.5, sy - 1.5, 3, 3);
+            }
+            if (lidar.nearest && lidar.nearest.mm != null) {
+                nativeRad = (lidar.nearest.deg - 180) * Math.PI / 180;
+                m = Math.min(lidar.nearest.mm / 1000, maxM);
+                sx = cx - Math.sin(nativeRad) * (m / maxM) * R;
+                sy = cy - Math.cos(nativeRad) * (m / maxM) * R;
+                ctx.fillStyle = '#fbbf24';
+                ctx.beginPath(); ctx.arc(sx, sy, 4, 0, Math.PI * 2); ctx.fill();
             }
         }
 
@@ -417,6 +680,27 @@
                 var reachMm = Math.sqrt(lastFk.x * lastFk.x + lastFk.y * lastFk.y) * 1000;
                 setText(hud.ee || 'ee-val',
                     reachMm.toFixed(0) + ' mm fwd · ' + (lastFk.zWorld * 1000).toFixed(0) + ' mm up');
+            }
+            var lidarHud = document.getElementById('hud-lidar');
+            var L = state.lidar;
+            var lidarShow = !!(L && (L.detected || L.enabled || L.open));
+            if (lidarHud) lidarHud.style.display = lidarShow ? '' : 'none';
+            if (lidarShow) {
+                var lidarLabel = 'off';
+                if (L.open) lidarLabel = 'live ' + (L.port ? L.port.replace(/^.*\//, '') : 'USB');
+                else if (L.enabled && L.detected) lidarLabel = 'enabled, waiting';
+                else if (L.enabled) lidarLabel = 'enabled, no USB';
+                else if (L.detected) lidarLabel = 'USB detected';
+                setText(hud.lidar || 'lidar-val', lidarLabel);
+                var nearTxt = '—';
+                if (L.nearest && L.nearest.mm != null) {
+                    nearTxt = Math.round(L.nearest.mm) + ' mm';
+                    if (L.nearest.deg != null) nearTxt += ' @ ' + Math.round(L.nearest.deg) + '°';
+                } else if (L.min_mm != null) {
+                    nearTxt = Math.round(L.min_mm) + '–' + Math.round(L.max_mm || L.min_mm) + ' mm';
+                }
+                setText(hud.lidarNear || 'lidar-near-val', nearTxt);
+                drawLidarRadar(L);
             }
             var roarmHud = document.getElementById('hud-roarm');
             var ptzHud = document.getElementById('hud-ptz');
@@ -460,6 +744,8 @@
                 }
             }
             setText('twin-title-name', state.robotName);
+            applyLidarScan(d.lidar);
+            updateHud();
         }
 
         function poll() {
@@ -538,6 +824,12 @@
                 if (pollTimer) clearInterval(pollTimer);
                 if (ro) ro.disconnect();
                 window.removeEventListener('resize', resize);
+                if (showRings) {
+                    renderer.domElement.removeEventListener('pointerdown', onRingDown);
+                    window.removeEventListener('pointermove', onRingMove);
+                    window.removeEventListener('pointerup', onRingUp);
+                    window.removeEventListener('pointercancel', onRingUp);
+                }
                 renderer.dispose();
             }
         };

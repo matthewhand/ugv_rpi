@@ -50,10 +50,15 @@
         }
         .back-btn:hover { background: #0369a1; }
         .hint { font-size: 11px; color: #64748b; margin: 8px 0 0; line-height: 1.35; }
+        #lidar-radar {
+            display: block; margin-top: 8px;
+            background: #071018; border-radius: 8px;
+            border: 1px solid rgba(56, 189, 248, 0.28);
+        }
     </style>
     <script src="./three.min.js"></script>
     <script src="./OrbitControls.js"></script>
-    <script src="./twin.js?v=roarm-twin-2"></script>
+    <script src="./twin.js?v=lidar-ring-1"></script>
 </head>
 <body>
     <div class="hud-panel">
@@ -71,12 +76,17 @@
             <div class="joint-val">Pan: <span id="pan-val">0.0°</span></div>
             <div class="joint-val">Tilt: <span id="tilt-val">0.0°</span></div>
         </div>
-        <p class="hint">RoArm-M2 links from Waveshare firmware (L1/L2/L3). Same model as the hangar overlay.</p>
+        <div id="hud-lidar" style="display:none;">
+            <div class="joint-val">Lidar: <span id="lidar-val">off</span></div>
+            <div class="joint-val">Nearest: <span id="lidar-near-val">—</span></div>
+            <canvas id="lidar-radar" width="140" height="140" aria-label="Lidar polar scan"></canvas>
+        </div>
+        <p class="hint">Drag a ring: blue = yaw, green = lift, amber = reach. Grip stays on the slider.</p>
         <a href="/" class="back-btn" id="back-btn">← Back to Dashboard</a>
     </div>
 
     <div class="controls-info">
-        Mouse Left: Rotate | Scroll: Zoom | Mouse Right: Pan
+        Drag a ring to jog that joint · Left empty: orbit · Scroll: zoom
     </div>
 
     <div id="canvas-container"></div>

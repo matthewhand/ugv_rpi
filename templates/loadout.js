@@ -30,6 +30,7 @@
   var serverOk = false;
   var dirty = false;
   var lastSigns = { drive_linear_sign: null, drive_angular_sign: null };
+  var lastLidar = { enabled: false, detected: false, open: false, port: null, nearest: null, min_mm: null, max_mm: null, valid_points: 0 };
 
   function $(id) {
     return document.getElementById(id);
@@ -226,9 +227,37 @@
     el.className = 'loadout-status' + (kind ? ' is-' + kind : '');
   }
 
+  function lidarMetaText() {
+    if (selection.use_lidar && lastLidar.open) {
+      var near = lastLidar.nearest && lastLidar.nearest.mm != null
+        ? Math.round(lastLidar.nearest.mm) + ' mm'
+        : (lastLidar.min_mm != null ? Math.round(lastLidar.min_mm) + ' mm' : 'scanning');
+      return 'live · ' + (lastLidar.port || 'USB') + ' · nearest ' + near;
+    }
+    if (selection.use_lidar && lastLidar.detected) {
+      return 'on · USB found, waiting for scan';
+    }
+    if (selection.use_lidar) {
+      return 'on · no USB lidar yet';
+    }
+    if (lastLidar.detected) {
+      return 'USB detected · click to enable';
+    }
+    return 'USB LD19 · off';
+  }
+
   function syncLidarBox() {
+    var on = !!selection.use_lidar;
     var cb = $('loadout-use-lidar');
-    if (cb) cb.checked = !!selection.use_lidar;
+    if (cb) cb.checked = on;
+    var btn = $('loadout-lidar-btn');
+    if (btn) {
+      btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+      btn.classList.toggle('is-live', !!(on && lastLidar.open));
+      btn.classList.toggle('is-detected', !!(!on && lastLidar.detected));
+    }
+    var meta = $('loadout-lidar-meta');
+    if (meta) meta.textContent = lidarMetaText();
   }
 
   function renderSigns() {
@@ -318,6 +347,18 @@
       selection.attachment = lo.attachment;
     }
     if (typeof lo.use_lidar !== 'undefined') selection.use_lidar = !!lo.use_lidar;
+    if (data.lidar && typeof data.lidar === 'object') {
+      lastLidar = {
+        enabled: !!data.lidar.enabled,
+        detected: !!data.lidar.detected,
+        open: !!data.lidar.open,
+        port: data.lidar.port || null,
+        nearest: data.lidar.nearest || null,
+        min_mm: data.lidar.min_mm,
+        max_mm: data.lidar.max_mm,
+        valid_points: data.lidar.valid_points || 0,
+      };
+    }
     if (lo.camera_prefer) selection.camera_prefer = String(lo.camera_prefer);
     selection._roarm_started = !!data.roarm_started;
     if (typeof data.drive_linear_sign !== 'undefined') {
@@ -405,6 +446,9 @@
         renderStage();
         setStatus('saved · ' + comboTitle().toLowerCase(), 'ok');
         notifyLoadoutChanged();
+        if (body.use_lidar) {
+          setTimeout(function () { refresh(); }, 1200);
+        }
       })
       .catch(function (e) {
         setStatus('save failed: ' + (e && e.message ? e.message : 'network'), 'err');
@@ -452,10 +496,44 @@
       }
     });
     var lidar = $('loadout-use-lidar');
+    var lidarBtn = $('loadout-lidar-btn');
+    function postLidar(on) {
+      selection.use_lidar = !!on;
+      if (lidar) lidar.checked = selection.use_lidar;
+      renderStage();
+      setStatus('lidar ' + (selection.use_lidar ? 'enabling…' : 'disabling…'), 'busy');
+      return fetch(API, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({ use_lidar: selection.use_lidar }),
+      })
+        .then(parseResponse)
+        .then(function (pack) {
+          if (
+            !pack.http.ok ||
+            pack.data.ok === false ||
+            pack.data.success === false
+          ) {
+            setStatus('lidar toggle failed: ' + payloadError(pack.data, pack.http), 'err');
+            return;
+          }
+          applyPayload(pack.data);
+          renderStage();
+          setStatus('lidar ' + (selection.use_lidar ? 'on' : 'off') + ' · USB', 'ok');
+          notifyLoadoutChanged();
+        })
+        .catch(function (e) {
+          setStatus('lidar toggle failed: ' + (e && e.message ? e.message : 'network'), 'err');
+        });
+    }
     if (lidar) {
       lidar.addEventListener('change', function () {
-        selection.use_lidar = !!lidar.checked;
-        markDirty();
+        postLidar(lidar.checked);
+      });
+    }
+    if (lidarBtn) {
+      lidarBtn.addEventListener('click', function () {
+        postLidar(!selection.use_lidar);
       });
     }
     var cam = $('loadout-camera-prefer');
@@ -485,6 +563,7 @@
           base: selection.base,
           attachment: selection.attachment,
           module_type: moduleType,
+          use_lidar: !!selection.use_lidar,
         },
       });
       document.dispatchEvent(event);

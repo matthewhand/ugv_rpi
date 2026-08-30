@@ -52,9 +52,12 @@ _loadout_store.load(fallback_from_config=f)
 loadout_mod.apply_loadout_to_config(f, _loadout_store.get())
 # Honor persisted use_lidar without forcing lidar hardware at install time.
 try:
-    base.use_lidar = bool(f['base_config'].get('use_lidar'))
+    base.set_use_lidar(bool(f['base_config'].get('use_lidar')))
 except Exception:
-    pass
+    try:
+        base.use_lidar = bool(f['base_config'].get('use_lidar'))
+    except Exception:
+        pass
 
 base.base_oled(0, f["base_config"]["robot_name"])
 base.base_oled(1, f"sbc_version: {f['base_config']['sbc_version']}")
@@ -829,6 +832,7 @@ def api_status():
         'drive_angular_sign': _drive_sign('angular'),
         'ptz': _ptz_aim_public(),
         'loadout': _status_loadout(),
+        'lidar': _lidar_public(),
     })
 
 @app.route('/api/toggle_rtsp', methods=['POST'])
@@ -838,6 +842,37 @@ def api_toggle_rtsp():
     olog.info('rtsp_toggle', f'RTSP stream {"ON" if enable_rtsp_stream else "OFF"}',
               enable_rtsp_stream=enable_rtsp_stream)
     return jsonify({'success': True, 'enable_rtsp_stream': enable_rtsp_stream})
+
+
+def _lidar_public(include_sample=True):
+    """Live USB lidar slice for /api/status, /api/lidar, and the 3D twin.
+
+    `detected` is true when a CP2102/ACM lidar candidate exists even if
+    hangar `use_lidar` is still off (so the UI can offer the toggle).
+    """
+    rl = getattr(base, 'rl', None)
+    snap = {}
+    if rl is not None and hasattr(rl, 'lidar_snapshot'):
+        try:
+            snap = rl.lidar_snapshot() or {}
+        except Exception as e:
+            snap = {'error': str(e)}
+    candidates = []
+    try:
+        from base_ctrl import lidar_port_candidates
+        candidates = list(lidar_port_candidates() or [])
+    except Exception:
+        candidates = []
+    detected = bool(snap.get('open') or candidates)
+    out = {
+        'enabled': bool(getattr(base, 'use_lidar', False)),
+        'detected': detected,
+        'candidates': candidates,
+        **snap,
+    }
+    if not include_sample:
+        out.pop('sample', None)
+    return out
 
 
 def _status_loadout():
@@ -863,9 +898,11 @@ def api_loadout():
       - overlay in-memory base_config
       - apply camera_prefer live via cv_ctrl re-init
       - start/stop USB RoArm only when attachment is/ was roarm2
+      - open/close USB lidar (CP2102 / ttyACM) when use_lidar flips
     """
     if request.method == 'GET':
         payload = _loadout_store.public(f, roarm_started=roarm_started())
+        payload['lidar'] = _lidar_public()
         return jsonify(payload)
     data = request.get_json(silent=True)
     if data is None:
@@ -879,7 +916,18 @@ def api_loadout():
     _loadout_store.set(patch)
     lo = _loadout_store.get()
     loadout_mod.apply_loadout_to_config(f, lo)
-    base.use_lidar = bool(f['base_config'].get('use_lidar'))
+    lidar_apply = None
+    try:
+        lidar_ok = base.set_use_lidar(bool(f['base_config'].get('use_lidar')))
+        lidar_apply = {
+            'ok': bool(lidar_ok) if lo.get('use_lidar') else True,
+            'enabled': bool(getattr(base, 'use_lidar', False)),
+            'port': getattr(base.rl, 'lidar_port', None),
+            'error': getattr(base.rl, 'lidar_last_error', None),
+        }
+    except Exception as e:
+        lidar_apply = {'ok': False, 'error': str(e)}
+        olog.warn('loadout', f'lidar apply failed: {e}', error=str(e)[:160])
 
     camera_apply = None
     if patch.get('camera_prefer') is not None or patch.get('base') is not None:
@@ -903,6 +951,8 @@ def api_loadout():
 
     payload = _loadout_store.public(f, roarm_started=roarm_started())
     payload['camera_apply'] = camera_apply
+    payload['lidar'] = _lidar_public()
+    payload['lidar_apply'] = lidar_apply
     payload['roarm_sync'] = {
         k: roarm_sync.get(k)
         for k in ('started', 'stopped', 'ok', 'already_up', 'already_down', 'detail', 'error', 'usb_owner')
@@ -921,6 +971,25 @@ def api_loadout():
         camera_ok=(camera_apply or {}).get('ok'),
     )
     return jsonify(payload)
+
+
+@app.route('/api/lidar', methods=['GET'])
+def api_lidar():
+    """Last USB lidar revolution (LD19/CP2102). ?fresh=1 waits for one scan."""
+    if request.args.get('fresh') in ('1', 'true', 'yes'):
+        if getattr(base, 'use_lidar', False):
+            try:
+                base.rl.lidar_data_recv()
+            except Exception as e:
+                olog.warn('lidar', f'fresh scan failed: {e}', error=str(e)[:160])
+        else:
+            return jsonify({
+                'ok': False,
+                'error': 'use_lidar is off',
+                **_lidar_public(),
+            }), 409
+    snap = _lidar_public()
+    return jsonify({'ok': True, **snap})
 
 
 @app.route('/api/ui_aim_mode', methods=['GET', 'POST'])
@@ -999,6 +1068,7 @@ def api_twin():
         'ee_m': {k: round(fk[k], 4) for k in ('x', 'y', 'z', 'z_world')},
         'ptz': _ptz_aim_public(),
         'kinematics': roarm_ctrl.kinematics_public(),
+        'lidar': _lidar_public(include_sample=False),
     })
 
 
@@ -3454,6 +3524,7 @@ def _get_robot_context_payload():
         'hailo_present': hailo_present,
         'arm_status': arm_status,
         'battery_voltage': voltage,
+        'lidar': _lidar_public(),
     }
 
 
@@ -3485,6 +3556,10 @@ def _get_telemetry_payload():
             k: bd.get(k) for k in ('T', 'L', 'R', 'v', 'pan', 'tilt', 'odl', 'odr')
             if k in bd
         }
+    except Exception:
+        pass
+    try:
+        data['lidar'] = _lidar_public()
     except Exception:
         pass
     return data
@@ -9249,6 +9324,8 @@ if __name__ == "__main__":
         serial_open=bool(getattr(base, 'ser', None)),
         module_type=f['base_config'].get('module_type'),
         main_type=f['base_config'].get('main_type'),
+        use_lidar=bool(getattr(base, 'use_lidar', False)),
+        lidar_port=getattr(getattr(base, 'rl', None), 'lidar_port', None),
         hot_reload=bool(_HOT_RELOAD),
         esp32_wifi_stop_on_start=os.environ.get('UGV_ESP32_WIFI_STOP_ON_START', '0'),
     )

@@ -1214,6 +1214,9 @@ ul.video-list li a:hover div .normal_btn_play::before{background-image: url('./i
   color: #5b8cff !important;
   border-color: #3a5a9a !important;
 }
+.ugv-nav-chip[hidden] {
+  display: none !important;
+}
 /* Global emergency STOP — always visible in navbar (primary safety control) */
 .ugv-global-stop {
   border: 1.5px solid #ff4d4f;

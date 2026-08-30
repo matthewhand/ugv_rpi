@@ -22,6 +22,7 @@ Visual QA source of truth for Playwright feature catalog.
 | `shell.hb_on` | Idle heartbeat ON | Chip **HB** green — safety default for manual |
 | `shell.hb_off` | Idle heartbeat OFF | Chip **HB off** amber — for AI timed drives |
 | `shell.wifi_chip` | ESP32 WiFi chip | Chip **WiFi** / **WiFi off** (confirm dialog before stop — do not confirm in QA) |
+| `shell.lidar` | USB lidar chip | Chip **Lidar** appears when a USB LD19/CP2102 is detected (or hangar lidar is on). Green = streaming; amber = enabled but no scan; red = detected but off. Click enables/disables immediately. |
 | `shell.ops_log` | App log open | Purple ops drawer bottom-right; level filter, follow, clear |
 | `shell.twin_drawer` | 3D Twin open | Blue twin drawer; iframe of `/3d`; larger default size |
 | `shell.navbar_phone` | Phone landscape chrome | Single sticky row; brand may hide; **STOP** visible |
@@ -34,6 +35,7 @@ Visual QA source of truth for Playwright feature catalog.
 - **ROS 2:** needs rosbridge; if it dies, firmware autoheal retries and serial fallback keeps motion alive (see README). Do not expect silent perfection if Docker/`ugv_ros2` is broken.
 - **Drive polarity:** after changing `drive_linear_sign`, **restart the Flask app** and check `GET /api/status` → `drive_linear_sign` (browser refresh alone does not reload yaml).
 - `shell.path_direct` / `shell.path_ros2` catalog shots depend on server path at capture time; flip the chip yourself if you need the other PNG (catalog never thrash-flips UART).
+- **Lidar** is USB on the Pi (LD19/CP2102), not ESP32 JSON. Hangar **Lidar** and the navbar chip both persist `use_lidar`. Twin shows a scan ring only while the port is streaming.
 
 ---
 
@@ -139,6 +141,7 @@ PTZ-only hunt: the camera sweeps; the chassis does not drive. A VOC class uses M
 | `twin.page` | Full page `/3d` | Hangar-true chassis + RoArm-M2 (Waveshare L1/L2/L3 FK) or PT gimbal; HUD joints |
 | `twin.drawer` | In-page drawer | Open from Twin chip; same `/3d` model; Back/full tab link |
 | `twin.hangar` | Raw RoArm overlay | Same twin as `/3d` (not a separate “workspace approx”) |
+| `twin.lidar` | Lidar overlay | When USB lidar is live: cyan scan ring around chassis + HUD radar (nearest in amber) |
 
 ---
 

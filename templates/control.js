@@ -1536,6 +1536,93 @@ document.getElementById('open_jupyter').addEventListener('click', function() {
     window.open(newUrl, '_blank');
 });
 
+var _lidarState = { enabled: false, detected: false, open: false };
+
+function _lidarChipTitle(d) {
+    d = d || _lidarState || {};
+    if (d.open) {
+        var near = d.nearest && d.nearest.mm != null ? Math.round(d.nearest.mm) + ' mm' : '—';
+        var at = d.nearest && d.nearest.deg != null ? ' @ ' + Math.round(d.nearest.deg) + '°' : '';
+        return 'USB lidar live on ' + (d.port || 'serial') +
+            ' · ' + (d.valid_points || 0) + ' pts · nearest ' + near + at +
+            ' (click to disable)';
+    }
+    if (d.enabled && d.detected) {
+        return 'USB lidar enabled, waiting for scans on ' + ((d.candidates && d.candidates[0]) || 'USB') + '. Click to disable.';
+    }
+    if (d.enabled) {
+        return 'Lidar enabled in hangar but no USB LD19/CP2102 found. Click to disable.';
+    }
+    if (d.detected) {
+        return 'USB lidar detected' + (d.candidates && d.candidates[0] ? ' (' + d.candidates[0] + ')' : '') + '. Click to enable.';
+    }
+    return 'No USB lidar detected. Hangar Lidar toggle still available.';
+}
+
+function updateLidarChip(d) {
+    var btn = document.getElementById('lidar-toggle-btn');
+    if (!btn) return;
+    if (d && typeof d === 'object') {
+        _lidarState = {
+            enabled: !!d.enabled,
+            detected: !!d.detected,
+            open: !!d.open,
+            port: d.port || null,
+            nearest: d.nearest || null,
+            valid_points: d.valid_points || 0,
+            candidates: d.candidates || [],
+            min_mm: d.min_mm,
+            max_mm: d.max_mm
+        };
+    }
+    var show = !!(_lidarState.detected || _lidarState.enabled || _lidarState.open);
+    btn.hidden = !show;
+    if (!show) return;
+    var label = 'Lidar';
+    var state = '';
+    if (_lidarState.open) {
+        label = 'Lidar';
+        state = 'is-on';
+        if (_lidarState.min_mm != null) {
+            var m = _lidarState.min_mm / 1000;
+            label = m >= 1 ? ('Lidar ' + m.toFixed(1) + 'm') : ('Lidar ' + Math.round(_lidarState.min_mm) + 'mm');
+        }
+    } else if (_lidarState.enabled) {
+        state = 'is-warn';
+        label = 'Lidar';
+    } else {
+        state = 'is-off';
+        label = 'Lidar';
+    }
+    _setNavChip(btn, label, state, _lidarChipTitle(_lidarState));
+}
+
+function toggleLidar() {
+    var next = !_lidarState.enabled;
+    fetch('/api/loadout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({ use_lidar: next })
+    })
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+            updateLidarChip(d.lidar || { enabled: next });
+            if (typeof window.ugvLoadoutRefresh === 'function') {
+                try { window.ugvLoadoutRefresh(); } catch (e) {}
+            }
+        })
+        .catch(function (e) { console.warn('lidar toggle failed', e); });
+}
+
+function pollLidarChip() {
+    fetch('/api/lidar')
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+            if (d) updateLidarChip(d);
+        })
+        .catch(function () {});
+}
+
 function toggleRTSP() {
     fetch('/api/toggle_rtsp', {method: 'POST'})
     .then(res => res.json())
@@ -2171,9 +2258,11 @@ fetch('/api/status').then(function (r) { return r.json(); }).then(function (d) {
     updateControlModeBtn(d.control_mode || (d.enable_motor_control ? 'direct' : 'ros2'));
     updateEsp32WifiBtn(!!d.esp32_wifi_stopped);
     updateChassisHeartbeatBtn();
+    if (d.lidar) updateLidarChip(d.lidar);
 }).catch(function () {
     updateChassisHeartbeatBtn();
 });
+setInterval(pollLidarChip, 2000);
 
 // ---- RoArm grip + height sliders (module_type=1) ----
 var roarmGripPercent = 0; // 0=closed, 100=open
@@ -2369,6 +2458,9 @@ document.addEventListener('ugv:loadout-changed', function (ev) {
             chassis: ev.detail.base === 'beast' ? 'beast' : 'rover',
             attachment: ev.detail.attachment
         });
+    }
+    if (typeof ev.detail.use_lidar !== 'undefined') {
+        pollLidarChip();
     }
 });
 

@@ -195,6 +195,18 @@ def run_catalog(base: str, out: Path, viewports: list[str]) -> list[dict]:
             # WiFi chip only (dismiss confirm via dialog handler)
             record(results, out, vp_name, page, "shell_wifi_chip", "shell.wifi_chip", "WiFi chip idle")
 
+            # Lidar chip (do not toggle — USB exclusive lock)
+            lidar_visible = page.locator("#lidar-toggle-btn").count() and page.locator("#lidar-toggle-btn").is_visible()
+            record(
+                results,
+                out,
+                vp_name,
+                page,
+                "shell_lidar",
+                "shell.lidar",
+                "Lidar chip visible" if lidar_visible else "Lidar chip hidden (no USB / hangar off)",
+            )
+
             # Ops log
             if safe_click(page, "#ops-log-btn"):
                 page.wait_for_timeout(600)

@@ -716,6 +716,7 @@
         <button type="button" id="motor-toggle-btn" class="ugv-nav-chip" onclick="toggleMotors()" title="Motion path: Direct serial (UART) or ROS 2 relay (rosbridge).">ROS2</button>
         <button type="button" id="chassis-heartbeat-btn" class="ugv-nav-chip is-on" onclick="toggleChassisHeartbeat()" title="Idle heartbeat: every 2s re-send last wheel cmd (idle = stop). OFF for AI timed drives.">HB</button>
         <button type="button" id="esp32-wifi-btn" class="ugv-nav-chip is-warn" onclick="toggleEsp32Wifi()" title="Session-only ESP32 SoftAP stop (T:408). Does not change boot config.">WiFi</button>
+        <button type="button" id="lidar-toggle-btn" class="ugv-nav-chip is-off" onclick="toggleLidar()" title="USB lidar: off. Click to enable hangar use_lidar." hidden>Lidar</button>
         <button type="button" id="ops-log-btn" class="ugv-nav-chip" onclick="toggleOpsLogPane()" title="Operational app log (control mode, WiFi, AI motion, errors).">Log</button>
         <button type="button" id="twin-btn" class="ugv-nav-chip ugv-nav-chip--accent" onclick="toggleTwinPane()" title="Open 3D digital twin as a popup panel.">Twin</button>
       </div>
@@ -1433,10 +1434,14 @@
           </div>
 
           <footer class="loadout-dock">
-            <label class="loadout-lidar" for="loadout-use-lidar">
-              <input type="checkbox" id="loadout-use-lidar" />
-              <span>use_lidar</span>
-            </label>
+            <button type="button" id="loadout-lidar-btn" class="loadout-hw-toggle" aria-pressed="false" title="USB LD19 lidar (Pi serial, not ESP32 JSON)">
+              <span class="loadout-hw-dot" id="loadout-lidar-dot" aria-hidden="true"></span>
+              <span class="loadout-hw-copy">
+                <strong>Lidar</strong>
+                <span id="loadout-lidar-meta">USB LD19 · off</span>
+              </span>
+            </button>
+            <input type="checkbox" id="loadout-use-lidar" hidden />
             <label class="loadout-cam" for="loadout-camera-prefer">
               <span>camera_prefer</span>
               <select id="loadout-camera-prefer" aria-label="Camera preference">
@@ -1644,10 +1649,10 @@
     </script>
     <script src="./three.min.js"></script>
     <script src="./OrbitControls.js"></script>
-    <script src="./twin.js?v=roarm-twin-2"></script>
+    <script src="./twin.js?v=lidar-ring-1"></script>
     <script src="./modes.js?v=seek-chat-finish-1"></script>
-    <script src="./loadout.js?v=roarm-twin-2"></script>
-    <script src="./control.js?v=roarm-twin-3"></script>
+    <script src="./loadout.js?v=lidar-hw-1"></script>
+    <script src="./control.js?v=lidar-chip-1"></script>
     <script src="./main.js"></script>
 </body>
 </html>
