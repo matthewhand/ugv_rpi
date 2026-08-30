@@ -351,6 +351,29 @@
         ptGroup.add(panLink);
 
         var trailPts = [];
+        var TRAIL_MS = 2500;
+
+        function rebuildTrail() {
+            var now = Date.now();
+            trailPts = trailPts.filter(function (p) { return (now - (p.t || 0)) < TRAIL_MS; });
+            if (trailPts.length < 2) {
+                trailLine.geometry.setAttribute('position', new THREE.Float32BufferAttribute([], 3));
+                trailLine.geometry.setAttribute('color', new THREE.Float32BufferAttribute([], 3));
+                return;
+            }
+            var pos = [];
+            var col = [];
+            var c = new THREE.Color(0x4FF5C0);
+            for (var i = 0; i < trailPts.length; i++) {
+                pos.push(trailPts[i].x, trailPts[i].y, trailPts[i].z);
+                var age = (now - (trailPts[i].t || now)) / TRAIL_MS;
+                var a = 1 - age;
+                col.push(c.r * a, c.g * a, c.b * a);
+            }
+            trailLine.geometry.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+            trailLine.geometry.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+            trailLine.geometry.computeBoundingSphere();
+        }
         var trailLine = new THREE.Line(
             new THREE.BufferGeometry(),
             new THREE.LineBasicMaterial({ vertexColors: true, transparent: true })
@@ -518,23 +541,12 @@
             var eeWorld = ee.clone();
             armRoot.updateMatrixWorld(true);
             armRoot.localToWorld(eeWorld);
-            if (!trailPts.length || trailPts[trailPts.length - 1].distanceTo(eeWorld) > 0.004) {
+            if (!trailPts.length || trailPts[trailPts.length - 1].distanceToSquared(eeWorld) > 0.000016) {
+                eeWorld.t = Date.now();
                 trailPts.push(eeWorld);
-                if (trailPts.length > 48) trailPts.shift();
+                if (trailPts.length > 64) trailPts.shift();
             }
-            if (trailPts.length > 1) {
-                var pos = [];
-                var col = [];
-                var c = new THREE.Color(0x4FF5C0);
-                for (var i = 0; i < trailPts.length; i++) {
-                    pos.push(trailPts[i].x, trailPts[i].y, trailPts[i].z);
-                    var a = i / (trailPts.length - 1);
-                    col.push(c.r * a, c.g * a, c.b * a);
-                }
-                trailLine.geometry.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-                trailLine.geometry.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
-                trailLine.geometry.computeBoundingSphere();
-            }
+            rebuildTrail();
             lastFk = p;
             updateRings();
             updateHud();
@@ -767,6 +779,7 @@
             if (!running || paused) return;
             requestAnimationFrame(animate);
             if (controls) controls.update();
+            if (trailPts.length) rebuildTrail();
             renderer.render(scene, camera);
         }
 

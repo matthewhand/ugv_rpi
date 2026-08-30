@@ -975,22 +975,41 @@ class OpencvFuncs():
     def grab_bgr_frame(self):
         """Capture one real BGR frame from the active camera (no HUD).
 
-        Returns None when no camera is available or the read fails — never a
+        Returns None when no camera is available or the read fails. Never a
         placeholder image. Use this for AI/snapshot paths; frame_process may
-        still return a white 'camera read failed' JPEG for the human MJPEG feed.
+        still return a white camera-failed JPEG for the human MJPEG feed.
         """
         try:
+            if not (self.usb_camera_connected or self.csi_camera_connected or self.oak_camera_connected):
+                self._try_camera_reconnect()
             if self.usb_camera_connected:
-                success, frame = self.camera.read()
-                if success:
+                if self.camera is None:
+                    self.camera = self._open_usb_camera()
+                    if self.camera is None:
+                        self.usb_camera_connected = False
+                success, frame = (False, None)
+                if self.camera is not None:
+                    success, frame = self.camera.read()
+                if success and frame is not None:
                     return frame
+                try:
+                    if self.camera is not None:
+                        self.camera.release()
+                except Exception:
+                    pass
+                self.camera = None
+                self.usb_camera_connected = False
+                if self._try_camera_reconnect() and self.camera is not None:
+                    success, frame = self.camera.read()
+                    if success and frame is not None:
+                        return frame
             elif self.csi_camera_connected:
                 return self.picam2.capture_array()
             elif self.oak_camera_connected:
                 frame = self.output_queue.get().getCvFrame()
                 return cv2.resize(frame, (640, 480))
         except Exception as e:
-            print(f'[cv_ctrl.grab_bgr_frame] {e}')
+            print('[cv_ctrl.grab_bgr_frame] %s' % e)
         return None
 
     def cv_detect_objects(self, img):

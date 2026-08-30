@@ -116,12 +116,14 @@
         max-width: 640px;
         padding: 0 8px;
       }
+      #twin-btn, #twin-pane, #twin-drawer { display: none !important; }
+      /* one-twin */
       .roarm-raw-dock {
         flex: 1 1 260px;
         min-width: 220px;
         max-width: 360px;
       }
-      /* RoArm sliders (grip + reach) */
+      /* RoArm sliders (grip + reach + yaw + lift) */
       .roarm-sliders-box {
         margin-top: 0;
         padding: 8px 12px;
@@ -192,6 +194,31 @@
         color: #4FF5C0;
         min-width: 50px;
         text-align: right;
+      }
+      .roarm-pair-picker {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin-top: 8px;
+        padding-top: 8px;
+        border-top: 1px solid #2a2f3d;
+      }
+      .roarm-pair-btn {
+        font-size: 11px;
+        font-weight: 600;
+        color: #9aa3b2;
+        background: #1b1f2a;
+        border: 1px solid #2a2f3d;
+        border-radius: 4px;
+        padding: 3px 8px;
+        cursor: pointer;
+      }
+      .roarm-pair-btn.active,
+      .roarm-pair-btn[aria-pressed="true"] {
+        color: #141720;
+        background: #4FF5C0;
+        border-color: #4FF5C0;
       }
       /* RoArm 3D workspace preview */
       .roarm-workspace-box {
@@ -914,11 +941,35 @@
                             <div class="roarm-slider-row">
                                 <label for="roarm-reach-slider" class="roarm-slider-label">
                                     <span class="roarm-slider-icon">→</span>
-                                    <span>Reach</span>
+                                    <span>Reach mm</span>
                                 </label>
                                 <input type="range" id="roarm-reach-slider" class="roarm-slider"
-                                    min="-150" max="150" value="0" step="5" />
-                                <span id="roarm-reach-value" class="roarm-slider-value">0</span>
+                                    min="-250" max="500" value="0" step="1" />
+                                <span id="roarm-reach-value" class="roarm-slider-value">0 mm</span>
+                            </div>
+                            <div class="roarm-slider-row">
+                                <label for="roarm-yaw-slider" class="roarm-slider-label">
+                                    <span class="roarm-slider-icon">↻</span>
+                                    <span>Yaw °</span>
+                                </label>
+                                <input type="range" id="roarm-yaw-slider" class="roarm-slider"
+                                    min="-70" max="70" value="0" step="1" />
+                                <span id="roarm-yaw-value" class="roarm-slider-value">0 °</span>
+                            </div>
+                            <div class="roarm-slider-row">
+                                <label for="roarm-lift-slider" class="roarm-slider-label">
+                                    <span class="roarm-slider-icon">↕</span>
+                                    <span>Lift mm</span>
+                                </label>
+                                <input type="range" id="roarm-lift-slider" class="roarm-slider"
+                                    min="-50" max="500" value="200" step="1" />
+                                <span id="roarm-lift-value" class="roarm-slider-value">0 mm</span>
+                            </div>
+                            <div id="roarm-pair-picker" class="roarm-pair-picker" role="group" aria-label="Stick axes">
+                                <span class="roarm-slider-label">Stick</span>
+                                <button type="button" class="roarm-pair-btn" data-pair="yaw_lift" aria-pressed="true">Yaw + Lift</button>
+                                <button type="button" class="roarm-pair-btn" data-pair="yaw_reach" aria-pressed="false">Yaw + Reach</button>
+                                <button type="button" class="roarm-pair-btn" data-pair="lift_reach" aria-pressed="false">Lift + Reach</button>
                             </div>
                         </div>
                         <div id="roarm-workspace-box" class="roarm-workspace-box">
@@ -1649,10 +1700,10 @@
     </script>
     <script src="./three.min.js"></script>
     <script src="./OrbitControls.js"></script>
-    <script src="./twin.js?v=lidar-ring-1"></script>
+    <script src="./twin.js?v=lidar-roarm-1"></script>
     <script src="./modes.js?v=seek-chat-finish-1"></script>
     <script src="./loadout.js?v=lidar-hw-1"></script>
-    <script src="./control.js?v=lidar-chip-1"></script>
+    <script src="./control.js?v=lidar-roarm-1"></script>
     <script src="./main.js"></script>
 </body>
 </html>

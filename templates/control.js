@@ -422,13 +422,18 @@ function pointInCircle(radius, x, y) {
         return { x: newX, y: newY };
     }
 }
-document.addEventListener('mousewheel', (e) => {
+function roarmWheelTarget(el) {
+    if (!el || !el.closest) return false;
+    return !!(el.closest('.video') || el.closest('.video_feed') ||
+              el.closest('#video_feed_frame') || el.closest('#roarm-workspace-box') ||
+              el.closest('#roarm-sliders-box') || el.closest('#roarm-raw-dock'));
+}
+document.addEventListener('wheel', function roarmPageWheel(e) {
     var delta = e.deltaY || e.detail || e.wheelDelta;
     if (module_type == 1) {
-        // RoArm reach: wheel works any time (no drag needed). IK keeps the
-        // gripper height while shoulder+elbow coordinate the extension.
+        if (!roarmWheelTarget(e.target)) return;
         e.preventDefault();
-        roarmQueueMove(0, 0, delta > 0 ? -10 : 10);  // wheel up = extend
+        roarmWheelJog(delta > 0 ? -1 : 1);
         return;
     }
     if (isDragging && isEnlarged) {
@@ -490,8 +495,9 @@ function joyStickCtrl(inputX, inputY, dx, dy) {
         roarmPrevStickX = inputX;
         roarmPrevStickY = inputY;
         if (ddx || ddy) {
-            // Full stick throw ≈ ±64° yaw / ±120mm lift; screen-down = gripper down.
-            roarmQueueMove(-ddx * (64 / 450), -ddy * (120 / 170), 0);
+            // Stick locks to the selected IK pair. Grip is never a stick axis.
+            // Default Yaw+Lift matches the old mapping (X=yaw, Y=lift).
+            roarmQueueStick(ddx, ddy);
         }
         var x_cmd = Math.max(-180, Math.min(inputX/7, 180));
         RotateAngle = document.getElementById("Pan").innerHTML = x_cmd.toFixed(2);
@@ -2377,12 +2383,18 @@ function roarmFlushMove() {
     fetch('/api/arm/move', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ d_yaw_deg: yaw, d_lift_mm: lift, d_reach_mm: reach })
+        body: JSON.stringify({ d_yaw_deg: -yaw, d_lift_mm: lift, d_reach_mm: reach })
     })
         .then(function (r) { return r.json(); })
         .then(function (res) {
-            if (res && res.ok && res.joints) {
-                applyRoarmIkHud(res.joints);
+            if (res && res.ok) {
+                var abs = res.joints ? roarmJointsToAbs(res.joints) : Object.assign({}, roarmAbs);
+                if (res.achieved_r_mm != null) abs.reach = res.achieved_r_mm;
+                if (res.achieved_z_mm != null) abs.lift = res.achieved_z_mm;
+                roarmAbsDragging = false;
+                roarmAbsIgnoreHudUntil = Date.now() + 1200;
+                roarmSetAbsSliders(abs);
+                if (res.joints) applyRoarmIkHud(res.joints);
             } else if (res && res.error) {
                 console.warn('[roarm] move rejected:', res.error);
             }
@@ -2392,6 +2404,7 @@ function roarmFlushMove() {
 
 function applyRoarmIkHud(joints) {
     // Pan gauge mirrors commanded base yaw (same convention as T:144 path).
+    if (joints) roarmSetAbsSliders(roarmJointsToAbs(joints));
     var baseDeg = (Number(joints.base) || 0) * 180 / Math.PI;
     var panEl = document.getElementById('Pan');
     if (panEl) panEl.innerHTML = (-baseDeg).toFixed(2);
@@ -2399,12 +2412,109 @@ function applyRoarmIkHud(joints) {
     if (panScale) panScale.style.transform = 'rotate(' + baseDeg + 'deg)';
 }
 
-// Wire up sliders
+var ROARM_STICK_PAIRS = {
+    yaw_lift: { x: 'yaw', y: 'lift' },
+    yaw_reach: { x: 'yaw', y: 'reach' },
+    lift_reach: { x: 'lift', y: 'reach' }
+};
+var roarmStickPair = 'yaw_lift';
+var ROARM_STICK_SCALE = {
+    yaw: { x: 64 / 450, y: 64 / 170 },
+    lift: { x: 120 / 450, y: 120 / 170 },
+    reach: { x: 150 / 450, y: 150 / 170 }
+};
+
+function roarmQueueStick(ddx, ddy) {
+    var pair = ROARM_STICK_PAIRS[roarmStickPair] || ROARM_STICK_PAIRS.yaw_lift;
+    var d = { yaw: 0, lift: 0, reach: 0 };
+    if (ddx && pair.x) {
+        d[pair.x] += -ddx * ROARM_STICK_SCALE[pair.x].x;
+    }
+    if (ddy && pair.y) {
+        d[pair.y] += -ddy * ROARM_STICK_SCALE[pair.y].y;
+    }
+    if (d.yaw || d.lift || d.reach) {
+        roarmQueueMove(d.yaw, d.lift, d.reach);
+    }
+}
+
+function roarmUnusedAxis() {
+    var pair = ROARM_STICK_PAIRS[roarmStickPair] || ROARM_STICK_PAIRS.yaw_lift;
+    if (pair.x !== "yaw" && pair.y !== "yaw") return "yaw";
+    if (pair.x !== "lift" && pair.y !== "lift") return "lift";
+    return "reach";
+}
+
+function roarmWheelJog(sign) {
+    var axis = roarmUnusedAxis();
+    var yaw = 0, lift = 0, reach = 0;
+    if (axis === "yaw") yaw = sign * 6;
+    else if (axis === "lift") lift = sign * 12;
+    else reach = sign * 10;
+    roarmQueueMove(yaw, lift, reach);
+}
+
+function setRoarmStickPair(pair) {
+    if (!ROARM_STICK_PAIRS[pair]) pair = 'yaw_lift';
+    roarmStickPair = pair;
+    var buttons = document.querySelectorAll('#roarm-pair-picker .roarm-pair-btn');
+    for (var i = 0; i < buttons.length; i++) {
+        var on = buttons[i].getAttribute('data-pair') === pair;
+        buttons[i].classList.toggle('active', on);
+        buttons[i].setAttribute('aria-pressed', on ? 'true' : 'false');
+    }
+}
+
+var roarmAbs = { yaw: 0, lift: 0, reach: 0 };
+var roarmAbsDragging = false;
+var roarmAbsIgnoreHudUntil = 0;
+
+function roarmJointsToAbs(j) {
+    j = j || {};
+    var abs = { yaw: (Number(j.base) || 0) * 180 / Math.PI, lift: roarmAbs.lift, reach: roarmAbs.reach };
+    if (window.UgvTwin && UgvTwin.fk) {
+        var p = UgvTwin.fk(j);
+        abs.reach = p.r * 1000;
+        abs.lift = p.z * 1000;
+    }
+    return abs;
+}
+
+function roarmSetAbsSliders(abs) {
+    if (!abs) return;
+    roarmAbs = { yaw: abs.yaw, lift: abs.lift, reach: abs.reach };
+    if (roarmAbsDragging) return;
+    function put(id, valId, v, unit, digits) {
+        var s = document.getElementById(id);
+        var lab = document.getElementById(valId);
+        if (s) s.value = String(Math.round(v));
+        if (lab) lab.textContent = (Math.round(v * Math.pow(10, digits)) / Math.pow(10, digits)) + ' ' + unit;
+    }
+    put('roarm-yaw-slider', 'roarm-yaw-value', roarmAbs.yaw, '°', 0);
+    put('roarm-reach-slider', 'roarm-reach-value', roarmAbs.reach, 'mm', 0);
+    put('roarm-lift-slider', 'roarm-lift-value', roarmAbs.lift, 'mm', 0);
+}
+
+function wireRoarmAbsSlider(slider, valueEl, key, unit, toDelta) {
+    if (!slider || !valueEl) return;
+    slider.addEventListener('pointerdown', function () { roarmAbsDragging = true; });
+    slider.addEventListener('pointerup', function () { /* keep dragging until flush */ });
+    slider.addEventListener('input', function () {
+        valueEl.textContent = this.value + ' ' + unit;
+    });
+    slider.addEventListener('change', function () {
+        var next = parseFloat(this.value);
+        var delta = next - roarmAbs[key];
+        roarmAbs[key] = next;
+        roarmAbsDragging = true;
+        if (delta) toDelta(delta);
+    });
+}
+
+// Wire up sliders + stick pair picker
 (function initRoarmSliders() {
     var gripSlider = document.getElementById('roarm-grip-slider');
     var gripValue = document.getElementById('roarm-grip-value');
-    var reachSlider = document.getElementById('roarm-reach-slider');
-    var reachValue = document.getElementById('roarm-reach-value');
     
     if (gripSlider && gripValue) {
         gripSlider.addEventListener('input', function () {
@@ -2423,20 +2533,40 @@ function applyRoarmIkHud(joints) {
             roarmSendGrip(pct);
         });
     }
-    
-    if (reachSlider && reachValue) {
-        reachSlider.addEventListener('input', function () {
-            var delta = parseInt(this.value, 10);
-            reachValue.textContent = (delta >= 0 ? '+' : '') + delta;
-        });
 
-        reachSlider.addEventListener('change', function () {
-            var delta = parseInt(this.value, 10);
-            roarmSendReach(delta);
-            // Relative control: spring back to centre after the jog
-            this.value = 0;
-            reachValue.textContent = '0';
+    wireRoarmAbsSlider(
+        document.getElementById('roarm-reach-slider'),
+        document.getElementById('roarm-reach-value'),
+        'reach',
+        'mm',
+        function (mm) { roarmQueueMove(0, 0, mm); }
+    );
+    wireRoarmAbsSlider(
+        document.getElementById('roarm-yaw-slider'),
+        document.getElementById('roarm-yaw-value'),
+        'yaw',
+        '°',
+        function (deg) { roarmQueueMove(deg, 0, 0); }
+    );
+    wireRoarmAbsSlider(
+        document.getElementById('roarm-lift-slider'),
+        document.getElementById('roarm-lift-value'),
+        'lift',
+        'mm',
+        function (mm) { roarmQueueMove(0, mm, 0); }
+    );
+    fetch('/api/ui_aim_mode').then(function (r) { return r.json(); }).then(function (d) {
+        if (d && d.roarm && d.roarm.last_joints && Date.now() >= roarmAbsIgnoreHudUntil) roarmSetAbsSliders(roarmJointsToAbs(d.roarm.last_joints));
+    }).catch(function () {});
+
+    var picker = document.getElementById('roarm-pair-picker');
+    if (picker) {
+        picker.addEventListener('click', function (ev) {
+            var btn = ev.target.closest ? ev.target.closest('.roarm-pair-btn') : null;
+            if (!btn) return;
+            setRoarmStickPair(btn.getAttribute('data-pair'));
         });
+        setRoarmStickPair('yaw_lift');
     }
     
     // Show/hide sliders based on module_type (set after config loads)

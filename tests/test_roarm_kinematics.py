@@ -261,16 +261,20 @@ class TestArmMoveEndpointGate(unittest.TestCase):
         src = Path(ROOT, "templates", "control.js").read_text(encoding="utf-8")
         self.assertIn("/api/arm/move", src)
         # wheel reach must hit the IK queue before any stick-drag requirement
-        wheel_idx = src.find("mousewheel")
-        wheel_body = src[wheel_idx : wheel_idx + 1200]
-        ik_pos = wheel_body.find("roarmQueueMove")
-        self.assertGreater(ik_pos, 0, "wheel must route through roarmQueueMove")
+        wheel_idx = src.find("addEventListener('wheel'")
+        self.assertGreater(wheel_idx, 0, "wheel listener missing")
+        wheel_body = src[wheel_idx : wheel_idx + 1600]
+        jog_pos = wheel_body.find("roarmWheelJog")
+        self.assertGreater(jog_pos, 0, "wheel must call roarmWheelJog")
         drag_pos = wheel_body.find("isDragging")
         if drag_pos != -1:
             # legacy PTZ path may keep its gate, but only AFTER the IK branch
-            self.assertLess(ik_pos, drag_pos)
+            self.assertLess(jog_pos, drag_pos)
+        self.assertIn("function roarmWheelJog", src)
+        self.assertIn("roarmQueueMove(yaw, lift, reach)", src)
         # stick drives yaw+lift deltas through the same queue
-        self.assertIn("roarmQueueMove(-ddx", src)
+        self.assertIn("roarmQueueStick(ddx, ddy)", src)
+        self.assertIn("-ddx", src)
         self.assertIn("roarmPrevStickX", src)
 
 

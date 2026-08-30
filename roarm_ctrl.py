@@ -199,6 +199,24 @@ def planar_ik(
         shoulder_raw = (math.pi / 2.0) - ARM_T2_RAD - u
         sh = _clamp(shoulder_raw, *_SHOULDER_LIM)
         el = _clamp(elbow_raw, *_ELBOW_LIM)
+        if abs(sh - shoulder_raw) > 1e-9 or abs(el - elbow_raw) > 1e-9:
+            # Per-joint clamping is NOT a constrained projection: keeping the
+            # other joint at its raw value can land far from the target (e.g.
+            # a lift jog from travel_tuck lunged ~60 mm forward in reach).
+            # Coordinate descent, each step closed-form optimal:
+            #   elbow fixed → linkage is rigid about the shoulder pivot, best
+            #   shoulder aims the EE at the target bearing;
+            #   shoulder fixed → best elbow points the forearm at the target.
+            # Both 1-D subproblems are unimodal over the limit intervals
+            # (< π wide), so interval clamping stays optimal per step.
+            beta_t = math.atan2(z, r)
+            for _ in range(3):
+                v_r = l2 * math.sin(ARM_T2_RAD) + l3 * math.sin(el)
+                v_z = l2 * math.cos(ARM_T2_RAD) + l3 * math.cos(el)
+                sh = _clamp(_wrap_pi(math.atan2(v_z, v_r) - beta_t), *_SHOULDER_LIM)
+                u_i = (math.pi / 2.0) - (sh + ARM_T2_RAD)
+                w_i = math.atan2(z - l2 * math.sin(u_i), r - l2 * math.cos(u_i))
+                el = _clamp(ARM_T2_RAD - _wrap_pi(w_i - u_i), *_ELBOW_LIM)
         # Honest post-clamp error so a limit-bound branch can lose to a
         # branch that actually reaches the target.
         th2 = (math.pi / 2.0) - (sh + ARM_T2_RAD)
@@ -241,14 +259,40 @@ def relative_move(
     so UIs can stay honest about partial moves. Hand is always preserved.
     """
     cur = dict(POSES["travel_tuck"] if joints is None else joints)
+    # Missing elbow/hand must default to home, not 0.0 rad: hand is passed
+    # straight to the servo (0.0 is past fully-open) and elbow 0.0 is outside
+    # the safe box.
+    defaults = {"base": 0.0, "shoulder": 0.0, "elbow": _HOME["elbow"], "hand": _HOME["hand"]}
     for key in ("base", "shoulder", "elbow", "hand"):
-        cur[key] = float(cur.get(key, 0.0) or 0.0)
+        val = cur.get(key)
+        cur[key] = defaults[key] if val is None else float(val)
 
     fk_cur = forward_kinematics(cur["base"], cur["shoulder"], cur["elbow"])
     # Signed radial reach from the shoulder axis (tuck leans BACKWARD: x<0);
     # must keep the sign or a zero-delta jog would mirror the pose.
     r0 = fk_cur["r"] * 1000.0
     z0 = fk_cur["z"] * 1000.0
+
+    if abs(float(dr_mm)) < 1e-9 and abs(float(dz_mm)) < 1e-9:
+        # Yaw is base-only by contract: never re-solve shoulder/elbow, or a
+        # pure yaw jog from a raw (console-commanded) pose outside the safe
+        # box would snap the planar joints to the box mid-turn.
+        new_base = _clamp(cur["base"] + math.radians(float(dyaw_deg)), *_BASE_LIM)
+        yaw_clamped = abs(new_base - (cur["base"] + math.radians(float(dyaw_deg)))) > 1e-9
+        return {
+            "ok": True,
+            "joints": {
+                "base": new_base,
+                "shoulder": cur["shoulder"],
+                "elbow": cur["elbow"],
+                "hand": cur["hand"],
+            },
+            "clamped": yaw_clamped,
+            "target_r_mm": r0,
+            "target_z_mm": z0,
+            "achieved_r_mm": r0,
+            "achieved_z_mm": z0,
+        }
 
     r_t = r0 + float(dr_mm)
     z_t = z0 + float(dz_mm)
@@ -285,7 +329,11 @@ def relative_move(
                     t_hi = mid
             r_t, z_t = r0 + dir_x * t_lo, z0 + dir_z * t_lo
         else:
-            scale = _clamp(math.hypot(r_t, z_t), d_min, d_max) / max(norm, 1e-6)
+            # Radial projection must divide by the TARGET magnitude, not the
+            # delta magnitude (`norm`), or the scaled point flies outside the
+            # workspace and the jog fails instead of clamping.
+            t_norm = math.hypot(r_t, z_t)
+            scale = _clamp(t_norm, d_min, d_max) / max(t_norm, 1e-6)
             r_t, z_t = r_t * scale, z_t * scale
         clamped = True
         sol = planar_ik(r_t, z_t, seed_shoulder=cur["shoulder"], seed_elbow=cur["elbow"])

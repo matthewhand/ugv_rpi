@@ -1,4 +1,5 @@
 import serial
+import socket
 import sys
 import math
 import re
@@ -797,6 +798,88 @@ def generate_frames():
 
 
 
+
+_RTSP_SCRIPT = os.path.join(thisPath, 'scripts', 'jpeg_rtsp.py')
+_RTSP_STATE = os.environ.get('UGV_RTSP_STATE', '/tmp/ugv-jpeg-rtsp.json')
+_RTSP_LOG = os.path.join(thisPath, 'jpeg_rtsp.log')
+_rtsp_proc = None
+_rtsp_lock = threading.Lock()
+
+
+def _rtsp_state():
+    try:
+        with open(_RTSP_STATE, 'r') as fh:
+            return json.load(fh)
+    except Exception:
+        return None
+
+
+def _rtsp_public_url():
+    st = _rtsp_state()
+    if isinstance(st, dict) and st.get('url'):
+        return st['url']
+    host = os.environ.get('UGV_RTSP_HOST') or socket.gethostname()
+    port = 8554
+    path = '/live'
+    if isinstance(st, dict):
+        port = st.get('port') or port
+        path = st.get('path') or path
+    if not str(path).startswith('/'):
+        path = '/' + str(path)
+    return 'rtsp://%s:%s%s' % (host, port, path)
+
+
+def _rtsp_running():
+    global _rtsp_proc
+    return _rtsp_proc is not None and _rtsp_proc.poll() is None
+
+
+def _start_rtsp_publisher():
+    """Start JPEG-over-RTSP restream of Flask /video_feed (no x264, no v4l2 steal)."""
+    global _rtsp_proc
+    import subprocess
+    with _rtsp_lock:
+        if _rtsp_running():
+            return True
+        if not os.path.isfile(_RTSP_SCRIPT):
+            olog.error('rtsp_toggle', 'jpeg_rtsp.py missing', path=_RTSP_SCRIPT)
+            return False
+        logf = open(_RTSP_LOG, 'ab', buffering=0)
+        env = os.environ.copy()
+        env['UGV_RTSP_STATE'] = _RTSP_STATE
+        _rtsp_proc = subprocess.Popen(
+            ['/usr/bin/python3', _RTSP_SCRIPT],
+            stdout=logf,
+            stderr=subprocess.STDOUT,
+            cwd=thisPath,
+            start_new_session=True,
+            env=env,
+        )
+        olog.info('rtsp_toggle', 'jpeg-rtsp started', pid=_rtsp_proc.pid)
+        return True
+
+
+def _stop_rtsp_publisher():
+    global _rtsp_proc
+    import subprocess
+    with _rtsp_lock:
+        if _rtsp_proc is not None and _rtsp_proc.poll() is None:
+            try:
+                _rtsp_proc.terminate()
+                _rtsp_proc.wait(timeout=5)
+            except Exception:
+                try:
+                    _rtsp_proc.kill()
+                except Exception:
+                    pass
+            olog.info('rtsp_toggle', 'jpeg-rtsp stopped')
+        _rtsp_proc = None
+        try:
+            os.remove(_RTSP_STATE)
+        except OSError:
+            pass
+
+
 # Feature Toggles (Default OFF)
 enable_rtsp_stream = False
 
@@ -815,6 +898,8 @@ def api_status():
         br_ok = _rosbridge_reachable()
     return jsonify({
         'enable_rtsp_stream': enable_rtsp_stream,
+        'rtsp_url': _rtsp_public_url() if enable_rtsp_stream else None,
+        'rtsp_running': _rtsp_running(),
         'enable_motor_control': base.enable_motor_control,
         'control_mode': mode,  # 'direct' | 'ros2'
         'control_mode_label': 'Direct serial' if mode == 'direct' else 'ROS 2 relay',
@@ -839,9 +924,36 @@ def api_status():
 def api_toggle_rtsp():
     global enable_rtsp_stream
     enable_rtsp_stream = not enable_rtsp_stream
+    ok = True
+    err = None
+    try:
+        if enable_rtsp_stream:
+            ok = bool(_start_rtsp_publisher())
+            if not ok:
+                enable_rtsp_stream = False
+                err = 'jpeg-rtsp failed to start'
+        else:
+            _stop_rtsp_publisher()
+    except Exception as e:
+        ok = False
+        err = str(e)
+        enable_rtsp_stream = False
+        try:
+            _stop_rtsp_publisher()
+        except Exception:
+            pass
+    url = _rtsp_public_url() if enable_rtsp_stream else None
     olog.info('rtsp_toggle', f'RTSP stream {"ON" if enable_rtsp_stream else "OFF"}',
-              enable_rtsp_stream=enable_rtsp_stream)
-    return jsonify({'success': True, 'enable_rtsp_stream': enable_rtsp_stream})
+              enable_rtsp_stream=enable_rtsp_stream, url=url, ok=ok)
+    payload = {
+        'success': bool(ok and err is None),
+        'enable_rtsp_stream': enable_rtsp_stream,
+        'rtsp_url': url,
+        'rtsp_running': _rtsp_running(),
+    }
+    if err:
+        payload['error'] = err
+    return jsonify(payload)
 
 
 def _lidar_public(include_sample=True):
