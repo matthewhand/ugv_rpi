@@ -62,6 +62,48 @@ def set_camera_first(strategy: str) -> str:
     return _cam_first
 
 
+def usb_capture_settings(video_cfg=None):
+    """USB UVC capture tuple: (width, height, fps, fourcc).
+
+    Realtek 0bda:5842 advertises MJPEG 2592x1944 @ 30fps. YUYV at 5MP is 2fps
+    and will not stream; callers must set this fourcc *before* size.
+    """
+    cfg = video_cfg if isinstance(video_cfg, dict) else (f.get('video') or {})
+    try:
+        w = int(cfg.get('default_res_w', 2592))
+    except (TypeError, ValueError):
+        w = 2592
+    try:
+        h = int(cfg.get('default_res_h', 1944))
+    except (TypeError, ValueError):
+        h = 1944
+    try:
+        fps = float(cfg.get('default_fps', 10))
+    except (TypeError, ValueError):
+        fps = 10.0
+    fourcc = str(cfg.get('fourcc') or 'MJPG').strip().upper()
+    if len(fourcc) != 4:
+        fourcc = 'MJPG'
+    if w < 160:
+        w = 160
+    if h < 120:
+        h = 120
+    if fps <= 0:
+        fps = 10.0
+    return w, h, fps, fourcc
+
+
+def fourcc_to_str(code):
+    try:
+        code = int(code)
+        chars = ''.join(chr((code >> (8 * i)) & 0xFF) for i in range(4))
+        if all(32 <= ord(c) < 127 for c in chars):
+            return chars
+    except Exception:
+        pass
+    return str(code)
+
+
 class OpencvFuncs():
     """docstring for OpencvFuncs"""
     def __init__(self, project_path, base_ctrl):
@@ -197,6 +239,13 @@ class OpencvFuncs():
         self.oak_camera_connected = False
         self.usb_camera_index = None
         self.camera = None
+        vw, vh, vfps, vfourcc = usb_capture_settings()
+        self.capture_req_w = vw
+        self.capture_req_h = vh
+        self.capture_fps = vfps
+        self.capture_fourcc = vfourcc
+        self.capture_size = (0, 0)
+        self._last_good_store = 0.0
         print(f"[cv_ctrl] camera first={_cam_first}")
 
         # rover / auto: Picamera2 first. usb-first (beast) skips this block.
@@ -436,10 +485,29 @@ class OpencvFuncs():
             time.sleep(0.3)  # Brief sleep to avoid tight loop
             return input_frame
         
-        # Store last good frame if we got one successfully
+        # Store last good frame if we got one successfully.
+        # 5MP BGR is ~15MB — do not clone every frame. Keep a 640 freeze-frame at 1 Hz.
         if not camera_failed and input_frame is not None and hasattr(input_frame, 'shape'):
-            self.last_good_frame = input_frame.copy()
+            now_store = time.time()
+            if now_store - getattr(self, '_last_good_store', 0) >= 1.0:
+                self._last_good_store = now_store
+                fh, fw = input_frame.shape[:2]
+                if fw > 640:
+                    self.last_good_frame = cv2.resize(
+                        input_frame, (640, 480), interpolation=cv2.INTER_AREA
+                    )
+                else:
+                    self.last_good_frame = input_frame.copy()
             self._usb_reopen_backoff = 2.0
+
+        # CV / mediapipe at 5MP will stall the Pi — run those modes at VGA.
+        if (
+            not camera_failed
+            and self.cv_mode != f['code']['cv_none']
+            and hasattr(input_frame, 'shape')
+            and input_frame.shape[1] > 640
+        ):
+            input_frame = cv2.resize(input_frame, (640, 480), interpolation=cv2.INTER_AREA)
 
         # opencv funcs
         if self.cv_mode != f['code']['cv_none']:
@@ -456,21 +524,23 @@ class OpencvFuncs():
             if time.time() - self.info_update_time > self.info_show_time:
                 self.show_info_flag = False
             self.overlay = input_frame.copy()
-            cv2.rectangle(self.overlay,  (round((self.info_scale-0.005)*640), round((0.33)*480)), 
-                                    (round(0.98*640), round((0.78)*480)), 
+            fh, fw = input_frame.shape[:2]
+            cv2.rectangle(self.overlay,  (round((self.info_scale-0.005)*fw), round((0.33)*fh)), 
+                                    (round(0.98*fw), round((0.78)*fh)), 
                                     self.info_bg_color, -1)
             cv2.addWeighted(self.overlay, 0.5, input_frame, 0.5, 0, input_frame)
 
             # info_deque.appendleft(time.time())
             for i in range(0, len(self.info_deque)):
                 cv2.putText(input_frame, str(self.info_deque[i]['text']), 
-                            (round(self.info_scale*640), round(self.info_scale*640 - i * 20)), 
+                            (round(self.info_scale*fw), round(self.info_scale*fh - i * 20)), 
                             cv2.FONT_HERSHEY_SIMPLEX, self.info_deque[i]['size'], self.info_deque[i]['color'], 1)
 
         if self.show_base_info_flag:
+            fh, fw = input_frame.shape[:2]
             for i in range(0, len(self.recv_deque)):
                 cv2.putText(input_frame, str(self.recv_deque[i]), 
-                        (round(0.05*640), round(0.1*640 + i * 13)), 
+                        (round(0.05*fw), round(0.1*fh + i * 13)), 
                         cv2.FONT_HERSHEY_SIMPLEX, 0.369, (255, 255, 255), 1)
 
         # render osd
@@ -572,14 +642,21 @@ class OpencvFuncs():
         """Open first working UVC node (index or /dev/videoN).
 
         After USB disconnect/reconnect the capture node often moves (e.g. video0→video1).
+        Must set MJPEG fourcc *before* 5MP size — YUYV 2592x1944 is 2fps.
         """
-        w = f['video']['default_res_w']
-        h = f['video']['default_res_h']
+        w, h, fps, fourcc = usb_capture_settings()
+        if getattr(self, 'capture_req_w', None):
+            w = int(self.capture_req_w)
+            h = int(self.capture_req_h)
+        sizes = [(w, h)]
+        for alt in ((1920, 1080), (1280, 720), (640, 480)):
+            if alt not in sizes:
+                sizes.append(alt)
         # Prefer current index if still good, then 0..4 and common paths
         candidates = []
         if self.usb_camera_index is not None:
             candidates.append(self.usb_camera_index)
-        candidates.extend([0, 1, 2, 3, 4])
+        candidates.extend(["/dev/video0", "/dev/video1", 0, 1, 2, 3, 4])
         # de-dupe preserving order
         seen = set()
         ordered = []
@@ -588,22 +665,57 @@ class OpencvFuncs():
                 seen.add(c)
                 ordered.append(c)
 
+        fourcc_int = cv2.VideoWriter_fourcc(*fourcc)
+        v4l2 = getattr(cv2, 'CAP_V4L2', 200)
         for idx in ordered:
-            try:
-                cap = cv2.VideoCapture(idx)
-                if not cap.isOpened():
-                    cap.release()
-                    continue
-                cap.set(cv2.CAP_PROP_FRAME_WIDTH, w)
-                cap.set(cv2.CAP_PROP_FRAME_HEIGHT, h)
-                ok, frame = cap.read()
-                if ok and frame is not None:
+            for sw, sh in sizes:
+                cap = None
+                try:
+                    cap = cv2.VideoCapture(idx, v4l2)
+                    if not cap.isOpened():
+                        cap.release()
+                        cap = cv2.VideoCapture(idx)
+                    if not cap.isOpened():
+                        cap.release()
+                        break  # next index; this node is dead
+                    cap.set(cv2.CAP_PROP_FOURCC, fourcc_int)
+                    cap.set(cv2.CAP_PROP_FRAME_WIDTH, sw)
+                    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, sh)
+                    cap.set(cv2.CAP_PROP_FPS, fps)
+                    try:
+                        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+                    except Exception:
+                        pass
+                    cap.set(cv2.CAP_PROP_FOURCC, fourcc_int)
+                    ok, frame = cap.read()
+                    if not ok or frame is None:
+                        cap.release()
+                        continue
+                    got_w, got_h = int(frame.shape[1]), int(frame.shape[0])
+                    matched = abs(got_w - sw) <= 16 and abs(got_h - sh) <= 16
+                    if not matched and (sw, sh) != sizes[-1]:
+                        cap.release()
+                        continue
                     self.usb_camera_index = idx
-                    print(f"[cv_ctrl] USB camera opened index={idx} shape={frame.shape}")
+                    self.capture_req_w = sw
+                    self.capture_req_h = sh
+                    self.capture_size = (got_w, got_h)
+                    self.capture_fourcc = fourcc_to_str(cap.get(cv2.CAP_PROP_FOURCC))
+                    self.capture_fps = float(cap.get(cv2.CAP_PROP_FPS) or fps)
+                    print(
+                        f"[cv_ctrl] USB camera opened index={idx} "
+                        f"req={sw}x{sh}@{fps:.0f} got={got_w}x{got_h} "
+                        f"fourcc={self.capture_fourcc} fps={self.capture_fps:.1f} "
+                        f"shape={frame.shape}"
+                    )
                     return cap
-                cap.release()
-            except Exception as e:
-                print(f"[cv_ctrl] open index {idx} failed: {e}")
+                except Exception as e:
+                    print(f"[cv_ctrl] open index {idx} {sw}x{sh} failed: {e}")
+                    if cap is not None:
+                        try:
+                            cap.release()
+                        except Exception:
+                            pass
         return None
 
     def _create_glitch_overlay(self, frame):
@@ -650,8 +762,7 @@ class OpencvFuncs():
 
     def _create_dark_placeholder(self):
         """Create a dark placeholder frame with pause badge when no good frame exists."""
-        w = f['video']['default_res_w']
-        h = f['video']['default_res_h']
+        w, h = 640, 480
         # Dark muted placeholder (not pure black, not white)
         placeholder = np.full((h, w, 3), 40, dtype=np.uint8)
         # Add a muted message in the center
@@ -719,10 +830,12 @@ class OpencvFuncs():
         # cv2.putText(overlay_buffer, 'OSD_TEST', (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
 
         # render lidar data
+        oh, ow = osd_frame.shape[:2]
+        cx, cy = ow // 2, oh // 2
         lidar_points = []
         for lidar_angle, lidar_distance in zip(self.base_ctrl.rl.lidar_angles_show, self.base_ctrl.rl.lidar_distances_show):
-            lidar_x = int(lidar_distance * np.cos(lidar_angle) * 0.05) + 320
-            lidar_y = int(lidar_distance * np.sin(lidar_angle) * 0.05) + 240
+            lidar_x = int(lidar_distance * np.cos(lidar_angle) * 0.05) + cx
+            lidar_y = int(lidar_distance * np.sin(lidar_angle) * 0.05) + cy
             lidar_points.append((lidar_x, lidar_y))
 
         for lidar_point in lidar_points:
@@ -754,6 +867,63 @@ class OpencvFuncs():
             self.scale_rate = 1
         else:
             self.scale_rate = input_rate
+
+    def set_capture_size(self, width, height):
+        """Reopen the USB camera at width x height (MJPEG). Used by 5MP/1080P/480P UI."""
+        try:
+            width = int(width)
+            height = int(height)
+        except (TypeError, ValueError):
+            return False
+        if width < 160 or height < 120:
+            return False
+        self.capture_req_w = width
+        self.capture_req_h = height
+        try:
+            f['video']['default_res_w'] = width
+            f['video']['default_res_h'] = height
+        except Exception:
+            pass
+        lock = getattr(self, '_cam_lock', None)
+        if lock is None:
+            self._cam_lock = threading.Lock()
+            lock = self._cam_lock
+        with lock:
+            try:
+                if self.camera is not None:
+                    self.camera.release()
+            except Exception:
+                pass
+            self.camera = None
+            self.camera = self._open_usb_camera()
+            self.usb_camera_connected = self.camera is not None
+        ok = bool(self.usb_camera_connected)
+        print(
+            f"[cv_ctrl] set_capture_size {width}x{height} ok={ok} "
+            f"got={self.capture_size}"
+        )
+        try:
+            from app_log import app_log as olog
+            olog.info(
+                'camera',
+                f'Capture {width}x{height} → {self.capture_size[0]}x{self.capture_size[1]}',
+                requested=[width, height], actual=list(self.capture_size),
+                fourcc=self.capture_fourcc, ok=ok,
+            )
+        except Exception:
+            pass
+        return ok
+
+    def camera_status(self):
+        return {
+            'usb': bool(self.usb_camera_connected),
+            'index': self.usb_camera_index,
+            'requested': [int(self.capture_req_w), int(self.capture_req_h)],
+            'actual': [int(self.capture_size[0]), int(self.capture_size[1])],
+            'fps_req': float(getattr(self, 'capture_fps', 0) or 0),
+            'fourcc': self.capture_fourcc,
+            'stream_fps': float(self.video_fps or 0),
+        }
 
     def set_video_quality(self, input_quality):
         if input_quality < 1:

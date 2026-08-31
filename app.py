@@ -727,6 +727,10 @@ cmd_actions = {
     f['code']['zoom_x2']: lambda: cvf.scale_ctrl(2),
     f['code']['zoom_x4']: lambda: cvf.scale_ctrl(4),
 
+    f['code']['max_res']: lambda: cvf.set_capture_size(2592, 1944),
+    f['code']['mid_res']: lambda: cvf.set_capture_size(1920, 1080),
+    f['code']['min_res']: lambda: cvf.set_capture_size(640, 480),
+
     f['code']['pic_cap']: cvf.picture_capture,
     f['code']['vid_sta']: lambda: cvf.video_record(True),
     f['code']['vid_end']: lambda: cvf.video_record(False),
@@ -770,6 +774,7 @@ cmd_feedback_actions = [f['code']['cv_none'], f['code']['cv_moti'],
                         f['code']['mp_pose'], f['code']['re_none'],
                         f['code']['re_capt'], f['code']['re_reco'],
                         f['code']['mc_lock'], f['code']['mc_unlo'],
+                        f['code']['max_res'], f['code']['mid_res'], f['code']['min_res'],
                         f['code']['led_off'], f['code']['led_aut'],
                         f['code']['led_ton'], f['code']['base_of'],
                         f['code']['base_on'], f['code']['head_ct'],
@@ -918,6 +923,7 @@ def api_status():
         'ptz': _ptz_aim_public(),
         'loadout': _status_loadout(),
         'lidar': _lidar_public(),
+        'camera': cvf.camera_status(),
     })
 
 @app.route('/api/toggle_rtsp', methods=['POST'])
