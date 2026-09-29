@@ -90,3 +90,9 @@ Rover + PTZ never opens the arm USB port.
 ## ROS chassis driver
 
 Entering ROS mode prefers `ugv_driver_min` when available (Beast image / bind-mount). Falls back to `ugv_bringup` on rover images. Does **not** require `ugv_ws-ugv_ros2`. Direct mode still preloads rosbridge, stops the chassis driver, and keeps UART handoff / autoheal / serial fallback.
+
+## Hailo-8L optional features
+
+Nested hailo block on the loadout (default nabled: auto). When uto, features activate if /dev/hailo0 exists. Stubs live in hailo_features/; HEFs are **not** in git. See [HAILO.md](HAILO.md).
+
+POST /api/loadout may deep-merge hailo: { enabled, pose, hand, face, device, hef_dir }.

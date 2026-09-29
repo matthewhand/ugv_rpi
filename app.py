@@ -1005,7 +1005,7 @@ def _status_loadout():
     }
 
 
-_LOADOUT_PATCH_KEYS = ('base', 'attachment', 'use_lidar', 'camera_prefer')
+_LOADOUT_PATCH_KEYS = ('base', 'attachment', 'use_lidar', 'camera_prefer', 'hailo')
 
 
 @app.route('/api/loadout', methods=['GET', 'POST'])
@@ -3614,8 +3614,14 @@ def _get_robot_context_payload():
     if control_mode == 'ros2':
         rosbridge_ok = _rosbridge_reachable()
     
-    # Hailo detection
+    # Hailo detection (+ optional-feature gate from loadout)
     hailo_present = bool(os.path.exists('/dev/hailo0'))
+    try:
+        hailo_features_active = loadout_mod.hailo_wanted(
+            _loadout_store.get(), device_exists=hailo_present
+        )
+    except Exception:
+        hailo_features_active = False
     
     # Arm status
     arm_status = 'no_arm'
@@ -3639,6 +3645,7 @@ def _get_robot_context_payload():
             'attachment': attachment_id,
             'use_lidar': use_lidar,
             'camera_prefer': camera_prefer,
+            'hailo': (_loadout_store.get() or {}).get('hailo'),
         },
         'camera': {
             'type': camera_type,
@@ -3648,6 +3655,7 @@ def _get_robot_context_payload():
         'uart_owner': uart_owner,
         'rosbridge_ok': rosbridge_ok,
         'hailo_present': hailo_present,
+        'hailo_features_active': hailo_features_active,
         'arm_status': arm_status,
         'battery_voltage': voltage,
         'lidar': _lidar_public(),

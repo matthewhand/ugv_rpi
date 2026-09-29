@@ -21,3 +21,7 @@ ai_proof/
 ui_shots/
 .tools/
 .ui_aim_mode.json
+
+# Hailo HEF weights (download locally; see docs/HAILO.md)
+models/hailo/*.hef
+*.hef

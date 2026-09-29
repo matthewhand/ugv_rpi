@@ -24,6 +24,7 @@ class TestNormalize(unittest.TestCase):
         self.assertEqual(lo["attachment"], "ptz")
         self.assertFalse(lo["use_lidar"])
         self.assertEqual(lo["camera_prefer"], "auto")
+        self.assertEqual(lo["hailo"]["enabled"], "auto")
 
     def test_unknown_falls_back(self):
         lo = loadout.normalize_loadout({"base": "hovercraft", "attachment": "laser"})
