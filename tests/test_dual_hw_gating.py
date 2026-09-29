@@ -19,6 +19,9 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+import pytest
+
+pytest.importorskip("serial")
 import loadout  # noqa: E402
 import roarm_ctrl  # noqa: E402
 from ros_motion import (  # noqa: E402
