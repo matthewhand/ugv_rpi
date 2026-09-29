@@ -72,7 +72,9 @@ class TestHailoStubs(unittest.TestCase):
         out = tick({"hailo": {"enabled": "true", "pose": True, "hand": True, "face": True}})
         self.assertFalse(out["skipped"])
         self.assertIn("pose", out["results"])
-        self.assertTrue(out["results"]["pose"]["skipped"])
+        # No HEF on typical host: skipped. With HEF + matching hailortcli: ok probe.
+        pose = out["results"]["pose"]
+        self.assertTrue(pose.get("skipped") or pose.get("ok"))
         self.assertIn("hand", out["results"])
         self.assertIn("face", out["results"])
         self.assertIn("pose", out["mqtt_topics"])
