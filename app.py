@@ -1825,17 +1825,25 @@ if get_control_mode() == 'direct':
             f'startup Direct bringup stop failed: {e}',
             error=str(e)[:200],
         )
-    # Preload rosbridge only. Bringup stays down so Flask keeps ttyAMA0.
-    try:
-        _rb = _ensure_rosbridge_running()
+    # Optional preload only (default off). Preloading rosbridge in Direct mode
+    # left :9090 up and burning CPU/RAM even when Flask owned the UART.
+    # Set UGV_PRELOAD_ROSBRIDGE=1 to restore the old behaviour.
+    if _env_flag('UGV_PRELOAD_ROSBRIDGE', '0'):
+        try:
+            _rb = _ensure_rosbridge_running()
+            olog.info(
+                'ros_preload',
+                'startup Direct: rosbridge preload (no bringup)',
+                ok=_rb.get('ok'), already_up=_rb.get('already_up'),
+                started=_rb.get('started'), detail=str(_rb.get('detail') or '')[:160],
+            )
+        except Exception as e:
+            olog.warn('ros_preload', f'startup Direct rosbridge preload failed: {e}', error=str(e)[:200])
+    else:
         olog.info(
             'ros_preload',
-            'startup Direct: rosbridge preload (no bringup)',
-            ok=_rb.get('ok'), already_up=_rb.get('already_up'),
-            started=_rb.get('started'), detail=str(_rb.get('detail') or '')[:160],
+            'startup Direct: skipped rosbridge preload (UGV_PRELOAD_ROSBRIDGE=0)',
         )
-    except Exception as e:
-        olog.warn('ros_preload', f'startup Direct rosbridge preload failed: {e}', error=str(e)[:200])
 
 
 # Background ROS2 heal: keep rosbridge/bringup up while control_mode=ros2.

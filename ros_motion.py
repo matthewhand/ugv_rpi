@@ -355,13 +355,59 @@ def _twist_msg(linear_x: float = 0.0, angular_z: float = 0.0) -> dict:
     }
 
 
-def publish_cmd_vel(linear_x: float = 0.0, angular_z: float = 0.0) -> Dict[str, Any]:
+_cmd_ws: Optional[RosbridgeClient] = None
+_cmd_client_lock = threading.Lock()
+_cmd_last_pub = 0.0
+_CMD_MIN_INTERVAL = float(os.environ.get('UGV_CMD_VEL_MIN_INTERVAL') or 0.05)  # ~20 Hz max
+
+
+def _get_cmd_client() -> RosbridgeClient:
+    global _cmd_ws
+    with _cmd_client_lock:
+        if _cmd_ws is None:
+            _cmd_ws = RosbridgeClient(timeout=2.0)
+        try:
+            _cmd_ws.ensure()
+        except Exception:
+            try:
+                _cmd_ws.close()
+            except Exception:
+                pass
+            _cmd_ws = RosbridgeClient(timeout=2.0)
+            _cmd_ws.ensure()
+        return _cmd_ws
+
+
+def publish_cmd_vel(
+    linear_x: float = 0.0,
+    angular_z: float = 0.0,
+    *,
+    throttle: bool = True,
+) -> Dict[str, Any]:
+    """Publish Twist on /cmd_vel. Rate-limited + persistent WS (avoids open/close spam)."""
+    global _cmd_last_pub
     topic = cmd_vel_topic()
     msg_type = os.environ.get('UGV_CMD_VEL_TYPE') or 'geometry_msgs/msg/Twist'
+    # Always allow zero (stop) through the throttle gate.
+    is_stop = abs(float(linear_x)) < 1e-9 and abs(float(angular_z)) < 1e-9
+    if throttle and not is_stop:
+        now = time.time()
+        if now - _cmd_last_pub < _CMD_MIN_INTERVAL:
+            return {
+                'ok': True,
+                'backend': 'ros2',
+                'topic': topic,
+                'throttled': True,
+                'linear_x': linear_x,
+                'angular_z': angular_z,
+            }
+        _cmd_last_pub = now
     msg = _twist_msg(linear_x, angular_z)
-    with RosbridgeClient() as client:
+    client = _get_cmd_client()
+    with _cmd_client_lock:
         client.publish(topic, msg, msg_type)
-        time.sleep(0.02)
+    if is_stop:
+        _cmd_last_pub = time.time()
     return {
         'ok': True,
         'backend': 'ros2',
@@ -494,17 +540,42 @@ def ros_drive(
     return result
 
 
-def rosbridge_status() -> Dict[str, Any]:
-    """Probe rosbridge connectivity (does not require bringup)."""
+_rosbridge_status_cache: Dict[str, Any] = {'at': 0.0, 'result': None}
+_ROSBRIDGE_STATUS_TTL = float(os.environ.get('UGV_ROSBRIDGE_STATUS_TTL') or 2.0)
+
+
+def rosbridge_status(*, force: bool = False) -> Dict[str, Any]:
+    """Probe rosbridge connectivity (does not require bringup).
+
+    Cached for UGV_ROSBRIDGE_STATUS_TTL seconds (default 2) so UI/heal polls
+    do not open a new WebSocket every call.
+    """
+    global _rosbridge_status_cache
     url = rosbridge_url()
+    now = time.time()
+    cached = _rosbridge_status_cache.get('result')
+    if (
+        not force
+        and cached is not None
+        and (now - float(_rosbridge_status_cache.get('at') or 0.0)) < _ROSBRIDGE_STATUS_TTL
+        and cached.get('url') == url
+    ):
+        out = dict(cached)
+        out['cached'] = True
+        return out
     if websocket is None:
-        return {'ok': False, 'url': url, 'error': 'websocket-client missing'}
-    try:
-        with RosbridgeClient(url, timeout=2.0) as client:
-            client.send({'op': 'status', 'level': 'none', 'msg': 'ping'})
-        return {'ok': True, 'url': url}
-    except Exception as e:
-        return {'ok': False, 'url': url, 'error': str(e)}
+        result = {'ok': False, 'url': url, 'error': 'websocket-client missing'}
+    else:
+        try:
+            with RosbridgeClient(url, timeout=2.0) as client:
+                client.send({'op': 'status', 'level': 'none', 'msg': 'ping'})
+            result = {'ok': True, 'url': url}
+        except Exception as e:
+            result = {'ok': False, 'url': url, 'error': str(e)}
+    _rosbridge_status_cache = {'at': now, 'result': dict(result)}
+    result = dict(result)
+    result['cached'] = False
+    return result
 
 
 # ---- USB RoArm joint topics (independent of base UART / chassis) ------------
