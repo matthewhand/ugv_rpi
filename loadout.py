@@ -59,11 +59,24 @@ ATTACHMENTS: dict[str, dict[str, Any]] = {
 
 CAMERA_PREFERS = ("auto", "csi", "usb")
 
+# Hailo-8L optional features (separate from Frigate). Runtime gate lives in
+# loadout.hailo; device auto-detect uses /dev/hailo0. HEFs stay outside git.
+HAILO_ENABLED_MODES = ("auto", "true", "false")
+DEFAULT_HAILO: dict[str, Any] = {
+    "enabled": "auto",  # auto | true | false
+    "pose": True,
+    "hand": True,
+    "face": True,
+    "device": "/dev/hailo0",
+    "hef_dir": "models/hailo",
+}
+
 DEFAULT_LOADOUT: dict[str, Any] = {
     "base": "rover",
     "attachment": "ptz",
     "use_lidar": False,
     "camera_prefer": "auto",
+    "hailo": dict(DEFAULT_HAILO),
 }
 
 ARM_OFFLINE_MESSAGE = "arm offline — USB RoArm not started"
@@ -110,6 +123,64 @@ def attachment_from_module_type(module_type: Any) -> str:
     return DEFAULT_LOADOUT["attachment"]
 
 
+def _normalize_hailo_enabled(value: Any) -> str:
+    if value is None:
+        return DEFAULT_HAILO["enabled"]
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    text = str(value).strip().lower()
+    if text in ("1", "yes", "on"):
+        return "true"
+    if text in ("0", "no", "off"):
+        return "false"
+    if text in HAILO_ENABLED_MODES:
+        return text
+    return DEFAULT_HAILO["enabled"]
+
+
+def normalize_hailo(data: Optional[Mapping[str, Any]] = None) -> dict[str, Any]:
+    """Validate loadout.hailo block; unknown keys dropped."""
+    src = dict(data or {})
+    device = str(src.get("device") or DEFAULT_HAILO["device"]).strip() or DEFAULT_HAILO["device"]
+    hef_dir = str(src.get("hef_dir") or DEFAULT_HAILO["hef_dir"]).strip() or DEFAULT_HAILO["hef_dir"]
+    return {
+        "enabled": _normalize_hailo_enabled(src.get("enabled", DEFAULT_HAILO["enabled"])),
+        "pose": _as_bool(src.get("pose"), DEFAULT_HAILO["pose"]),
+        "hand": _as_bool(src.get("hand"), DEFAULT_HAILO["hand"]),
+        "face": _as_bool(src.get("face"), DEFAULT_HAILO["face"]),
+        "device": device,
+        "hef_dir": hef_dir,
+    }
+
+
+def hailo_wanted(
+    loadout: Optional[Mapping[str, Any]] = None,
+    *,
+    device_exists: Optional[bool] = None,
+) -> bool:
+    """Whether optional Hailo feature pipelines should run.
+
+    enabled=true  -> always (caller still needs HEFs / HailoRT)
+    enabled=false -> never
+    enabled=auto  -> when device node exists (default /dev/hailo0)
+    """
+    if isinstance(loadout, Mapping) and isinstance(loadout.get("hailo"), dict):
+        hailo = normalize_hailo(loadout.get("hailo"))
+    else:
+        hailo = normalize_hailo((loadout or {}).get("hailo") if isinstance(loadout, Mapping) else None)
+    mode = hailo["enabled"]
+    if mode == "false":
+        return False
+    if mode == "true":
+        return True
+    if device_exists is None:
+        try:
+            device_exists = os.path.exists(hailo.get("device") or DEFAULT_HAILO["device"])
+        except OSError:
+            device_exists = False
+    return bool(device_exists)
+
+
 def normalize_loadout(data: Optional[Mapping[str, Any]] = None) -> dict[str, Any]:
     """Return a validated loadout. Unknown keys dropped; bad values → default."""
     src = dict(data or {})
@@ -122,11 +193,15 @@ def normalize_loadout(data: Optional[Mapping[str, Any]] = None) -> dict[str, Any
     camera_prefer = str(src.get("camera_prefer") or DEFAULT_LOADOUT["camera_prefer"]).strip().lower()
     if camera_prefer not in CAMERA_PREFERS:
         camera_prefer = DEFAULT_LOADOUT["camera_prefer"]
+    hailo_src = src.get("hailo")
+    if not isinstance(hailo_src, dict):
+        hailo_src = DEFAULT_HAILO
     return {
         "base": base,
         "attachment": attachment,
         "use_lidar": _as_bool(src.get("use_lidar"), DEFAULT_LOADOUT["use_lidar"]),
         "camera_prefer": camera_prefer,
+        "hailo": normalize_hailo(hailo_src),
     }
 
 
@@ -239,6 +314,8 @@ def catalog_payload() -> dict[str, Any]:
             for spec in ATTACHMENTS.values()
         ],
         "camera_prefers": list(CAMERA_PREFERS),
+        "hailo_enabled_modes": list(HAILO_ENABLED_MODES),
+        "hailo_defaults": dict(DEFAULT_HAILO),
     }
 
 
@@ -288,7 +365,8 @@ def public_payload(
         "roarm_started": started,
         "note": (
             "drive signs stay in config.yaml; RoArm drivers start only when "
-            "hangar attachment=roarm2"
+            "hangar attachment=roarm2; hailo optional features gated by "
+            "loadout.hailo / /dev/hailo0 (see docs/HAILO.md)"
         ),
         **catalog_payload(),
         **drive_signs_from_config(cfg),
@@ -346,6 +424,11 @@ class LoadoutStore:
         current = self.get()
         if patch:
             merged = {**current, **dict(patch)}
+            if isinstance(patch.get("hailo"), dict):
+                merged["hailo"] = {
+                    **dict(current.get("hailo") or DEFAULT_HAILO),
+                    **dict(patch["hailo"]),
+                }
         else:
             merged = current
         return self.save(merged)

@@ -30,7 +30,7 @@ The original Waveshare README (install, hotspot, robot type) is unchanged **belo
 | **Chat** | Thin vision chat against `/api/ai/chat`. Enable motion tools on `/ai` first. |
 | **Seek** | Finite scan-and-hop loop: mode `a` L/C/R stills + heuristic nav; modes `b`/`c` front-first forced-JSON LLM hops with side scans only when blocked. Referee says found → optional TTS. |
 | **Track** | Experimental. Camera hunts only — **wheels do not move**. Closed-list VOC labels use MobileNet-SSD and try to centre the bbox. Any other goal string uses the vision LLM and locks the current PTZ pose. |
-| **Loadout** | Chassis + attachment profile (rover/beast × none/ptz/roarm2). Runtime `.loadout.json` via `/api/loadout`. Examples: [docs/CONFIG_PROFILES.md](docs/CONFIG_PROFILES.md). USB RoArm starts **only** when hangar attachment=`roarm2`; rover+PTZ keeps `roarm_started=false`. |
+| **Loadout** | Chassis + attachment profile (rover/beast × none/ptz/roarm2). Runtime `.loadout.json` via `/api/loadout`. Examples: [docs/CONFIG_PROFILES.md](docs/CONFIG_PROFILES.md). USB RoArm starts **only** when hangar attachment=`roarm2`; rover+PTZ keeps `roarm_started=false`. Optional Hailo features: [docs/HAILO.md](docs/HAILO.md). |
 
 Navbar **STOP** zeros wheels, cancels Seek **and** Track, and clears the AI motion lock.
 
@@ -68,7 +68,8 @@ Navbar chips. **Direct** (default for Seek / PTZ): Flask owns UART. **ROS 2**: F
 - Drive polarity: `base_config.drive_linear_sign` (this tree **`-1`**). After a yaml change, **restart the app** and check `GET /api/status`.
 - **Loadout** tab / `GET|POST /api/loadout`: chassis + attachment; live `camera_prefer` re-init; RoArm gated on `roarm2`. Examples `config.rover.yaml` / `config.beast.yaml` — live file stays `config.yaml`. [docs/CONFIG_PROFILES.md](docs/CONFIG_PROFILES.md).
 - Ops log drawer, 3D Twin (RoArm-M2 firmware FK / PT gimbal / chassis — hangar overlay is the same model; Three.js **vendored locally**), session-only ESP32 WiFi stop.
-- Unit tests: `tests/test_seek_nav.py`, `tests/test_ai_track.py`, `tests/test_loadout.py`, `tests/test_dual_hw_gating.py` (planner / referee / hangar gates — not a live find-rate).
+- **Hailo-8L optional features** (scaffold): pose / hand / face stubs gated by `loadout.hailo` or `/dev/hailo0` auto-detect; separate from Frigate. HEFs not in git. [docs/HAILO.md](docs/HAILO.md).
+- Unit tests: `tests/test_seek_nav.py`, `tests/test_ai_track.py`, `tests/test_loadout.py`, `tests/test_hailo_features.py`, `tests/test_dual_hw_gating.py` (planner / referee / hangar gates — not a live find-rate).
 
 ---
 

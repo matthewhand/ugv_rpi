@@ -7,6 +7,7 @@ import os
 import sys
 import tempfile
 import unittest
+import pytest
 from pathlib import Path
 from unittest import mock
 
@@ -24,6 +25,7 @@ class TestNormalize(unittest.TestCase):
         self.assertEqual(lo["attachment"], "ptz")
         self.assertFalse(lo["use_lidar"])
         self.assertEqual(lo["camera_prefer"], "auto")
+        self.assertEqual(lo["hailo"]["enabled"], "auto")
 
     def test_unknown_falls_back(self):
         lo = loadout.normalize_loadout({"base": "hovercraft", "attachment": "laser"})
@@ -252,6 +254,7 @@ class TestSourceGates(unittest.TestCase):
 
     def test_roarm_ctrl_present_with_poses_and_t144(self):
         self.assertTrue(os.path.isfile(os.path.join(ROOT, "roarm_ctrl.py")))
+        pytest.importorskip("serial")
         import roarm_ctrl
 
         self.assertIn("travel_tuck", roarm_ctrl.POSES)

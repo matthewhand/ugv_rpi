@@ -10,6 +10,11 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+import pytest
+
+pytest.importorskip("serial")
+pytest.importorskip("yaml")
+pytest.importorskip("numpy")
 import base_ctrl  # noqa: E402
 
 
