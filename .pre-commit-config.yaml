@@ -1,0 +1,21 @@
+# Secret + publish-surface scanning.
+#
+# Install:  pip install pre-commit && pre-commit install
+# Or rely on the bundled .git/hooks/pre-commit, which runs a dependency-free
+# scanner (high-signal regex) on every commit without needing pre-commit.
+#
+# Why: this repo is prepared for publication to a public fork. These hooks
+# block accidental commits of credentials and raw robot camera captures.
+repos:
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.18.4
+    hooks:
+      - id: gitleaks
+  - repo: local
+    hooks:
+      - id: no-camera-captures
+        name: block tracked camera captures / large binaries
+        entry: bash scripts/check-publish-surface.sh
+        language: script
+        pass_filenames: false
+        always_run: true
