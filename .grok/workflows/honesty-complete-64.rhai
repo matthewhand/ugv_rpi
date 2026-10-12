@@ -13,7 +13,7 @@
 // Args:
 //   slots     (int, default 64, min 8, max 64) — finder parallel size
 //   dry_run   (bool) — implementers propose only (read-only capability)
-//   repo      (string) — default /home/ws/ugv_rpi
+//   repo      (string) — default: repo root (auto-detected)
 //
 // Usage:
 //   workflow tool: script_path=.../honesty-complete-64.rhai
@@ -79,7 +79,7 @@ let synth_schema = #{
 // ---- args ----
 let slots = 64;
 let dry_run = false;
-let repo = "/home/ws/ugv_rpi";
+let repo = ".";
 if args != () {
     if args.slots != () {
         slots = args.slots;

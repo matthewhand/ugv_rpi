@@ -21,3 +21,17 @@ ai_proof/
 ui_shots/
 .tools/
 .ui_aim_mode.json
+
+# Never commit live robot camera captures / debug frames (interior footage)
+ugv_wall_check*.jpg
+capture_*.jpg
+frame_*.jpg
+snapshot*.jpg
+
+# Prebuilt binaries (ngrok helper etc.) are built locally, not committed
+/sunny
+*.bin
+
+# Hailo HEF weights (download locally; see docs/HAILO.md)
+models/hailo/*.hef
+*.hef

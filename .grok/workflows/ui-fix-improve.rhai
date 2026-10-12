@@ -73,8 +73,8 @@ phase("Setup");
 log("ui-fix-improve: iterations=" + iterations.to_string() + " dry_run=" + dry_run.to_string());
 
 let setup = agent(
-    "Read /home/ws/ugv_rpi/docs/ui-backlog.md and list the next open items (unchecked table rows). "
-    + "Confirm templates paths exist under /home/ws/ugv_rpi/templates/. "
+    "Read ./docs/ui-backlog.md and list the next open items (unchecked table rows). "
+    + "Confirm templates paths exist under ./templates/. "
     + "Reply with a short plain-text list of open item numbers and titles only.",
     #{ label: "setup-backlog", capability_mode: "read-only" }
 );
@@ -88,7 +88,7 @@ while i < iterations {
 
     // 1) Pick next open item
     let pick_prompt = "";
-    pick_prompt += "You are planning iteration " + n.to_string() + " of a UI fix loop for the UGV dashboard at /home/ws/ugv_rpi.\n";
+    pick_prompt += "You are planning iteration " + n.to_string() + " of a UI fix loop for the UGV dashboard at the repo root.\n";
     pick_prompt += "Read docs/ui-backlog.md. Pick the FIRST open (unchecked) table row by item #.\n";
     pick_prompt += "If none open, set item_id=0, title=\"none\", files=[], approach=\"stop\", skip_reason=\"backlog empty\".\n";
     pick_prompt += "Otherwise fill item_id, title, files (repo-relative), approach (2-4 sentences, concrete CSS/HTML/JS).\n";
@@ -127,7 +127,7 @@ while i < iterations {
     // 2) Implement
     let fix_prompt = "";
     fix_prompt += "Implement ONE small UI polish item for the Waveshare UGV dashboard.\n";
-    fix_prompt += "Repo root: /home/ws/ugv_rpi\n";
+    fix_prompt += "Repo root: .\n";
     fix_prompt += "Item #" + plan.item_id.to_string() + ": " + plan.title + "\n";
     fix_prompt += "Approach: " + plan.approach + "\n";
     fix_prompt += "Preferred files: " + json_encode(plan.files) + "\n\n";
