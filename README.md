@@ -193,6 +193,22 @@ The upper computer communicates with the lower computer (the robot's driver base
 - Video Recording
 
 ## Quick Install
+
+The installer keeps Bookworm's system Python in place. If it is older than
+Python 3.11.5, the rover uses a checksum-verified CPython 3.11 in the checkout.
+The environment still sees Bookworm's apt-installed Python 3.11 packages.
+
+To upgrade an existing checkout without rerunning hardware setup, stop the
+rover Python services first. Run as the rover service user from the repository
+root:
+
+    ./scripts/setup-python.sh
+
+The script installs the new environment before switching ugv-env. It preserves
+an original ugv-env directory under .ugv-python/previous-ugv-env. For a
+rollback, restore that directory to its original ugv-env path. Restart the
+rover services after a successful switch.
+
 You need to install Raspberry Pi on your robot if you are using **WAVE ROVER**, **UGV01** or **UGV02**.  
 
 This app is already installed in the SD card of **UGV Rover**, **UGV Beast** and **RaspRover**.  
