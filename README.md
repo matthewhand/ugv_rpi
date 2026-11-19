@@ -209,6 +209,12 @@ an original ugv-env directory under .ugv-python/previous-ugv-env. For a
 rollback, restore that directory to its original ugv-env path. Restart the
 rover services after a successful switch.
 
+The helper builds a local MediaPipe wheel from the checksum-verified 0.10.15
+release. It adapts the Python packet API and native import to the supported
+Protobuf message factory and sends graph options as binary Protobuf. This
+keeps the legacy hand, face and pose APIs working with Protobuf 6.33.6.
+Run the helper to resolve requirements.txt and build the downstream wheel.
+
 You need to install Raspberry Pi on your robot if you are using **WAVE ROVER**, **UGV01** or **UGV02**.  
 
 This app is already installed in the SD card of **UGV Rover**, **UGV Beast** and **RaspRover**.  
