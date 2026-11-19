@@ -5,6 +5,7 @@ project=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 state="$project/.ugv-python"
 environment="$project/ugv-env"
 requirements="$project/requirements.txt"
+wheel_builder="$project/scripts/build-mediapipe-wheel.py"
 release=20261110
 version=3.11.18
 pip_options=()
@@ -83,7 +84,13 @@ else
     fi
 fi
 
-fingerprint=$(printf '%s\n%s\n' "$(sha256sum < "$requirements")" "$("$python" -c 'import sys; print(sys.executable, sys.version)')" | sha256sum)
+fingerprint=$(
+    {
+        sha256sum < "$requirements"
+        sha256sum < "$wheel_builder"
+        "$python" -c 'import sys; print(sys.executable, sys.version)'
+    } | sha256sum
+)
 if compatible_python "$environment/bin/python" &&
     [[ -f "$environment/.rover-requirements" ]] &&
     [[ $(cat "$environment/.rover-requirements") == "$fingerprint" ]]; then
@@ -102,7 +109,12 @@ if [[ $python != /usr/bin/python3 && -d /usr/lib/python3/dist-packages ]] &&
         "$candidate/bin/python" -c 'import libcamera'
     fi
 fi
-"$candidate/bin/python" -m pip install "${pip_options[@]}" -r "$requirements"
+wheel_directory="$candidate/.wheel-build"
+"$candidate/bin/python" -m pip download "${pip_options[@]}" --no-deps --only-binary=:all: \
+    --dest "$wheel_directory" mediapipe==0.10.15
+wheel=$("$candidate/bin/python" "$wheel_builder" "$wheel_directory")
+"$candidate/bin/python" -m pip install "${pip_options[@]}" -r "$requirements" "$wheel"
+rm -r -- "$wheel_directory"
 printf '%s\n' "$fingerprint" > "$candidate/.rover-requirements"
 
 link_target=".ugv-python/$(basename -- "$candidate")"
